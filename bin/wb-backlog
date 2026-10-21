@@ -6,6 +6,8 @@
       section (NOW / NEXT / -), title, parent, worktree from the claim notes.
       Exits non-zero when there is nothing to list; the code says why (STATES).
   wb-backlog summary ROOT      one line of counts for screen 1; always exits 0
+  wb-backlog claimed ROOT PATH the bead whose current claim note names the
+      worktree at PATH (end-session's way back to the bead); exits 1 if none
   wb-backlog preview FILE ID [QUERY]
       the preview pane for one bead, from a snapshot, with QUERY's words
       highlighted in the title and description (lib/wb_search.py)
@@ -158,6 +160,17 @@ def cmd_list(root, snapshot=None):
     return 0
 
 
+def cmd_claimed(root, path):
+    state, data = read(root)
+    want = os.path.realpath(path)
+    for b in data or []:
+        wt = worktree(b)
+        if wt != "-" and os.path.realpath(wt) == want:
+            print(b.get("id", ""))
+            return 0
+    return 1
+
+
 def cmd_summary(root):
     state, data = read(root)
     if state != "ok":
@@ -210,6 +223,8 @@ def main(argv):
         return cmd_list(args[1], snap)
     if len(args) == 2 and args[0] == "summary":
         return cmd_summary(args[1])
+    if len(args) == 3 and args[0] == "claimed":
+        return cmd_claimed(args[1], args[2])
     if len(args) in (3, 4) and args[0] == "preview":
         return cmd_preview(*args[1:])
     print(__doc__, file=sys.stderr)

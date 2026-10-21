@@ -49,9 +49,11 @@ end-session [<worktree>]           # remove it, once the work is merged or pushe
 `new-session` fetches, branches from the default branch, points the worktree at the space's bead
 store, runs the space's `on_create` hook, claims the bead and starts Claude.
 
-`end-session` refuses while the worktree has uncommitted or unpushed work, or while the space's
-`before_end` hook fails. `--force` skips those checks and keeps the branch. A merged branch is
-deleted; an unmerged one is kept.
+`end-session` refuses while the worktree has uncommitted or unpushed work, while the space's
+`before_end` hook fails, or when no space in your config claims the repo (`--no-space` goes ahead
+anyway). `--force` skips those checks and keeps the branch. A merged branch is deleted; an
+unmerged one is kept. Either way it appends a note to the session's bead saying what happened,
+without closing it: merged isn't the same as done.
 
 ## Configuration
 

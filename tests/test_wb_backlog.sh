@@ -15,6 +15,9 @@ assert_eq "row fields" "$(printf '%s\n' "$out" | head -1)" \
   "acme-a2	a2	○	P1	NOW	High wave-1	acme-e1	-"
 assert_eq "in-progress is ◐ with its worktree from notes" "$(printf '%s\n' "$out" | tail -1)" \
   "acme-c2	c2	◐	P3	-	Claimed elsewhere	-	/tmp/wb-fixture-wt/acme-x"
+assert_eq "claimed: the bead whose current claim names the worktree" \
+  "$("$WB" claimed "$T/store" /tmp/wb-fixture-wt/acme-x)" "acme-c2"
+"$WB" claimed "$T/store" /tmp/wb-fixture-wt/other >/dev/null; assert_eq "claimed: none exits 1" "$?" "1"
 assert_eq "summary with waves" "$("$WB" summary "$T/store")" "NOW 2 · NEXT 1 · claimed 1"
 
 prev="$("$WB" preview "$T/snap.json" acme-a1)"

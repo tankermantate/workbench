@@ -8,20 +8,23 @@ WB_HOME="$(cd "$(dirname "$(readlink -f "$0")")/.." && pwd)"
 
 usage() {
   cat <<'EOF'
-Usage: end-session [<worktree-path>] [--force] [--base=<branch>]
+Usage: end-session [<worktree-path>] [--force] [--no-space] [--base=<branch>]
 
   <worktree-path>   default: the worktree you are in
   --force           skip the dirty, unpushed and before_end checks; keep the branch
+  --no-space        go ahead though no space in spaces.toml claims this repo
+                    (so no before_end check runs)
   --base=<branch>   the branch "merged" is checked against
                     (default: the repo's default branch)
 EOF
 }
 die() { echo "end-session: $1" >&2; exit "${2:-2}"; }
 
-FORCE=0; TARGET=""; BASE=""
+FORCE=0; NO_SPACE=0; TARGET=""; BASE=""
 while [ $# -gt 0 ]; do
   case "$1" in
     --force) FORCE=1; shift ;;
+    --no-space) NO_SPACE=1; shift ;;
     --base=*) BASE=${1#*=}; shift ;;
     -h|--help) usage; exit 0 ;;
     -*) echo "end-session: unknown flag: $1" >&2; usage >&2; exit 2 ;;
@@ -67,12 +70,35 @@ if ROWS="$(ws_rows)"; then
   done <<< "$ROWS"
   ROW=${KEY_ROW:-$FIRST_ROW}
   if [ -n "$ROW" ]; then ws_split "$ROW"; FOUND=1; fi
-  [ "$FOUND" = 1 ] || echo "end-session: no space in spaces.toml claims $MAIN; no before_end check ran." >&2
+  if [ "$FOUND" = 1 ]; then :
+  elif [ "$NO_SPACE" = 1 ] || [ "$FORCE" = 1 ]; then
+    echo "end-session: no space in spaces.toml claims $MAIN; no before_end check ran." >&2
+  else
+    # Fail closed: a lookup that misses (a moved root, a typo) would otherwise
+    # skip the space's gate with only a warning.
+    die "no worktree space in spaces.toml claims $MAIN, so no before_end check can run. Fix the space's root, or use --no-space." 1
+  fi
 elif [ "$FORCE" = 1 ]; then
   echo "end-session: could not read spaces.toml; going ahead because of --force." >&2
 else
   die "could not read spaces.toml (see above), so this space's before_end check can't run. Fix the config, or use --force." 1
 fi
+
+# where the space's project and beads live, in the main checkout
+PREFIX=""
+if [ "$FOUND" = 1 ]; then PREFIX=$(git -C "$S_ROOT" rev-parse --show-prefix); PREFIX=${PREFIX%/}; fi
+SOURCE="$MAIN${PREFIX:+/$PREFIX}"
+
+# ---- its bead: the one whose claim note (new-session's) names this worktree
+BEAD=$("$WB_HOME/bin/wb-backlog" claimed "$SOURCE" "$TARGET" 2>/dev/null) || BEAD=""
+if [ -n "$BEAD" ]; then echo "→ bead: $BEAD"
+else echo "→ no bead's claim note names this worktree; nothing will be noted."; fi
+note_bead() {   # append, never replace: the notes hold the claim
+  [ -n "$BEAD" ] || return 0
+  (cd "$SOURCE" && ws_timeout "${WB_BD_WRITE_TIMEOUT:-30}" "${WB_BD:-bd}" update "$BEAD" \
+     --append-notes "$1" </dev/null >/dev/null) \
+    || echo "  warning: couldn't note the close-out on $BEAD." >&2
+}
 
 [ -n "$BASE" ] || BASE=$(ws_default_branch "$MAIN")
 HAS_ORIGIN=0
@@ -101,17 +127,25 @@ if [ "$FORCE" = 0 ] && [ "$NOTHING" = 0 ] && [ "$HAS_ORIGIN" = 1 ]; then
   [ -n "$REMOTE" ] || die "'$BRANCH' is not pushed to origin (use --force to override)" 1
   [ "$LOCAL" = "$REMOTE" ] || die "'$BRANCH' has unpushed commits (origin at ${REMOTE:0:10}, local at ${LOCAL:0:10})" 1
 fi
+if [ "$FORCE" = 0 ] && [ "$NOTHING" = 0 ] && [ "$HAS_ORIGIN" = 0 ]; then
+  echo "→ no origin remote, so there is nothing to push to; skipping the push check (an unmerged branch is kept)"
+fi
 
 if [ "$FOUND" = 1 ] && [ -n "$S_BEFORE_END" ] && [ "$FORCE" = 0 ] && [ "$NOTHING" = 0 ]; then
-  PREFIX=$(git -C "$S_ROOT" rev-parse --show-prefix); PREFIX=${PREFIX%/}
   PROJECT="$TARGET${PREFIX:+/$PREFIX}"; [ -d "$PROJECT" ] || PROJECT=$TARGET
   export WB_SPACE="$S_KEY" WB_WORKTREE="$TARGET" WB_PROJECT="$PROJECT" \
-         WB_SOURCE="$MAIN${PREFIX:+/$PREFIX}" WB_BRANCH="$BRANCH" WB_BEAD=""
+         WB_SOURCE="$SOURCE" WB_BRANCH="$BRANCH" WB_BEAD="$BEAD"
   WB_SHA=$(git -C "$TARGET" rev-parse HEAD); export WB_SHA
   echo "→ before_end: $S_BEFORE_END"
   ws_run_hook "$S_BEFORE_END" "$PROJECT" \
     || die "before_end failed, so the worktree stays. Fix what it says, or use --force." 1
 fi
+
+# Stashes belong to the repo, not the worktree, so removal keeps them; say so,
+# since they're easy to forget once the folder is gone.
+STASHES=$(git -C "$MAIN" stash list --format=%gs | grep -c -E "^(WIP on|On) $BRANCH:" || true)
+if [ "$STASHES" = 1 ]; then echo "→ note: 1 stash made on $BRANCH is kept in the repo (git stash list)"
+elif [ "$STASHES" -gt 1 ]; then echo "→ note: $STASHES stashes made on $BRANCH are kept in the repo (git stash list)"; fi
 
 # ---- remove, then tidy the branch
 echo "→ removing worktree $TARGET"
@@ -119,6 +153,7 @@ cd "$MAIN"   # the worktree may be our own folder
 if [ "$FORCE" = 1 ]; then git -C "$MAIN" worktree remove --force "$TARGET"
 else git -C "$MAIN" worktree remove "$TARGET"; fi
 if [ "$FORCE" = 1 ]; then
+  note_bead "Session ended (forced): worktree removed; branch $BRANCH kept, unchecked."
   echo "✓ session ended (forced). Branch '$BRANCH' kept — check it by hand."
   exit 0
 fi
@@ -129,9 +164,12 @@ if [ "$HAS_ORIGIN" = 1 ] && git -C "$MAIN" merge-base --is-ancestor "$BRANCH" "o
 if [ "$MERGED" = 1 ]; then
   # -D, not -d: ancestry is proven above, and -d re-checks against the branch's
   # own (possibly stale) upstream.
+  TIP=$(git -C "$MAIN" rev-parse "$BRANCH")
   git -C "$MAIN" branch -D "$BRANCH" >/dev/null
+  note_bead "Session ended: worktree removed; branch $BRANCH merged into $BASE at ${TIP:0:10} and deleted."
   echo "✓ session ended. Branch '$BRANCH' is merged into $BASE and was deleted."
 else
+  note_bead "Session ended: worktree removed; branch $BRANCH kept, not merged into $BASE."
   echo "✓ session ended. Branch '$BRANCH' is not merged into $BASE, so it was kept."
   echo "  Delete it later with: $(ws_quote git -C "$MAIN" branch -d "$BRANCH")"
 fi

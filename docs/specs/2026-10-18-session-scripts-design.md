@@ -88,7 +88,7 @@ listing the space keys.
 ### `end-session`
 
 ```
-end-session [<worktree-path>] [--force] [--base=<branch>]
+end-session [<worktree-path>] [--force] [--no-space] [--base=<branch>]
 ```
 
 Kept from today: default target is the current worktree; it refuses the main checkout and anything
@@ -108,12 +108,20 @@ Changed:
   - **The config can't be read** (`wb-spaces` exits non-zero: no file, an invalid file, or a broken
     `python3`): `end-session` refuses with the reason, unless `--force` is given.
   - **No space matches** (for example the space's root folder moved, so `wb-spaces` skipped it): it
-    goes ahead, but first prints `end-session: no space in spaces.toml claims <repo>; no before_end
-    check ran.` on stderr, so a missing gate is never silent.
+    refuses, because a lookup that misses would otherwise skip that space's gate. `--no-space` (or
+    `--force`) goes ahead, printing `end-session: no space in spaces.toml claims <repo>; no
+    before_end check ran.` on stderr.
 - **`--base`** defaults to the repo's default branch, found exactly as `new-session` finds it, so a
   `master` repo's branches are recognised as merged.
-- **No `origin`**: no fetch and no unpushed check. "Nothing at risk" means every commit is on local
-  `<base>`. An unmerged branch is kept, so no work is lost.
+- **No `origin`**: no fetch and no unpushed check, and it says so in one line. "Nothing at risk"
+  means every commit is on local `<base>`. An unmerged branch is kept, so no work is lost.
+- **Its bead** is the one whose claim note (`new-session` step 7: `… (worktree at <path>)`) names
+  this worktree, found with `wb-backlog claimed`. It is passed to `before_end` as `WB_BEAD`, and after
+  removal a note is appended to it: merged into `<base>` at `<sha>` and deleted, kept unmerged, or
+  forced. The bead is never closed: merged isn't the same as done. No bead found is a line of
+  output, not a refusal.
+- **Stashes** made on the branch outlive the worktree (`refs/stash` belongs to the repo), so a
+  line says how many are kept.
 - **`before_end`** replaces the hard-coded predeploy gate (below).
 
 ## Configuration
@@ -140,7 +148,7 @@ every hook:
 | `WB_PROJECT` | the project folder inside the worktree |
 | `WB_SOURCE` | the project folder in the main checkout (where untracked files such as `.env.local` live) |
 | `WB_BRANCH` | the branch |
-| `WB_BEAD` | the bead id; empty for exploratory sessions, and always empty in `before_end` (`end-session` doesn't know which bead a worktree served) |
+| `WB_BEAD` | the bead id; empty for exploratory sessions. In `before_end`, the bead whose claim note names the worktree, or empty if none does |
 | `WB_SHA` | `before_end` only: the worktree's `HEAD` |
 
 Other config changes:
@@ -182,7 +190,8 @@ before_end = 'test -f ~/.local/state/acme-predeploy/$WB_SHA || { echo "predeploy
 | Ctrl-C during `new-session` from the launcher | the launcher's existing message (half-made worktree, `git worktree list`) |
 | `before_end` fails | `end-session` refuses; worktree kept |
 | `end-session` can't read the config | refuses with the reason; `--force` overrides |
-| `end-session` on a worktree no space claims | works, and says on stderr that no `before_end` ran |
+| `end-session` on a worktree no space claims | refuses; `--no-space` (or `--force`) goes ahead and says on stderr that no `before_end` ran |
+| `end-session` finds no bead, or can't write its note | a line saying so; the session still ends |
 
 ## Testing
 
@@ -192,7 +201,7 @@ for `bd` and `gh`. Nothing touches `~/.worktrees` or the real config.
 
 - `test_end_session.sh`: the ten cases of today's `~/scripts/test-end-session.sh` (the acme predeploy
   cases become a `before_end` hook), plus: no-`origin` repo, `before_end` sees the right `WB_*`
-  values, a worktree no space claims (goes ahead, with the warning), an unreadable config (refused,
+  values, a worktree no space claims (refused; allowed with `--no-space`), the bead found from its claim note and noted on removal, stashes mentioned, an unreadable config (refused,
   and allowed with `--force`), a `master` repo (base found, merged branch deleted).
 - `test_new_session.sh`: bead shape (branch from title, bug → `fix/`), space + topic, space with no
   topic, `--space`, finding the space from the stores, unknown id, a repo with no `origin`, a project

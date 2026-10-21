@@ -82,7 +82,9 @@ mkdir -p "$h/app"; : > "$h/app/keep"; git -C "$h" add app; git -C "$h" commit -q
 conf "$h/app" "before_end = 'env | grep ^WB_ | sort > \"\$MARKERS/env\"'"
 w=$(wt "$h" feat/eleven); commit "$w" e; git -C "$w" push -q -u origin feat/eleven
 sha=$(git -C "$w" rev-parse HEAD)
-(cd "$w/app" && "$ES" >/dev/null 2>&1); assert_eq "from inside: exits 0" "$?" "0"
+mkstore "$h/app"   # new-session's claim note is how end-session finds the bead
+printf '[{"id":"acme-7","title":"Eleven","status":"in_progress","notes":"Branch: feat/eleven (worktree at %s)"}]\n' "$w" > "$h/app/.beads/fake.json"
+(cd "$w/app" && FAKE_BD_LOG="$T/bd.log" "$ES" >/dev/null 2>&1); assert_eq "from inside: exits 0" "$?" "0"
 gone "from inside: removed" "$w"
 env_out="$(cat "$MARKERS/env" 2>/dev/null)"
 assert_contains "hook: WB_SPACE" "$env_out" "WB_SPACE=acme"
@@ -90,12 +92,18 @@ assert_contains "hook: WB_WORKTREE" "$env_out" "WB_WORKTREE=$w"
 assert_contains "hook: WB_PROJECT" "$env_out" "WB_PROJECT=$w/app"
 assert_contains "hook: WB_SOURCE" "$env_out" "WB_SOURCE=$h/app"
 assert_contains "hook: WB_SHA" "$env_out" "WB_SHA=$sha"
+assert_contains "hook: WB_BEAD from the claim note" "$env_out" "WB_BEAD=acme-7"
+assert_contains "bead: close-out noted, not closed" "$(cat "$T/bd.log")" \
+  "update acme-7 --append-notes Session ended: worktree removed; branch feat/eleven kept, not merged into main."
+assert_not_contains "bead: never closed" "$(cat "$T/bd.log")" "close"
+rm -rf "$h/app/.beads"
 
 # 12 no origin
 n="$T/noorigin"; git init -q -b main "$n"; git -C "$n" config user.email t@example.com; git -C "$n" config user.name t
 commit "$n" base; conf "$n"
 w=$(wt "$n" feat/local); commit "$w" l
-"$ES" "$w" >/dev/null 2>&1; assert_eq "no origin: unmerged work ends" "$?" "0"
+out="$("$ES" "$w" 2>&1)"; assert_eq "no origin: unmerged work ends" "$?" "0"
+assert_contains "no origin: says the push check was skipped" "$out" "no origin remote, so there is nothing to push to"
 branch_kept "no origin: unmerged branch kept" "$n" feat/local
 w=$(wt "$n" feat/merged); commit "$w" m; git -C "$n" merge -q --ff-only feat/merged
 "$ES" "$w" >/dev/null 2>&1; branch_gone "no origin: merged branch deleted" "$n" feat/merged
@@ -104,8 +112,11 @@ w=$(wt "$n" feat/merged); commit "$w" m; git -C "$n" merge -q --ff-only feat/mer
 conf "$T/markers"
 w=$(wt "$h" fix/thirteen)
 out="$("$ES" "$w" 2>&1)"; rc=$?
-assert_eq "unclaimed: goes ahead" "$rc" "0"
-assert_contains "unclaimed: says no before_end ran" "$out" "no before_end check ran"
+assert_eq "unclaimed: refused (a missed lookup must not skip a gate)" "$rc" "1"
+there "unclaimed: kept" "$w"; assert_contains "unclaimed: names the override" "$out" "--no-space"
+out="$("$ES" --no-space "$w" 2>&1)"; rc=$?
+assert_eq "unclaimed + --no-space: goes ahead" "$rc" "0"; gone "unclaimed + --no-space: removed" "$w"
+assert_contains "unclaimed + --no-space: says no before_end ran" "$out" "no before_end check ran"
 
 # 14 unreadable config fails closed
 w=$(wt "$h" fix/fourteen)
@@ -142,6 +153,24 @@ w=$(wt "$sp" feat/sp); commit "$w" s; git -C "$w" push -q -u origin feat/sp
 out="$("$ES" "$w" 2>&1)"; rc=$?
 assert_eq "space in path: ends" "$rc" "0"; gone "space in path: removed" "$w"
 assert_contains "space in path: delete command is quoted" "$out" "git -C $(printf '%q' "$sp") branch -d feat/sp"
+
+# 17 merged: the note says where; no bead found is a warning, not a refusal
+b="$T/beadrepo"; setup_repo "$b"; conf "$b"; mkstore "$b"
+w=$(wt "$b" feat/noted); commit "$w" n; git -C "$w" push -q -u origin feat/noted
+git -C "$b" merge -q --ff-only feat/noted; git -C "$b" push -q origin main; sha=$(git -C "$b" rev-parse HEAD)
+printf '[{"id":"acme-8","title":"Noted","status":"in_progress","notes":"Branch: feat/noted (worktree at %s)"}]\n' "$w" > "$b/.beads/fake.json"
+FAKE_BD_LOG="$T/bd8.log" "$ES" "$w" >/dev/null 2>&1
+assert_contains "bead: merged close-out names the commit" "$(cat "$T/bd8.log")" \
+  "update acme-8 --append-notes Session ended: worktree removed; branch feat/noted merged into main at ${sha:0:10} and deleted."
+w=$(wt "$b" feat/orphan)
+out="$("$ES" "$w" 2>&1)"; rc=$?
+assert_eq "no bead: still ends" "$rc" "0"; assert_contains "no bead: says so" "$out" "no bead's claim note names this worktree"
+
+# 18 stashes made on the branch are mentioned (they outlive the worktree)
+w=$(wt "$b" feat/stashy); echo wip > "$w/wip.txt"; git -C "$w" add wip.txt; git -C "$w" stash -q
+out="$("$ES" "$w" 2>&1)"; rc=$?
+assert_eq "stash: still ends" "$rc" "0"
+assert_contains "stash: mentioned" "$out" "1 stash made on feat/stashy is kept in the repo"
 
 # 16 refusals
 conf "$h"

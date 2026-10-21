@@ -5,3 +5,5 @@
 .beads-credential-key
 .beads/proxieddb/
 __pycache__/
+research_notes/
+reports/
