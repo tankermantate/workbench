@@ -1,0 +1,50 @@
+#!/usr/bin/env bash
+# Fake bd for tests.
+# With FAKE_BD_DIR set, behaviour comes from files in it:
+#   calls             incremented on every invocation (retry tests count it)
+#   stdout.N, stdout  what call N (or any call) prints
+#   stderr            printed to stderr
+#   rc                exit code (default 0)
+#   sleep             seconds to sleep first, in a child process (timeout tests)
+# Without FAKE_BD_DIR, it prints $PWD/.beads/fake.json (screen tests: one store per space),
+# except:
+#   show ID   walks up to .beads/fake.json and prints [that bead], or exits 1;
+#             FAKE_BD_SLEEP sleeps first, FAKE_BD_WARN prints a Warning line first
+#             (FAKE_BD_WARN=bracket: a '[warn] …' line, which looks like JSON)
+#   update    sleeps $FAKE_BD_UPDATE_SLEEP, exits $FAKE_BD_UPDATE_RC (default 0)
+# FAKE_BD_LOG: every call's args are appended to it.
+set -u
+[ -n "${FAKE_BD_LOG:-}" ] && echo "$*" >> "$FAKE_BD_LOG"
+if [ -z "${FAKE_BD_DIR:-}" ]; then
+  case "${1:-}" in
+    show)
+      [ -z "${FAKE_BD_SLEEP:-}" ] || sleep "$FAKE_BD_SLEEP"
+      d=$PWD
+      while [ ! -f "$d/.beads/fake.json" ] && [ "$d" != / ]; do d=$(dirname "$d"); done
+      [ -f "$d/.beads/fake.json" ] || { echo "Error: no beads database found" >&2; exit 1; }
+      case "${FAKE_BD_WARN:-}" in
+        "") ;;
+        bracket) echo "[warn] slow dolt" ;;
+        *) echo "Warning: noisy" ;;
+      esac
+      python3 - "$d/.beads/fake.json" "$2" <<'PY'
+import json, sys
+beads = [b for b in json.load(open(sys.argv[1])) if b.get("id") == sys.argv[2]]
+if not beads:
+    print(f"Error: no issue found matching {sys.argv[2]!r}", file=sys.stderr)
+    sys.exit(1)
+print(json.dumps(beads))
+PY
+      exit $? ;;
+    update) [ -z "${FAKE_BD_UPDATE_SLEEP:-}" ] || sleep "$FAKE_BD_UPDATE_SLEEP"
+            exit "${FAKE_BD_UPDATE_RC:-0}" ;;
+  esac
+  [ -f .beads/fake.json ] && cat .beads/fake.json
+  exit 0
+fi
+d="$FAKE_BD_DIR"
+n=$(( $(cat "$d/calls" 2>/dev/null || echo 0) + 1 )); echo "$n" > "$d/calls"
+[ -f "$d/sleep" ] && sleep "$(cat "$d/sleep")"
+[ -f "$d/stderr" ] && cat "$d/stderr" >&2
+if [ -f "$d/stdout.$n" ]; then cat "$d/stdout.$n"; elif [ -f "$d/stdout" ]; then cat "$d/stdout"; fi
+exit "$(cat "$d/rc" 2>/dev/null || echo 0)"

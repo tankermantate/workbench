@@ -1,0 +1,192 @@
+#!/usr/bin/env bash
+# new-session — start a Claude Code session in its own git worktree, for any
+# space with worktrees = true in spaces.toml.
+# Spec: docs/specs/2026-10-18-session-scripts-design.md
+set -euo pipefail
+WB_HOME="$(cd "$(dirname "$(readlink -f "$0")")/.." && pwd)"
+# shellcheck source=../lib/session.sh
+. "$WB_HOME/lib/session.sh"
+
+usage() {
+  cat <<'EOF'
+Usage: new-session <bead-id> [--space <key>] [--no-launch] [--safe]
+       new-session <space-key> [topic words...] [--no-launch] [--safe]
+
+  <bead-id>     work on that bead: branch feat/<title> (fix/<title> for a bug); the bead is claimed
+  <space-key>   explore: branch explore/<topic>, or explore/<timestamp> with no topic
+  --space KEY   the bead's space (the launcher passes it); otherwise each
+                worktree space's bead store is asked
+  --no-launch   set up only; the last line is WORKTREE_DIR=<project folder>
+  --safe        keep Claude's permission prompts on
+
+Spaces: ~/.config/workbench/spaces.toml (WORKBENCH_CONFIG overrides).
+Worktrees: ~/.worktrees/<key>-<slug> (WB_WORKTREES_DIR overrides).
+EOF
+}
+die() { echo "new-session: $1" >&2; exit "${2:-2}"; }
+
+LAUNCH=1; SAFE=0; SPACE=""; POS=()
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --no-launch) LAUNCH=0; shift ;;
+    --safe) SAFE=1; shift ;;
+    --space=*) SPACE=${1#--space=}; shift ;;
+    --space)
+      if [ -z "${2:-}" ] || [ "${2#--}" != "$2" ]; then die "--space needs a space key"; fi
+      SPACE=$2; shift 2 ;;
+    -h|--help) usage; exit 0 ;;
+    --*) echo "new-session: unknown flag: $1" >&2; usage >&2; exit 2 ;;
+    *) POS+=("$1"); shift ;;
+  esac
+done
+if [ ${#POS[@]} -eq 0 ]; then usage >&2; exit 2; fi
+
+ROWS="$(ws_rows)" || die "could not read spaces.toml (see above)"
+FIRST=${POS[0]}; BEAD=""; TOPIC=""; BEAD_TYPE=""; BEAD_TITLE=""
+
+# ---- which space, which shape
+if [ -z "$SPACE" ] && ws_find_key "$ROWS" "$FIRST"; then
+  TOPIC="${POS[*]:1}"
+else
+  BEAD=$FIRST
+  [ ${#POS[@]} -eq 1 ] || die "a bead id takes no topic words (got: ${POS[*]})"
+  if [ -n "$SPACE" ]; then
+    ws_find_key "$ROWS" "$SPACE" || die "no worktree space has the key '$SPACE' (keys: $(ws_keys "$ROWS"))"
+    ws_has_store "$S_ROOT" || die "space '$SPACE' has no bead store of its own (no .beads in $S_ROOT up to its repo top)"
+    ws_bead_info "$S_ROOT" "$BEAD" || die "bd show $BEAD failed in $S_ROOT; check the id"
+  else
+    ws_find_bead "$ROWS" "$BEAD" \
+      || die "'$BEAD' is not a space key, and no worktree space's bead store has it (keys: $(ws_keys "$ROWS"))"
+  fi
+fi
+
+# ---- repo, project folder, branch, worktree path
+REPO=$(git -C "$S_ROOT" rev-parse --show-toplevel 2>/dev/null) || die "$S_ROOT is not in a git repo"
+REPO=$(cd "$REPO" && pwd -P)
+PREFIX=$(git -C "$S_ROOT" rev-parse --show-prefix); PREFIX=${PREFIX%/}
+SOURCE="$REPO${PREFIX:+/$PREFIX}"
+
+if [ -n "$BEAD" ]; then
+  if [ "$BEAD_TYPE" = bug ]; then BRANCH="fix/$(ws_slugify "$BEAD_TITLE")"
+  else BRANCH="feat/$(ws_slugify "$BEAD_TITLE")"; fi
+elif [ -n "$TOPIC" ]; then
+  BRANCH="explore/$(ws_slugify "$TOPIC")"
+else
+  BRANCH="explore/$(date +%Y-%m-%d-%H%M%S)"
+fi
+WT_DIR=${WB_WORKTREES_DIR:-$HOME/.worktrees}
+WORKTREE="$WT_DIR/$S_KEY-${BRANCH#*/}"
+
+# ---- pre-checks: nothing is created if these fail
+[ ! -e "$WORKTREE" ] || die "worktree path already exists: $WORKTREE" 1
+LIST=$(git -C "$REPO" worktree list --porcelain)
+if grep -qxF "branch refs/heads/$BRANCH" <<< "$LIST"; then
+  die "branch '$BRANCH' is already checked out in another worktree" 1
+fi
+
+# ---- base
+DEFAULT=$(ws_default_branch "$REPO")
+if git -C "$REPO" remote get-url origin >/dev/null 2>&1; then
+  [ -z "$S_GH_ACCOUNT" ] || ws_gh_switch "$S_GH_ACCOUNT"
+  echo "→ fetching origin"
+  git -C "$REPO" fetch origin --quiet || die "git fetch origin failed in $REPO" 1
+  # Refresh the main checkout only when it is on the default branch: 'git pull'
+  # always merges into whatever branch is checked out.
+  if [ "$(git -C "$REPO" symbolic-ref --quiet --short HEAD || true)" = "$DEFAULT" ]; then
+    git -C "$REPO" pull --ff-only --quiet origin "$DEFAULT" 2>/dev/null \
+      || echo "  note: couldn't fast-forward $DEFAULT in $REPO; the worktree still starts from origin/$DEFAULT."
+  fi
+  BASE="origin/$DEFAULT"
+else
+  BASE=$DEFAULT
+fi
+
+# ---- create
+echo "→ creating worktree at $WORKTREE on branch $BRANCH (from $BASE)"
+mkdir -p "$WT_DIR"
+if git -C "$REPO" show-ref --verify --quiet "refs/heads/$BRANCH"; then
+  # An earlier end-session kept this unmerged branch: carry on from it.
+  echo "→ reusing branch $BRANCH (it already exists; its work carries on)"
+  git -C "$REPO" worktree add --quiet "$WORKTREE" "$BRANCH" || die "git worktree add failed" 1
+else
+  git -C "$REPO" worktree add --quiet -b "$BRANCH" "$WORKTREE" "$BASE" || die "git worktree add failed" 1
+fi
+WORKTREE=$(cd "$WORKTREE" && pwd -P)
+PROJECT="$WORKTREE${PREFIX:+/$PREFIX}"
+[ -d "$PROJECT" ] || die "the worktree has no $PREFIX folder (is it committed on $BASE?); it is at $WORKTREE" 1
+
+# ---- beads: point the worktree's .beads at the real store. git checks out only
+# tracked files, and the database itself is never tracked.
+STORE=$(ws_store_dir "$(cd "$S_ROOT" && pwd -P)" "$REPO")
+if [ -n "$STORE" ]; then
+  WT_BEADS="$WORKTREE${STORE#"$REPO"}"
+  mkdir -p "$WT_BEADS"; chmod 700 "$WT_BEADS"
+  ws_relpath "$STORE" "$(dirname "$WT_BEADS")" > "$WT_BEADS/redirect"
+  # Keep the redirect out of git status, or end-session would call the tree dirty.
+  rel="${WT_BEADS#"$WORKTREE"/}/redirect"
+  if ! git -C "$WORKTREE" check-ignore -q -- "$rel"; then
+    excl="$(git -C "$WORKTREE" rev-parse --path-format=absolute --git-common-dir)/info/exclude"
+    mkdir -p "$(dirname "$excl")"; echo "/$rel" >> "$excl"
+  fi
+  echo "→ beads: redirect → $STORE"
+fi
+
+# ---- the space's own setup
+export WB_SPACE="$S_KEY" WB_WORKTREE="$WORKTREE" WB_PROJECT="$PROJECT" WB_SOURCE="$SOURCE" \
+       WB_BRANCH="$BRANCH" WB_BEAD="$BEAD"
+if [ -n "$S_ON_CREATE" ]; then
+  echo "→ on_create: $S_ON_CREATE"
+  if ! ws_run_hook "$S_ON_CREATE" "$PROJECT"; then
+    echo "new-session: on_create failed; the worktree is still at $WORKTREE." >&2
+    echo "             Remove it with: end-session --force $WORKTREE" >&2
+    exit 1
+  fi
+fi
+
+# ---- claim (append: --notes would replace the bead's notes)
+if [ -n "$BEAD" ]; then
+  echo "→ claiming $BEAD"
+  # Bounded: a bd stuck behind a lock must not hold up the session.
+  (cd "$SOURCE" && ws_timeout "${WB_BD_WRITE_TIMEOUT:-30}" "${WB_BD:-bd}" update "$BEAD" --claim \
+     --append-notes "Branch: $BRANCH (worktree at $WORKTREE)" </dev/null >/dev/null) \
+    || echo "  warning: couldn't claim $BEAD; the session starts anyway." >&2
+fi
+
+cat <<EOF
+
+────────────────────────────────────────
+  Session ready
+    space:    $S_KEY
+    worktree: $WORKTREE
+    branch:   $BRANCH
+    project:  $PROJECT
+    bead:     ${BEAD:-<none>}
+────────────────────────────────────────
+EOF
+
+if [ "$LAUNCH" -eq 0 ]; then
+  echo "WORKTREE_DIR=$PROJECT"   # the launcher reads this last line
+  exit 0
+fi
+
+# ---- launch Claude on the space's account
+if [ -n "$S_CLAUDE_CONFIG" ]; then ENVS=(env "CLAUDE_CONFIG_DIR=$S_CLAUDE_CONFIG"); else ENVS=(env -u CLAUDE_CONFIG_DIR); fi
+CMD=(claude)
+if [ "$SAFE" -eq 0 ] && [ "$S_SAFE" != 1 ]; then CMD+=(--dangerously-skip-permissions); fi
+cd "$PROJECT"
+if [ -n "${WORKBENCH_DRY_RUN:-}" ]; then
+  echo "DRY-RUN: cd $(ws_quote "$PROJECT") && $(ws_quote "${ENVS[@]}" "${CMD[@]}")"
+  exit 0
+fi
+# Inside a Claude session (or with no terminal) an interactive claude can't start.
+if [ -n "${CLAUDECODE:-}" ] || ! [ -t 0 ]; then
+  cat <<EOF
+
+  Running inside a Claude session (or with no terminal), so a new interactive
+  Claude can't start here. Open a new terminal and run:
+    cd $(ws_quote "$PROJECT")
+    $(ws_quote "${ENVS[@]}" "${CMD[@]}")
+EOF
+  exit 0
+fi
+exec "${ENVS[@]}" "${CMD[@]}"

@@ -1,0 +1,195 @@
+#!/usr/bin/env python3
+"""wb-ui — the launcher's screen helpers. fzf runs these as child processes,
+so they can't be zsh functions. TMP is the launch's scratch dir, holding
+spaces.tsv (wb-spaces output).
+
+  wb-ui render-spaces TMP      screen 1 lines: index, label, summary
+  wb-ui fill-counts TMP        every space's summary, read in parallel, into
+                               TMP/counts/<index>; with $FZF_PORT set, tells
+                               fzf to reload as each one lands
+  wb-ui render-work TMP INDEX [QUERY]
+                               screen 2 lines: kind, id, worktree, header, text
+                               (sep and msg rows have an empty id, so the
+                               preview shows nothing for them); reads bd and
+                               keeps what it read in TMP/work.<INDEX>.json
+  wb-ui filter-work TMP INDEX QUERY
+                               the same lines from that copy, narrowed to beads
+                               with any QUERY word (lib/wb_search.py) in short
+                               id, title or description: a count, then beads with every
+                               word, then beads with some; fzf runs it on each
+                               keystroke, so it never calls bd
+"""
+import json
+import os
+import re
+import shlex
+import subprocess
+import sys
+import threading
+import urllib.request
+
+ME = os.path.realpath(__file__)
+BACKLOG = os.path.join(os.path.dirname(ME), "wb-backlog")
+sys.path.insert(0, os.path.join(os.path.dirname(ME), "..", "lib"))
+import wb_search  # noqa: E402  (lives in lib/, found through ME)
+FIELDS = ("label", "group", "root", "beads", "worktrees", "session_cmd",
+          "space_key", "claude_config", "protocol", "safe")
+MESSAGES = {  # wb-backlog list exit code -> screen 2 message
+    20: "(bd not installed — something new still works)",
+    21: "(no bead store — something new still works)",
+    22: "(no readable beads — something new still works)",
+    23: "(bd unavailable — ctrl-r to retry)",
+    24: "0 open (ctrl-r to re-check)",
+}
+
+
+def spaces(tmp):
+    with open(os.path.join(tmp, "spaces.tsv")) as f:
+        return [dict(zip(FIELDS, l.rstrip("\n").split("\t"))) for l in f if l.strip()]
+
+
+def render_spaces(tmp):
+    rows = spaces(tmp)
+    names = [s["label"] if s["group"] == "-" else f"{s['group']} › {s['label']}" for s in rows]
+    width = max(map(len, names), default=0)
+    for i, (s, name) in enumerate(zip(rows, names), 1):
+        summary = ""
+        if s["beads"] != "false":
+            try:
+                with open(os.path.join(tmp, "counts", str(i))) as f:
+                    summary = f.read().strip()
+            except FileNotFoundError:
+                summary = "…"
+        print(f"{i}\t{name.ljust(width)}  \t{summary}")
+    print("q\t[q] just give me a shell\t")
+
+
+def fill_counts(tmp):
+    counts = os.path.join(tmp, "counts")
+    os.makedirs(counts, exist_ok=True)
+    port = os.environ.get("FZF_PORT")
+    reload = f"reload({shlex.quote(sys.executable)} {shlex.quote(ME)} render-spaces {shlex.quote(tmp)})"
+
+    def one(i, s):
+        p = subprocess.run([BACKLOG, "summary", s["root"]], capture_output=True, text=True)
+        path = os.path.join(counts, str(i))
+        with open(path + ".part", "w") as f:
+            f.write(p.stdout.strip() or "(bd unavailable)")
+        os.replace(path + ".part", path)
+        if port:
+            try:
+                urllib.request.urlopen(urllib.request.Request(
+                    f"http://127.0.0.1:{port}", data=reload.encode(), method="POST"), timeout=1).close()
+            except OSError:
+                pass  # fzf has already closed
+
+    threads = [threading.Thread(target=one, args=(i, s))
+               for i, s in enumerate(spaces(tmp), 1) if s["beads"] != "false"]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+
+
+def render_work(tmp, index, query=""):
+    s = spaces(tmp)[int(index) - 1]
+    print("new\t-\t-\t\t✦ something new", flush=True)
+    work = {"rows": [], "msg": None}
+    if s["beads"] != "false":
+        p = subprocess.run([BACKLOG, "list", s["root"], "--snapshot", os.path.join(tmp, "snapshot.json")],
+                           capture_output=True, text=True)
+        if p.returncode != 0:
+            work["msg"] = MESSAGES.get(p.returncode, MESSAGES[23])
+        else:
+            work["rows"] = [l.split("\t") for l in p.stdout.splitlines() if l]
+    path = os.path.join(tmp, f"work.{index}.json")
+    with open(path + ".part", "w") as f:  # write-then-rename: a keystroke's filter-work may be reading it
+        json.dump(work, f, ensure_ascii=False)
+    os.replace(path + ".part", path)
+    print_work(tmp, work, query)
+
+
+def filter_work(tmp, index, query):
+    print("new\t-\t-\t\t✦ something new", flush=True)
+    try:
+        with open(os.path.join(tmp, f"work.{index}.json")) as f:
+            work = json.load(f)
+    except (OSError, ValueError):
+        work = {"rows": [], "msg": MESSAGES[23]}
+    print_work(tmp, work, query)
+
+
+def print_work(tmp, work, query):
+    if work["msg"]:
+        print(f"msg\t\t-\t{work['msg']}\t")
+        return
+    pats = wb_search.patterns(query)
+    if pats:
+        print_matches(tmp, work["rows"], pats)
+        return
+    rows = work["rows"]
+    waves = any(r[4] != "-" for r in rows)
+    current = None
+    for r in rows:
+        if waves and r[4] != current:
+            current = r[4]
+            print(f"sep\t\t-\t── {current if current != '-' else 'everything else'} ──\t")
+        print_row(r)
+
+
+def print_matches(tmp, rows, pats):
+    """A count, then beads matching every word, then beads matching some,
+    with the matched words highlighted. Within each, beads with more words in
+    the title come first (a highlighted row shows why it's there), then
+    backlog order."""
+    try:
+        with open(os.path.join(tmp, "snapshot.json")) as f:
+            beads = json.load(f)
+    except (OSError, ValueError):
+        beads = {}
+    every, some = [], []
+    for r in rows:
+        # the short id, not the full one: every id shares the space's prefix ("acme-")
+        n = wb_search.hits(pats, f"{r[1]}\n{r[5]}\n{(beads.get(r[0]) or {}).get('description') or ''}")
+        if n:
+            (every if n == len(pats) else some).append(r)
+    if not every and not some:
+        print("msg\t\t-\t(no beads match)\t")
+    elif len(pats) == 1:
+        print(f"msg\t\t-\t{len(every)} match\t")
+    else:
+        print(f"msg\t\t-\t{len(every)} match all words · {len(some)} match some\t")
+    for label, group in (("all words", every), ("some words", some)):
+        group.sort(key=lambda r: -wb_search.hits(pats, f"{r[1]}\n{r[5]}"))  # stable: ties keep backlog order
+        if group and len(pats) > 1:
+            print(f"sep\t\t-\t── {label} ──\t")
+        for r in group:
+            print_row(r, pats)
+
+
+def print_row(r, pats=()):
+    bid, short, mark, prio, _sect, title, _parent, wt = r
+    kind = "claimed" if mark == "◐" else "open"
+    pad = " " * max(0, 6 - len(short))  # padded outside the highlight, so columns stay aligned
+    print(f"{kind}\t{bid}\t{wt}\t\t{mark} {wb_search.highlight(pats, short)}{pad} {prio}  "
+          f"{wb_search.highlight(pats, title)}")
+
+
+def main(argv):
+    cmd, args = (argv[1], argv[2:]) if len(argv) > 1 else ("", [])
+    if cmd == "render-spaces" and len(args) == 1:
+        render_spaces(*args)
+    elif cmd == "fill-counts" and len(args) == 1:
+        fill_counts(*args)
+    elif cmd == "render-work" and len(args) in (2, 3):
+        render_work(*args)
+    elif cmd == "filter-work" and len(args) == 3:
+        filter_work(*args)
+    else:
+        print(__doc__, file=sys.stderr)
+        return 2
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv))

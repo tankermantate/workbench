@@ -1,0 +1,3 @@
+#!/usr/bin/env bash
+# Safety net: if a test ever reaches a real launch, it prints instead of starting Claude.
+echo "FAKE-CLAUDE $*"

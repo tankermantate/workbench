@@ -1,0 +1,9 @@
+#!/usr/bin/env bash
+# Fake gh: logs argv to $FAKE_GH_LOG; reports $FAKE_GH_ACTIVE as the active
+# account; 'auth switch' exits $FAKE_GH_SWITCH_RC (default 0).
+[ -n "${FAKE_GH_LOG:-}" ] && echo "$*" >> "$FAKE_GH_LOG"
+case "${1:-} ${2:-}" in
+  "auth status") echo "github.com"; echo "  ✓ Logged in to github.com account ${FAKE_GH_ACTIVE:-someone} (keyring)" ;;
+  "auth switch") exit "${FAKE_GH_SWITCH_RC:-0}" ;;
+esac
+exit 0

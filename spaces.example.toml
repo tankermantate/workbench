@@ -1,0 +1,32 @@
+# Copy to ~/.config/workbench/spaces.toml and edit it there. This file stays
+# generic: real names, paths and accounts live only in your copy.
+
+[launcher]
+# $TERM_PROGRAM values, besides Apple_Terminal, that should auto-start the launcher.
+terminals = []
+# Space names that are ordinary words, which check-leaks.sh should not flag.
+leak_allow = []
+
+# A space whose sessions each get their own git worktree, via a session command.
+[[space]]
+name          = "Acme"
+root          = "~/dev/acme/app"
+beads         = true
+worktrees     = true
+space_key     = "acme"              # new-session/end-session call this space by it
+claude_config = "~/.claude-acme"    # optional: a non-default Claude profile
+protocol      = "docs/PROTOCOL.md"  # optional: read first in every session
+# safe        = true                # keep Claude's permission prompts on
+# Optional, worktree spaces only. Hooks are one line, run with sh -c, with
+# WB_SPACE WB_WORKTREE WB_PROJECT WB_SOURCE WB_BRANCH WB_BEAD set (WB_SHA too for before_end).
+# gh_account  = "acme-bot"                                  # gh account to switch to before fetching
+# on_create   = "~/.config/workbench/hooks/acme-setup"      # after the worktree is made
+# before_end  = 'test -f ~/.local/state/acme-ok/$WB_SHA'    # end-session refuses if this fails
+# session_cmd = "my-session"        # default: workbench's own bin/new-session
+
+# One entry per folder; sessions start in the folder itself.
+[[space]]
+name      = "Side projects"
+glob      = "~/dev/side/*"
+beads     = "if-present"
+worktrees = false

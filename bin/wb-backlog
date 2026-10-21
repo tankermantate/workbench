@@ -1,0 +1,220 @@
+#!/usr/bin/env python3
+"""wb-backlog — one space's live beads, read through bd.
+
+  wb-backlog list ROOT [--snapshot FILE]
+      TSV, best first: id, short id, mark (○ open / ◐ in progress), P<n>,
+      section (NOW / NEXT / -), title, parent, worktree from the claim notes.
+      Exits non-zero when there is nothing to list; the code says why (STATES).
+  wb-backlog summary ROOT      one line of counts for screen 1; always exits 0
+  wb-backlog preview FILE ID [QUERY]
+      the preview pane for one bead, from a snapshot, with QUERY's words
+      highlighted in the title and description (lib/wb_search.py)
+
+Order: wave:1, then wave:2, then everything else; priority within each.
+Closed and deferred beads are hidden.
+"""
+import json
+import os
+import re
+import shutil
+import signal
+import subprocess
+import sys
+
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.realpath(__file__)), "..", "lib"))
+import wb_search  # noqa: E402  (lives in lib/; realpath, since install.sh links bin/ elsewhere)
+
+TIMEOUT = float(os.environ.get("WB_BD_TIMEOUT", "3"))
+BD = os.environ.get("WB_BD", "bd")
+HIDDEN = {"closed", "deferred"}
+WORKTREE_RE = re.compile(r"worktree at (/[^)\n]+)\)")  # paths may contain spaces
+# state -> (list exit code, summary text)
+STATES = {
+    "no-bd": (20, "(bd not installed)"),
+    "no-store": (21, "(no bead store)"),
+    "unreadable": (22, "(no readable beads)"),
+    "unavailable": (23, "(bd unavailable)"),
+    "empty": (24, "0 open"),  # screen 1 has no ctrl-r; screen 2 says how to re-check
+}
+
+
+class BdError(Exception):
+    def __init__(self, state):
+        super().__init__(state)
+        self.state = state
+
+
+def run_bd(root):
+    try:
+        p = subprocess.Popen([BD, "list", "-n", "0", "--json"], cwd=root, text=True,
+                             stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                             start_new_session=True)
+    except OSError:
+        raise BdError("unavailable")
+    try:
+        out, err = p.communicate(timeout=TIMEOUT)
+    except subprocess.TimeoutExpired:
+        # Kill the whole group: a child still holding the pipe would make
+        # communicate() wait for it.
+        try:
+            os.killpg(p.pid, signal.SIGKILL)
+        except ProcessLookupError:
+            pass  # it finished just as the timeout hit
+        try:
+            p.communicate(timeout=1)
+        except subprocess.TimeoutExpired:
+            pass  # a child in its own session still holds the pipe; leave it
+        raise BdError("unavailable")
+    if p.returncode != 0:
+        raise BdError("unreadable" if "no beads database found" in out + err else "unavailable")
+    start = re.search(r"^\[", out, re.M)  # bd can print 'Warning: …' lines first
+    if not start:
+        raise BdError("unavailable")
+    try:
+        data = json.loads(out[start.start():])
+    except json.JSONDecodeError:
+        raise BdError("unavailable")
+    if not isinstance(data, list) or not all(isinstance(b, dict) for b in data):
+        raise BdError("unavailable")
+    return data
+
+
+def has_store(root):
+    """A bead store in ROOT or a parent, up to the top of ROOT's git repo. bd itself
+    walks up (a space's root can be a subfolder of the repo that holds .beads), but a
+    store above the repo, like ~/.beads, belongs to someone else. Outside any
+    repo the walk stops below $HOME. A store is a .beads with bd's config.yaml or
+    metadata.json, as in lib/session.sh: a .beads holding only old exports isn't."""
+    home = os.path.abspath(os.path.expanduser("~"))
+    d = os.path.abspath(root)
+    while d != home or d == os.path.abspath(root):
+        if any(os.path.isfile(os.path.join(d, ".beads", f)) for f in ("config.yaml", "metadata.json")):
+            return True
+        if os.path.exists(os.path.join(d, ".git")) or os.path.dirname(d) == d:
+            return False
+        d = os.path.dirname(d)
+    return False
+
+
+def read(root):
+    """(state, every bead bd returned). state is 'ok' or a key of STATES."""
+    if shutil.which(BD) is None:
+        return "no-bd", []
+    if not has_store(root):
+        return "no-store", []
+    try:
+        data = run_bd(root)
+        if not data:  # a locked store has answered [] with exit 0; look once more
+            data = run_bd(root)
+    except BdError as e:
+        return e.state, []
+    return ("ok" if data else "empty"), data
+
+
+def live(data):
+    return [b for b in data if b.get("status") not in HIDDEN]
+
+
+def section(b):
+    waves = [int(l[5:]) for l in (b.get("labels") or []) if re.fullmatch(r"wave:\d+", str(l))]
+    return {1: "NOW", 2: "NEXT"}.get(min(waves) if waves else None, "-")
+
+
+def priority(b):
+    p = b.get("priority")
+    return p if isinstance(p, int) else 9
+
+
+def ordered(beads):
+    rank = {"NOW": 0, "NEXT": 1}
+    return sorted(beads, key=lambda b: (rank.get(section(b), 2), priority(b), str(b.get("id", ""))))
+
+
+def clean(v):
+    v = re.sub(r"[\t\r\n]+", " ", str(v or "")).strip()
+    return v or "-"
+
+
+def worktree(b):
+    found = WORKTREE_RE.findall(b.get("notes") or "")
+    return found[-1] if found else "-"  # notes are appended to, so the last claim is current
+
+
+def cmd_list(root, snapshot=None):
+    state, data = read(root)
+    if snapshot and data:  # write-then-rename: the preview may be reading it during a ctrl-r reload
+        with open(snapshot + ".part", "w") as f:
+            json.dump({b.get("id"): b for b in data}, f, ensure_ascii=False)
+        os.replace(snapshot + ".part", snapshot)
+    if state != "ok":
+        return STATES[state][0]
+    for b in ordered(live(data)):
+        bid = str(b.get("id", ""))
+        mark = "◐" if b.get("status") == "in_progress" else "○"
+        prio = f"P{b['priority']}" if isinstance(b.get("priority"), int) else "P-"
+        print("\t".join(clean(x) for x in (bid, bid.rsplit("-", 1)[-1], mark, prio,
+                                            section(b), b.get("title"), b.get("parent"),
+                                            worktree(b))))
+    return 0
+
+
+def cmd_summary(root):
+    state, data = read(root)
+    if state != "ok":
+        print(STATES[state][1])
+        return 0
+    beads = live(data)
+    claimed = sum(b.get("status") == "in_progress" for b in beads)
+    now = sum(section(b) == "NOW" for b in beads)
+    nxt = sum(section(b) == "NEXT" for b in beads)
+    if now or nxt:
+        print(f"NOW {now} · NEXT {nxt} · claimed {claimed}")
+    else:
+        print(f"open {len(beads)} · claimed {claimed}")
+    return 0
+
+
+def cmd_preview(snapshot, bead_id, query=""):
+    if bead_id == "":  # a section header or message row
+        return 0
+    if bead_id == "-":
+        print("✦ Start Claude here and shape a new idea into a bead.")
+        return 0
+    try:
+        with open(snapshot) as f:
+            beads = json.load(f)
+    except (OSError, ValueError):
+        print("(no details yet — ctrl-r to re-read)")
+        return 0
+    b = beads.get(bead_id)
+    if not b:
+        print(f"{bead_id}: not in the last read")
+        return 0
+    parent = b.get("parent")
+    ptitle = (beads.get(parent) or {}).get("title") if parent else None
+    pats = wb_search.patterns(query)
+    print(f"{bead_id}  P{b.get('priority', '?')}  {b.get('status', '?')}")
+    print(wb_search.highlight(pats, b.get("title") or ""))
+    print()
+    print("parent: " + (f"{parent}  {ptitle}" if ptitle else (parent or "—")))
+    print("labels: " + (", ".join(map(str, b.get("labels") or [])) or "—"))
+    print()
+    print(wb_search.highlight(pats, b.get("description") or "") or "(no description)")
+    return 0
+
+
+def main(argv):
+    args = argv[1:]
+    if len(args) >= 2 and args[0] == "list":
+        snap = args[3] if len(args) == 4 and args[2] == "--snapshot" else None
+        return cmd_list(args[1], snap)
+    if len(args) == 2 and args[0] == "summary":
+        return cmd_summary(args[1])
+    if len(args) in (3, 4) and args[0] == "preview":
+        return cmd_preview(*args[1:])
+    print(__doc__, file=sys.stderr)
+    return 2
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv))

@@ -1,0 +1,4 @@
+I want to start something new in {space}. Help me shape the idea before writing any code: ask what it's for and what done looks like.
+
+{protocol}
+Once it has a shape, file it as a bead with `bd create`, under a parent epic if this space uses epics, and only then start building. If this folder has no .beads directory, run `bd init` first.

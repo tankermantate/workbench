@@ -1,0 +1,119 @@
+#!/usr/bin/env bash
+source "$(dirname "$0")/lib.sh"
+T="$(newtmp)"; trap 'rm -rf "$T"' EXIT
+WB="$REPO/bin/wb-backlog"; FX="$REPO/tests/fixtures"
+mkstore "$T/store"; mkdir -p "$T/nostore"
+export FAKE_BD_DIR="$T/bd"
+reset_bd() { rm -rf "$FAKE_BD_DIR"; mkdir -p "$FAKE_BD_DIR"; }
+
+reset_bd; cp "$FX/waves.json" "$FAKE_BD_DIR/stdout"
+out="$("$WB" list "$T/store" --snapshot "$T/snap.json")"; rc=$?
+assert_eq "list ok exits 0" "$rc" "0"
+assert_eq "order: NOW by priority, NEXT, then the rest by priority; deferred+closed hidden" \
+  "$(printf '%s\n' "$out" | cut -f1 | tr '\n' ' ')" "acme-a2 acme-a1 acme-b1 acme-c1 acme-e1 acme-c2 "
+assert_eq "row fields" "$(printf '%s\n' "$out" | head -1)" \
+  "acme-a2	a2	○	P1	NOW	High wave-1	acme-e1	-"
+assert_eq "in-progress is ◐ with its worktree from notes" "$(printf '%s\n' "$out" | tail -1)" \
+  "acme-c2	c2	◐	P3	-	Claimed elsewhere	-	/tmp/wb-fixture-wt/acme-x"
+assert_eq "summary with waves" "$("$WB" summary "$T/store")" "NOW 2 · NEXT 1 · claimed 1"
+
+prev="$("$WB" preview "$T/snap.json" acme-a1)"
+assert_contains "preview: title" "$prev" "Low wave-1"
+assert_contains "preview: parent with title" "$prev" "parent: acme-e1  Epic: tidy the shop"
+assert_contains "preview: labels" "$prev" "labels: wave:1"
+assert_contains "preview: description keeps newlines" "$prev" $'First line\nSecond line'
+assert_contains "preview: new-idea row" "$("$WB" preview "$T/snap.json" -)" "new idea"
+prev="$("$WB" preview "$T/snap.json" acme-a1 'second LOW')"
+assert_contains "preview: query words highlighted in the title" "$prev" $'\e[1;33mLow\e[0m wave-1'
+assert_contains "preview: and in the description" "$prev" $'\e[1;33mSecond\e[0m line'
+assert_not_contains "preview: not in the labels" "$prev" $'labels: \e'
+assert_not_contains "preview: no query, no colour" "$("$WB" preview "$T/snap.json" acme-a1 '')" $'\e'
+assert_eq "preview: section and message rows (no id) show nothing" "$("$WB" preview "$T/snap.json" "")" ""
+
+reset_bd; cp "$FX/plain.json" "$FAKE_BD_DIR/stdout"
+assert_eq "no waves: priority alone" "$("$WB" list "$T/store" | cut -f1,5 | tr '\n' ' ')" "bee-2	- bee-1	- "
+assert_eq "summary without waves" "$("$WB" summary "$T/store")" "open 2 · claimed 0"
+
+reset_bd; { echo "Warning: $T/store/.beads has permissions 0755 [recommended: 0700]"; cat "$FX/plain.json"; } > "$FAKE_BD_DIR/stdout"
+assert_eq "warning line before JSON is skipped" "$("$WB" summary "$T/store")" "open 2 · claimed 0"
+
+reset_bd; echo '[]' > "$FAKE_BD_DIR/stdout"
+"$WB" list "$T/store" >/dev/null; rc=$?
+assert_eq "empty twice exits 24" "$rc" "24"
+assert_eq "empty is retried once" "$(cat "$FAKE_BD_DIR/calls")" "2"
+assert_eq "empty summary is a plain count (ctrl-r only works on screen 2)" "$("$WB" summary "$T/store")" "0 open"
+
+reset_bd; echo '[]' > "$FAKE_BD_DIR/stdout.1"; cp "$FX/plain.json" "$FAKE_BD_DIR/stdout.2"
+assert_eq "empty then data: the retry wins" "$("$WB" summary "$T/store")" "open 2 · claimed 0"
+
+reset_bd; echo 1 > "$FAKE_BD_DIR/rc"; echo "Error: no beads database found" > "$FAKE_BD_DIR/stderr"
+"$WB" list "$T/store" >/dev/null 2>&1; rc=$?
+assert_eq "unreadable store exits 22" "$rc" "22"
+assert_eq "unreadable summary" "$("$WB" summary "$T/store")" "(no readable beads)"
+
+reset_bd; echo 1 > "$FAKE_BD_DIR/rc"; echo "Error: dolt exploded" > "$FAKE_BD_DIR/stderr"
+"$WB" list "$T/store" >/dev/null 2>&1; rc=$?
+assert_eq "other failure exits 23" "$rc" "23"
+
+reset_bd; echo 'not json at all' > "$FAKE_BD_DIR/stdout"
+assert_eq "junk output is unavailable" "$("$WB" summary "$T/store")" "(bd unavailable)"
+
+reset_bd; echo 5 > "$FAKE_BD_DIR/sleep"; cp "$FX/plain.json" "$FAKE_BD_DIR/stdout"
+start=$SECONDS; out="$("$WB" summary "$T/store")"; took=$((SECONDS - start))
+assert_eq "hang is unavailable" "$out" "(bd unavailable)"
+if [ "$took" -lt 3 ]; then ok "hang is cut off at the timeout (${took}s)"; else bad "hang took ${took}s"; fi
+
+# A bd that leaves a detached child (its own session, so killpg misses it)
+# holding the output pipe must not make the read wait for that child.
+cat > "$T/bd-daemon" <<'EOF'
+#!/usr/bin/env perl
+use POSIX qw(setsid);
+if (fork() == 0) { setsid(); sleep 6; exit 0 }
+sleep 6;
+EOF
+chmod +x "$T/bd-daemon"
+start=$SECONDS; out="$(WB_BD="$T/bd-daemon" "$WB" summary "$T/store")"; took=$((SECONDS - start))
+assert_eq "hang with a detached child is unavailable" "$out" "(bd unavailable)"
+if [ "$took" -lt 5 ]; then ok "a detached child does not hold the read open (${took}s)"; else bad "detached child held the read for ${took}s"; fi
+
+reset_bd
+"$WB" list "$T/nostore" >/dev/null; rc=$?
+assert_eq "no .beads exits 21" "$rc" "21"
+if [ ! -f "$FAKE_BD_DIR/calls" ]; then ok "no .beads: bd not called"; else bad "bd was called without .beads"; fi
+assert_eq "no-store summary" "$("$WB" summary "$T/nostore")" "(no bead store)"
+
+# .beads higher up in the same git repo counts (a root can be a subfolder); above the repo it doesn't.
+mkdir -p "$T/repo/.git" "$T/repo/projects/app" "$T/outer/proj/.git"; mkstore "$T/repo" "$T/outer"
+reset_bd; cp "$FX/plain.json" "$FAKE_BD_DIR/stdout"
+assert_eq ".beads at the repo top counts for a subfolder root" "$("$WB" summary "$T/repo/projects/app")" "open 2 · claimed 0"
+assert_eq ".beads above the repo does not count" "$("$WB" summary "$T/outer/proj")" "(no bead store)"
+mkstore "$T/home"; mkdir -p "$T/home/dev/loose"
+assert_eq "outside any repo, ~/.beads does not count" "$(HOME="$T/home" "$WB" summary "$T/home/dev/loose")" "(no bead store)"
+# A .beads without bd's config (old exports left behind) is not a store, as bd skips it too.
+mkdir -p "$T/left/.git" "$T/left/.beads"; : > "$T/left/.beads/issues.jsonl"
+assert_eq "a leftover .beads is not a store" "$("$WB" summary "$T/left")" "(no bead store)"
+mkdir -p "$T/repo/projects/.beads"; : > "$T/repo/projects/.beads/issues.jsonl"
+assert_eq "a leftover nearer the root doesn't hide the real store" "$("$WB" summary "$T/repo/projects/app")" "open 2 · claimed 0"
+
+WB_BD=/nonexistent/bd "$WB" list "$T/store" >/dev/null; rc=$?
+assert_eq "bd missing exits 20" "$rc" "20"
+assert_eq "bd missing summary" "$(WB_BD=/nonexistent/bd "$WB" summary "$T/store")" "(bd not installed)"
+
+reset_bd
+cat > "$FAKE_BD_DIR/stdout" <<'EOF'
+[{"id":"bee-7","title":"Claimed twice","status":"in_progress","priority":1,
+  "notes":"Branch: feat/a (worktree at /x/old)\nBranch: feat/a (worktree at /x/wt dir/new)"}]
+EOF
+assert_eq "claim notes: the newest worktree, spaces kept" \
+  "$("$WB" list "$T/store" | cut -f8)" "/x/wt dir/new"
+
+reset_bd
+cat > "$FAKE_BD_DIR/stdout" <<EOF
+[{"id":"bee-9","title":"tab\there \$(touch $T/pwned) \"q\"\nnext","status":"open","priority":1,"description":"\$(touch $T/pwned)"}]
+EOF
+out="$("$WB" list "$T/store" --snapshot "$T/snap2.json")"
+assert_eq "hostile title is cleaned into one row of 8 fields" "$(printf '%s\n' "$out" | awk -F'\t' '{print NR":"NF}')" "1:8"
+prev="$("$WB" preview "$T/snap2.json" bee-9)"
+assert_contains "hostile description shown literally" "$prev" "\$(touch $T/pwned)"
+if [ ! -e "$T/pwned" ]; then ok "hostile title is cleaned and not executed"; else bad "something executed the title"; fi
+finish

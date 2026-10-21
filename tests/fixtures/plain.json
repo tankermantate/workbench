@@ -1,0 +1,4 @@
+[
+  {"id":"bee-1","title":"Second by priority","status":"open","priority":2,"labels":null},
+  {"id":"bee-2","title":"First by priority","status":"open","priority":1}
+]

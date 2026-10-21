@@ -1,0 +1,6 @@
+Work on bead {id} in {space}.
+
+{protocol}
+1. Run `bd show {id}` and read all of it, including the notes.
+2. Before writing any code, re-verify the bead's load-bearing figure or fact against the live system, and tell me if it moved. If it moved, re-scope before building.
+3. Then build it. When it ships, close the bead, recording what actually shipped and what did not.

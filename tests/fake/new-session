@@ -1,0 +1,9 @@
+#!/usr/bin/env bash
+# Fake new-session: logs argv, prints progress like the real one, ends with WORKTREE_DIR=.
+echo "$*" >> "${FAKE_NS_LOG:?}"
+echo "→ creating worktree (fake)"
+# FAKE_NS_INT: act like Ctrl-C (the shell gets SIGINT too, as from the terminal).
+if [ -n "${FAKE_NS_INT:-}" ]; then kill -INT "$PPID"; exit 130; fi
+if [ -n "${FAKE_NS_RC:-}" ]; then echo "error: worktree path already exists: /x" >&2; exit "$FAKE_NS_RC"; fi
+mkdir -p "${FAKE_NS_DIR:?}"
+echo "WORKTREE_DIR=$FAKE_NS_DIR"

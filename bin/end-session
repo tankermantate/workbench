@@ -1,0 +1,137 @@
+#!/usr/bin/env bash
+# end-session — remove a session's worktree once its work is safe, for any
+# space in spaces.toml. Spec: docs/specs/2026-10-18-session-scripts-design.md
+set -euo pipefail
+WB_HOME="$(cd "$(dirname "$(readlink -f "$0")")/.." && pwd)"
+# shellcheck source=../lib/session.sh
+. "$WB_HOME/lib/session.sh"
+
+usage() {
+  cat <<'EOF'
+Usage: end-session [<worktree-path>] [--force] [--base=<branch>]
+
+  <worktree-path>   default: the worktree you are in
+  --force           skip the dirty, unpushed and before_end checks; keep the branch
+  --base=<branch>   the branch "merged" is checked against
+                    (default: the repo's default branch)
+EOF
+}
+die() { echo "end-session: $1" >&2; exit "${2:-2}"; }
+
+FORCE=0; TARGET=""; BASE=""
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --force) FORCE=1; shift ;;
+    --base=*) BASE=${1#*=}; shift ;;
+    -h|--help) usage; exit 0 ;;
+    -*) echo "end-session: unknown flag: $1" >&2; usage >&2; exit 2 ;;
+    *) [ -z "$TARGET" ] || die "only one worktree path, got another: $1"
+       TARGET=$1; shift ;;
+  esac
+done
+
+# ---- the worktree, and the main checkout it belongs to
+[ -n "$TARGET" ] || TARGET=$PWD
+[ -d "$TARGET" ] || die "no such folder: $TARGET"
+TARGET=$(git -C "$TARGET" rev-parse --show-toplevel 2>/dev/null) || die "$TARGET is not in a git repo" 1
+TARGET=$(cd "$TARGET" && pwd -P)
+COMMON=$(git -C "$TARGET" rev-parse --path-format=absolute --git-common-dir)
+MAIN=$(cd "$COMMON/.." && pwd -P)
+[ "$TARGET" != "$MAIN" ] || die "refusing to remove the main checkout ($MAIN)" 1
+REGISTERED=0
+LIST=$(git -C "$MAIN" worktree list --porcelain)
+while IFS= read -r line; do
+  case "$line" in
+    "worktree "*)
+      if [ "$(cd "${line#worktree }" 2>/dev/null && pwd -P)" = "$TARGET" ]; then REGISTERED=1; fi ;;
+  esac
+done <<< "$LIST"
+[ "$REGISTERED" = 1 ] || die "$TARGET is not a registered git worktree" 1
+BRANCH=$(git -C "$TARGET" rev-parse --abbrev-ref HEAD)
+[ "$BRANCH" != HEAD ] || die "the worktree is on a detached HEAD, so its branch is unknown" 1
+echo "→ worktree: $TARGET (branch: $BRANCH)"
+
+# ---- its space: a worktree space on this repo, preferring the one whose key
+# names the worktree (new-session makes <key>-<slug>). Fail closed: before_end
+# may be the only thing between unverified work and its removal.
+FOUND=0; FIRST_ROW=""; KEY_ROW=""
+if ROWS="$(ws_rows)"; then
+  while IFS= read -r r; do
+    [ -n "$r" ] || continue
+    ws_split "$r"
+    [ "$S_WORKTREES" = 1 ] || continue
+    top=$(git -C "$S_ROOT" rev-parse --show-toplevel 2>/dev/null) || continue
+    [ "$(cd "$top" && pwd -P)" = "$MAIN" ] || continue
+    [ -n "$FIRST_ROW" ] || FIRST_ROW=$r
+    case "$(basename "$TARGET")" in "$S_KEY"-*) KEY_ROW=$r; break ;; esac
+  done <<< "$ROWS"
+  ROW=${KEY_ROW:-$FIRST_ROW}
+  if [ -n "$ROW" ]; then ws_split "$ROW"; FOUND=1; fi
+  [ "$FOUND" = 1 ] || echo "end-session: no space in spaces.toml claims $MAIN; no before_end check ran." >&2
+elif [ "$FORCE" = 1 ]; then
+  echo "end-session: could not read spaces.toml; going ahead because of --force." >&2
+else
+  die "could not read spaces.toml (see above), so this space's before_end check can't run. Fix the config, or use --force." 1
+fi
+
+[ -n "$BASE" ] || BASE=$(ws_default_branch "$MAIN")
+HAS_ORIGIN=0
+if git -C "$MAIN" remote get-url origin >/dev/null 2>&1; then HAS_ORIGIN=1; fi
+REF=$BASE; if [ "$HAS_ORIGIN" = 1 ]; then REF="origin/$BASE"; fi
+
+# ---- checks
+if [ "$FORCE" = 0 ] && [ -n "$(git -C "$TARGET" status --porcelain)" ]; then
+  echo "end-session: the worktree has uncommitted changes. Commit them, or use --force:" >&2
+  git -C "$TARGET" status --short >&2
+  exit 1
+fi
+
+NOTHING=0   # every commit already on the base: nothing to push or verify
+if [ "$FORCE" = 0 ]; then
+  if [ "$HAS_ORIGIN" = 1 ]; then git -C "$TARGET" fetch --quiet origin "$BASE" 2>/dev/null || true; fi
+  if git -C "$TARGET" merge-base --is-ancestor HEAD "$REF" 2>/dev/null; then
+    NOTHING=1; echo "→ no commits beyond $REF — nothing to push or verify"
+  fi
+fi
+
+if [ "$FORCE" = 0 ] && [ "$NOTHING" = 0 ] && [ "$HAS_ORIGIN" = 1 ]; then
+  git -C "$TARGET" fetch --quiet origin "$BRANCH" 2>/dev/null || true
+  LOCAL=$(git -C "$TARGET" rev-parse HEAD)
+  REMOTE=$(git -C "$TARGET" rev-parse --verify --quiet "origin/$BRANCH" || true)
+  [ -n "$REMOTE" ] || die "'$BRANCH' is not pushed to origin (use --force to override)" 1
+  [ "$LOCAL" = "$REMOTE" ] || die "'$BRANCH' has unpushed commits (origin at ${REMOTE:0:10}, local at ${LOCAL:0:10})" 1
+fi
+
+if [ "$FOUND" = 1 ] && [ -n "$S_BEFORE_END" ] && [ "$FORCE" = 0 ] && [ "$NOTHING" = 0 ]; then
+  PREFIX=$(git -C "$S_ROOT" rev-parse --show-prefix); PREFIX=${PREFIX%/}
+  PROJECT="$TARGET${PREFIX:+/$PREFIX}"; [ -d "$PROJECT" ] || PROJECT=$TARGET
+  export WB_SPACE="$S_KEY" WB_WORKTREE="$TARGET" WB_PROJECT="$PROJECT" \
+         WB_SOURCE="$MAIN${PREFIX:+/$PREFIX}" WB_BRANCH="$BRANCH" WB_BEAD=""
+  WB_SHA=$(git -C "$TARGET" rev-parse HEAD); export WB_SHA
+  echo "→ before_end: $S_BEFORE_END"
+  ws_run_hook "$S_BEFORE_END" "$PROJECT" \
+    || die "before_end failed, so the worktree stays. Fix what it says, or use --force." 1
+fi
+
+# ---- remove, then tidy the branch
+echo "→ removing worktree $TARGET"
+cd "$MAIN"   # the worktree may be our own folder
+if [ "$FORCE" = 1 ]; then git -C "$MAIN" worktree remove --force "$TARGET"
+else git -C "$MAIN" worktree remove "$TARGET"; fi
+if [ "$FORCE" = 1 ]; then
+  echo "✓ session ended (forced). Branch '$BRANCH' kept — check it by hand."
+  exit 0
+fi
+if [ "$HAS_ORIGIN" = 1 ]; then git -C "$MAIN" fetch --quiet origin "$BASE" 2>/dev/null || true; fi
+MERGED=0
+if git -C "$MAIN" merge-base --is-ancestor "$BRANCH" "$BASE" 2>/dev/null; then MERGED=1; fi
+if [ "$HAS_ORIGIN" = 1 ] && git -C "$MAIN" merge-base --is-ancestor "$BRANCH" "origin/$BASE" 2>/dev/null; then MERGED=1; fi
+if [ "$MERGED" = 1 ]; then
+  # -D, not -d: ancestry is proven above, and -d re-checks against the branch's
+  # own (possibly stale) upstream.
+  git -C "$MAIN" branch -D "$BRANCH" >/dev/null
+  echo "✓ session ended. Branch '$BRANCH' is merged into $BASE and was deleted."
+else
+  echo "✓ session ended. Branch '$BRANCH' is not merged into $BASE, so it was kept."
+  echo "  Delete it later with: $(ws_quote git -C "$MAIN" branch -d "$BRANCH")"
+fi

@@ -1,0 +1,125 @@
+#!/usr/bin/env python3
+"""wb-spaces — this machine's spaces, from ~/.config/workbench/spaces.toml.
+
+  wb-spaces                one TSV line per space (glob spaces: one per folder):
+                           label, group, root, beads, worktrees, session_cmd,
+                           space_key, claude_config, protocol, safe, gh_account,
+                           on_create, before_end   ('-' = unset)
+  wb-spaces --terminals    [launcher].terminals, one per line
+  wb-spaces --leak-terms   private words check-leaks.sh greps for
+
+Exit 3: no config file. Exit 4: the config is invalid. Both explain on stderr.
+"""
+import glob
+import os
+import sys
+
+if sys.version_info < (3, 11):
+    sys.exit("workbench: wb-spaces needs python3 >= 3.11 (for tomllib)")
+import tomllib
+
+
+def config_path():
+    return os.environ.get("WORKBENCH_CONFIG") or os.path.expanduser("~/.config/workbench/spaces.toml")
+
+
+def expand(p):
+    return os.path.abspath(os.path.expanduser(p)) if p else ""
+
+
+DEFAULT_SESSION_CMD = os.path.join(os.path.dirname(os.path.realpath(__file__)), "new-session")
+HOOKS = ("gh_account", "on_create", "before_end")
+
+
+def field(v):
+    v = str(v).replace("\t", " ").replace("\n", " ")
+    return v if v else "-"
+
+
+def spaces(cfg):
+    entries = cfg.get("space")
+    if not isinstance(entries, list) or not entries:
+        raise ValueError("no [[space]] entries")
+    for n, s in enumerate(entries, 1):
+        name = s.get("name")
+        if not name:
+            raise ValueError(f"space #{n} has no name")
+        if ("root" in s) == ("glob" in s):
+            raise ValueError(f"space '{name}' needs exactly one of root or glob")
+        worktrees = bool(s.get("worktrees", False))
+        if worktrees and "root" in s and not s.get("space_key"):
+            raise ValueError(f"space '{name}' has worktrees = true but no space_key")
+        if worktrees and "glob" in s and s.get("space_key"):
+            raise ValueError(f"space '{name}': a glob space with worktrees = true uses each folder's "
+                             "name as its key; remove space_key")
+        hooks = {k: s.get(k, "") for k in HOOKS}
+        for k, v in hooks.items():
+            if not isinstance(v, str) or "\n" in v or "\t" in v:
+                raise ValueError(f"space '{name}': {k} must be one line without tabs")
+        beads = s.get("beads", "if-present")
+        beads = {True: "true", False: "false"}.get(beads, beads)
+        if beads not in ("true", "false", "if-present"):
+            raise ValueError(f"space '{name}': beads must be true, false or \"if-present\"")
+        common = {
+            "beads": beads,
+            "worktrees": "1" if worktrees else "0",
+            "session_cmd": s.get("session_cmd", "") or (DEFAULT_SESSION_CMD if worktrees else ""),
+            "space_key": s.get("space_key", ""),
+            "claude_config": expand(s.get("claude_config", "")),
+            "protocol": s.get("protocol", ""),
+            "safe": "1" if s.get("safe") else "0",
+            **hooks,
+        }
+        if "root" in s:
+            root = expand(s["root"])
+            if not os.path.isdir(root):
+                print(f"workbench: skipping '{name}': {root} is not a folder", file=sys.stderr)
+                continue
+            yield {"label": name, "group": "", "root": root, **common}
+        else:
+            for d in sorted(glob.glob(expand(s["glob"]))):
+                if os.path.isdir(d):
+                    yield {"label": os.path.basename(d), "group": name, "root": d,
+                           **common, "space_key": common["space_key"] or os.path.basename(d)}
+
+
+ORDER = ("label", "group", "root", "beads", "worktrees", "session_cmd",
+         "space_key", "claude_config", "protocol", "safe", "gh_account", "on_create", "before_end")
+
+
+def main(argv):
+    path = config_path()
+    if not os.path.exists(path):
+        print(f"workbench: no config at {path} — copy spaces.example.toml there to start", file=sys.stderr)
+        return 3
+    try:
+        with open(path, "rb") as f:
+            cfg = tomllib.load(f)
+        launcher = cfg.get("launcher", {})
+        if argv[1:] == ["--terminals"]:
+            print("\n".join(launcher.get("terminals", [])))
+            return 0
+        rows = list(spaces(cfg))
+        keys = [r["space_key"] for r in rows if r["worktrees"] == "1"]
+        dup = next((k for k in keys if keys.count(k) > 1), None)
+        if dup:
+            raise ValueError(f"space key '{dup}' is used by more than one worktree space")
+    except (tomllib.TOMLDecodeError, ValueError, TypeError, AttributeError) as e:
+        print(f"workbench: invalid config {path}: {e}", file=sys.stderr)
+        return 4
+    if argv[1:] == ["--leak-terms"]:
+        allow = {str(a).casefold() for a in launcher.get("leak_allow", [])}  # check-leaks greps -i
+        terms = {r["label"] for r in rows} | {r["group"] for r in rows if r["group"]}
+        terms |= {os.path.basename(r["claude_config"]) for r in rows if r["claude_config"]}
+        # the folder a root names, or the folder a glob lists
+        terms |= {os.path.basename(expand(s["root"]) if "root" in s else os.path.dirname(expand(s["glob"])))
+                  for s in cfg["space"]}
+        print("\n".join(sorted(t for t in terms if t and t.casefold() not in allow)))
+        return 0
+    for r in rows:
+        print("\t".join(field(r[k]) for k in ORDER))
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv))

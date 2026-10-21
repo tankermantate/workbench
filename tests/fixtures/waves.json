@@ -1,0 +1,10 @@
+[
+  {"id":"acme-e1","title":"Epic: tidy the shop","status":"open","priority":2,"issue_type":"epic","labels":[],"parent":null,"description":"The parent epic."},
+  {"id":"acme-a1","title":"Low wave-1","status":"open","priority":2,"labels":["wave:1"],"parent":"acme-e1","description":"First line\nSecond line"},
+  {"id":"acme-a2","title":"High wave-1","status":"open","priority":1,"labels":["wave:1","ws:shop"],"parent":"acme-e1","description":"Do the thing."},
+  {"id":"acme-b1","title":"Wave-2 urgent","status":"open","priority":0,"labels":["wave:2"],"parent":null,"description":""},
+  {"id":"acme-c1","title":"Unwaved P1","status":"blocked","priority":1,"labels":[],"parent":null},
+  {"id":"acme-c2","title":"Claimed elsewhere","status":"in_progress","priority":3,"labels":["wave:0"],"parent":null,"notes":"Branch: feat/x (worktree at /tmp/wb-fixture-wt/acme-x)"},
+  {"id":"acme-d1","title":"Deferred one","status":"deferred","priority":0,"labels":["wave:1"]},
+  {"id":"acme-z1","title":"Closed one","status":"closed","priority":0,"labels":["wave:1"]}
+]
