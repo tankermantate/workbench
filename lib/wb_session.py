@@ -18,7 +18,7 @@ import subprocess
 import time
 
 BD = os.environ.get("WB_BD", "bd")
-READ_TIMEOUT = float(os.environ.get("WB_BD_TIMEOUT", "3"))
+READ_TIMEOUT = float(os.environ.get("WB_BD_TIMEOUT", "10"))  # a big store's bd show takes ~2s idle, more while claude starts
 WRITE_TIMEOUT = float(os.environ.get("WB_BD_WRITE_TIMEOUT", "30"))
 SAFE_ID = re.compile(r"[A-Za-z0-9-]{1,64}")
 WORKTREE_RE = re.compile(r"worktree at (/[^)\n]+)\)")  # as in wb-backlog

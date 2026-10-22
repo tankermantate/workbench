@@ -61,10 +61,15 @@ assert_eq "other failure exits 23" "$rc" "23"
 reset_bd; echo 'not json at all' > "$FAKE_BD_DIR/stdout"
 assert_eq "junk output is unavailable" "$("$WB" summary "$T/store")" "(bd unavailable)"
 
+# A big store read alongside every other space can take a few seconds: the
+# default limit must leave room for it (a store of ~1,200 beads: about 3s under load).
+reset_bd; echo 3.5 > "$FAKE_BD_DIR/sleep"; cp "$FX/plain.json" "$FAKE_BD_DIR/stdout"
+assert_not_contains "a slow read within the default limit counts" "$(env -u WB_BD_TIMEOUT "$WB" summary "$T/store")" "unavailable"
+
 reset_bd; echo 5 > "$FAKE_BD_DIR/sleep"; cp "$FX/plain.json" "$FAKE_BD_DIR/stdout"
-start=$SECONDS; out="$("$WB" summary "$T/store")"; took=$((SECONDS - start))
+start=$SECONDS; out="$(WB_BD_TIMEOUT=2 "$WB" summary "$T/store")"; took=$((SECONDS - start))
 assert_eq "hang is unavailable" "$out" "(bd unavailable)"
-if [ "$took" -lt 3 ]; then ok "hang is cut off at the timeout (${took}s)"; else bad "hang took ${took}s"; fi
+if [ "$took" -lt 4 ]; then ok "hang is cut off at the timeout (${took}s)"; else bad "hang took ${took}s"; fi
 
 # A bd that leaves a detached child (its own session, so killpg misses it)
 # holding the output pipe must not make the read wait for that child.

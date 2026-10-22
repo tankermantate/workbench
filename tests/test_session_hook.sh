@@ -89,6 +89,11 @@ start=$SECONDS; out="$(FAKE_BD_SLEEP=5 WB_BEAD=acme-x1y WB_SPACE_ROOT="$S" ss s5
 assert_eq "start: bd hangs → silent, exit 0" "$out:$rc" ":0"
 if [ "$took" -lt 3 ]; then ok "start: hang cut off (${took}s)"; else bad "start: hang took ${took}s"; fi
 
+# a big store's bd show takes ~2s idle, more while claude is starting: the
+# default limit must leave room for it, or the session silently never binds
+out="$(unset WB_BD_TIMEOUT; FAKE_BD_SLEEP=3.5 WB_BEAD=acme-x1y WB_SPACE_ROOT="$S" ss s6 startup)"
+assert_contains "start: a slow bd within the default limit still binds" "$(binding s6)" "acme-x1y"
+
 touch -t "$(date -v-31d +%Y%m%d%H%M)" "$WB_STATE_DIR/sessions/s2.json"
 touch -t "$(date -v-29d +%Y%m%d%H%M)" "$WB_STATE_DIR/sessions/s3.json"
 ss s9 startup >/dev/null

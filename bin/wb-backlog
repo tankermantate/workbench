@@ -27,7 +27,7 @@ import sys
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.realpath(__file__)), "..", "lib"))
 import wb_search  # noqa: E402  (lives in lib/; realpath, since install.sh links bin/ elsewhere)
 
-TIMEOUT = float(os.environ.get("WB_BD_TIMEOUT", "3"))
+TIMEOUT = float(os.environ.get("WB_BD_TIMEOUT", "10"))  # counts fill in after the screen draws; a big store under parallel load takes ~3s
 BD = os.environ.get("WB_BD", "bd")
 HIDDEN = {"closed", "deferred"}
 WORKTREE_RE = re.compile(r"worktree at (/[^)\n]+)\)")  # paths may contain spaces

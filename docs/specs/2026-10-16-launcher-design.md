@@ -162,8 +162,11 @@ on. It is additive, and today's `--no-launch` output is otherwise unchanged.
     store about 0.4 s, and a folder with no store 0.06 s.
   - **Screen 1 draws the space list at once**, and the counts fill in as the reads finish, all
     spaces read **in parallel**. The start screen never waits on bd before you can choose.
-- **Timeout of 3 seconds per read.** macOS has no `timeout` command, so `wb-backlog` (Python) uses
-  `subprocess.run(timeout=3)`.
+- **Timeout of 10 seconds per read** (`WB_BD_TIMEOUT`). macOS has no `timeout` command, so
+  `wb-backlog` (Python) bounds the read itself. It was 3 seconds until 2026-10-22, when the biggest
+  store (1,235 beads) took 1.5–1.9 s alone and about 3 s alongside every other space, so screen 1
+  showed it as `(bd unavailable)`. The counts fill in after the screen draws, so a longer limit
+  costs nothing unless bd truly hangs.
 - **Reads don't disturb running sessions.** Measured on a live store: 40 `bd list` reads running
   alongside 15 `bd update` writes caused zero write failures. So no cache is needed.
 - **Empty results.** bd allows one writer at a time, and a locked store has been seen to return
