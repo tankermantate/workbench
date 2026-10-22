@@ -236,6 +236,17 @@ out="$(BEADS_ACTOR=Me ptu e1 'bd update acme-e3 --claim')"
 assert_contains "claiming the epic's next bead: continuing here is recommended" "$(printf '%s' "$out" | pctx)" "continuing here is recommended"
 assert_not_contains "claiming the epic's next bead: not told to start fresh" "$(printf '%s' "$out" | pctx)" "starting fresh is recommended"
 
+# a worktree session can't carry on: its worktree goes at close-out, and the
+# next bead needs its own. The list still shows; the next one starts fresh.
+setstatus acme-e3 open
+printf '%s' '{"bead":"acme-e1","title":"x","root":"'"$S"'","since":"x","done":false,"named":null}' > "$WB_STATE_DIR/sessions/w1.json"
+out="$(WB_WORKTREE="$T/wt" ptu w1 'bd close acme-e1')"; c="$(printf '%s' "$out" | pctx)"
+assert_contains "worktree close-out: still lists the epic's next work" "$(printf '%s' "$out" | msg)" "next here:  e4"
+assert_contains "worktree close-out: the next bead starts fresh from the launcher" "$c" "start acme-e4 from the workbench launcher in a fresh session"
+assert_not_contains "worktree close-out: no carrying on in this session" "$c" "wb-focus"
+out="$(setstatus acme-e3 in_progress; BEADS_ACTOR=Me WB_WORKTREE="$T/wt" ptu w1 'bd update acme-e3 --claim')"
+assert_contains "worktree: claiming the epic's next bead still recommends fresh" "$(printf '%s' "$out" | pctx)" "starting fresh is recommended"
+
 printf '%s' '{"bead":"acme-s1","title":"Last one standing","root":"'"$S"'","since":"x","done":false,"named":null}' > "$WB_STATE_DIR/sessions/e2.json"
 setstatus acme-s1 closed
 out="$(ptu e2 'bd close acme-s1')"

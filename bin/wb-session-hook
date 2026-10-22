@@ -106,6 +106,12 @@ def created_id(stdout):
     return words[0] if len(words) == 1 else None  # bd create --silent prints just the id
 
 
+def worktree():
+    # a worktree session can't carry on with the next bead: its worktree goes at
+    # close-out, and the next bead gets its own from the launcher
+    return bool(os.environ.get("WB_WORKTREE"))
+
+
 def closed_out(k, just_closed):
     return k.get("status") == "closed" or k.get("id") == just_closed
 
@@ -166,7 +172,15 @@ def epic_closeout(root, bead):
     if elsewhere:
         ctx.append("Already in another session (not to offer): "
                    + "; ".join(f"{k['id']}: {k.get('title') or ''}" for k in elsewhere) + ".")
-    if pick:
+    if pick and worktree():
+        ctx.append(f"Tell the user what is left in this epic. Read the closed bead's notes "
+                   f"(`bd show {bead['id']}`) and the epic's description below: if they name a "
+                   f"different next step than the top of this list, say so. This is a worktree "
+                   f"session, so it can't carry on: the next bead needs its own worktree. "
+                   f"Finish the close-out (run end-session once the work is merged or pushed), then "
+                   f"tell the user to type /exit and start {pick[0]['id']} from the workbench launcher "
+                   f"in a fresh session (or the step the notes name).")
+    elif pick:
         ctx.append(f"Tell the user what is left in this epic so they can carry on while this "
                    f"session's context is fresh. Read the closed bead's notes (`bd show {bead['id']}`) "
                    f"and the epic's description below: if they name a different next step than the "
@@ -226,7 +240,7 @@ def post_tool_use(h):
             break
         closed_note = ", which is closed" if b.get("done") else ""
         advice = "; starting fresh is recommended, since this session's bead is done" if b.get("done") else ""
-        if b.get("done") and b.get("epic") and bead.get("parent") == b["epic"]:
+        if b.get("done") and b.get("epic") and bead.get("parent") == b["epic"] and not worktree():
             advice = ("; continuing here is recommended, since it is the next bead in the same "
                       "epic and this session's context carries over (if the user already chose to "
                       "carry on here, just run it)")

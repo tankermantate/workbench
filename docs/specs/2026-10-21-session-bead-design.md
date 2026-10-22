@@ -63,7 +63,9 @@ What the user said:
      session", never offered. Nothing from outside the epic is shown. Claude gets the same list,
      reads the closed bead's notes and the epic's description, and says so if they name a different
      next step. If you pick one, Claude claims it and moves the session onto it with `wb-focus`;
-     otherwise it finishes the close-out as above. When every bead in the epic is closed, it says
+     otherwise it finishes the close-out as above. A worktree session can't carry on (its worktree
+     goes at close-out, and the next bead needs its own), so there the list is for information:
+     Claude finishes the close-out and names the bead to start from the launcher in a fresh session. When every bead in the epic is closed, it says
      the epic looks finished and offers to close it. A bead with no epic gets none of this: that work
      is over, and the next session starts fresh.
 
@@ -71,7 +73,7 @@ What the user said:
    interactive session or clear its context. So the session says it's done, and you close it.
    If Claude claims another bead in a session whose bead is done, it still asks "continue here or
    start fresh", and recommends starting fresh, unless the bead is in the same epic as the closed
-   one: then it recommends continuing here, since the context carries over.
+   one in a plain space: then it recommends continuing here, since the context carries over.
 6. **The session is named after the bead,** so `claude --resume` lists it by bead rather than by a
    generated label.
 
