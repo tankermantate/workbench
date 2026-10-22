@@ -22,6 +22,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(ME), "..", "lib"))
 import wb_session as ws  # noqa: E402  (lives in lib/; realpath, since install.sh links bin/ elsewhere)
 
 DESC_MAX = 1500
+PICKS = 5  # next-here rows at close-out; the rest are counted
 # by full path: bin/wb-focus is on PATH only once install.sh has linked it
 FOCUS = shlex.quote(os.path.join(os.path.dirname(ME), "wb-focus"))
 ASK = ("Before you start work on a different bead (claiming it or setting it in progress), "
@@ -105,6 +106,80 @@ def created_id(stdout):
     return words[0] if len(words) == 1 else None  # bd create --silent prints just the id
 
 
+def closed_out(k, just_closed):
+    return k.get("status") == "closed" or k.get("id") == just_closed
+
+
+def blocked(k, kids):
+    if k.get("status") == "blocked":
+        return True
+    status = {c.get("id"): c.get("status") for c in kids}
+    # a blocker outside the epic is unknown here: count it as still blocking
+    return any(d.get("type") == "blocks" and status.get(d.get("depends_on_id")) != "closed"
+               for d in k.get("dependencies") or [] if isinstance(d, dict))
+
+
+def epic_closeout(root, bead):
+    """(lines under the done notice, Claude's close-out context). A bead with an
+    epic gets what is left in that epic, so the user can carry on while the
+    context is fresh; one without gets the plain close-out: that work is over."""
+    exit_ = ("Finish the close-out (in a worktree space, run end-session once the work "
+             "is merged or pushed), then tell the user to type /exit and start the next "
+             "bead from the workbench launcher.")
+    plain = f"This session's bead {bead['id']} is closed, so the session's work is done. " + exit_
+    eid = bead.get("parent")
+    kids = ws.children(root, eid) if eid else None
+    if not kids:
+        return [], plain
+    epic = ws.show(root, eid) or {"id": eid}
+    name = re.sub(r"^epic:\s*", "", epic.get("title") or "", flags=re.I) or eid
+    done = sum(closed_out(k, bead["id"]) for k in kids)
+    pick = ws.ordered([k for k in kids if not closed_out(k, bead["id"]) and k.get("status") == "open"
+                       and k.get("issue_type") != "epic" and "icebox" not in (k.get("labels") or [])
+                       and not blocked(k, kids)])
+    elsewhere = [k for k in kids if not closed_out(k, bead["id"]) and k.get("status") == "in_progress"]
+    head = f"  {ws.cut(name)}: {done} of {len(kids)} done"
+    if done == len(kids):
+        return [head + " · the epic looks finished"], (
+            f"This session's bead {bead['id']} is closed, and with it every bead in its epic "
+            f"{eid}: {epic.get('title') or ''}. Offer to close the epic (`bd close {eid}`). " + exit_)
+    lines, lead = [head], "  next here:  "
+    for k in pick[:PICKS]:
+        sec = ws.section(k)
+        prio = f"P{k['priority']}" if isinstance(k.get("priority"), int) else "P-"
+        lines.append(f"{lead}{ws.short(k['id'])}  {'' if sec == '-' else sec + ' '}{prio}  "
+                     f"{ws.cut(k.get('title') or '')}")
+        lead = " " * len(lead)
+    if len(pick) > PICKS:
+        lines.append(f"{lead}+{len(pick) - PICKS} more")
+    if not pick and not elsewhere:
+        lines.append("  nothing ready to pick up here: the rest is shelved, blocked or an epic")
+    lead = "  in another session:  "
+    for k in elsewhere:
+        lines.append(f"{lead}{ws.short(k['id'])}  {ws.cut(k.get('title') or '')}")
+        lead = " " * len(lead)
+    ctx = [f"This session's bead {bead['id']} is closed. It is part of epic {eid}: "
+           f"{epic.get('title') or ''} ({done} of {len(kids)} done)."]
+    if pick:
+        ctx.append("Ready next in this epic, best first: "
+                   + "; ".join(f"{k['id']}: {k.get('title') or ''}" for k in pick) + ".")
+    if elsewhere:
+        ctx.append("Already in another session (not to offer): "
+                   + "; ".join(f"{k['id']}: {k.get('title') or ''}" for k in elsewhere) + ".")
+    if pick:
+        ctx.append(f"Tell the user what is left in this epic so they can carry on while this "
+                   f"session's context is fresh. Read the closed bead's notes (`bd show {bead['id']}`) "
+                   f"and the epic's description below: if they name a different next step than the "
+                   f"top of this list, say so. If the user picks one, claim it (`bd update <id> --claim`) "
+                   f"and move this session onto it (`{FOCUS} <id>`). If they are done for now: " + exit_)
+    else:
+        ctx.append(exit_)
+    desc = (epic.get("description") or "").strip()
+    if desc:
+        ctx.append("The epic's description: " + desc[:DESC_MAX])
+    return lines, " ".join(ctx)
+
+
 def post_tool_use(h):
     resp = h.get("tool_response") if isinstance(h.get("tool_response"), dict) else {}
     if h.get("tool_name") != "Bash" or resp.get("is_error") or resp.get("interrupted"):
@@ -130,12 +205,12 @@ def post_tool_use(h):
         bead = ws.show(root, b["bead"])
         if bead and bead.get("status") == "closed":
             b["done"] = True
+            if bead.get("parent"):
+                b["epic"] = bead["parent"]
             ws.save(sid, b)
-            msgs.append(f"✓ {ws.short(b['bead'])} closed · this session is done")
-            ctxs.append(f"This session's bead {b['bead']} is closed, so the session's work is done. "
-                        "Finish the close-out (in a worktree space, run end-session once the work "
-                        "is merged or pushed), then tell the user to type /exit and start the next "
-                        "bead from the workbench launcher.")
+            lines, ctx = epic_closeout(root, bead)
+            msgs.append("\n".join([f"✓ {ws.short(b['bead'])} closed · this session is done"] + lines))
+            ctxs.append(ctx)
 
     for i in claimed:
         if b and i == b["bead"] and not b.get("done"):
@@ -151,6 +226,10 @@ def post_tool_use(h):
             break
         closed_note = ", which is closed" if b.get("done") else ""
         advice = "; starting fresh is recommended, since this session's bead is done" if b.get("done") else ""
+        if b.get("done") and b.get("epic") and bead.get("parent") == b["epic"]:
+            advice = ("; continuing here is recommended, since it is the next bead in the same "
+                      "epic and this session's context carries over (if the user already chose to "
+                      "carry on here, just run it)")
         msgs.append(f"→ claimed {ws.short(i)} while this session is on {ws.short(b['bead'])}")
         ctxs.append(f"You just claimed {i}: {bead.get('title') or ''}, but this session is on "
                     f"{b['bead']}: {b.get('title') or ''}{closed_note}. "

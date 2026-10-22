@@ -44,10 +44,34 @@ What the user said:
    - Claude then tells you to type `/exit` and start the next bead from the launcher, in a fresh
      session with a fresh context.
 
+   - **When the bead belongs to an epic** (its direct parent), the close-out shows what is left in
+     that epic, so you can carry on in the same train of thought while this session's context is
+     fresh, instead of stopping at a fraction of what matters:
+
+     ```
+     ✓ e1 closed · this session is done
+       invoice sync: 2 of 10 done
+       next here:  e4  NOW P3  Match invoices to POs by supplier ref
+                   e3  P1  Flag invoices with no matching PO
+       in another session:  e5  Import supplier refs
+     ```
+
+     `N of M` counts every child, shelved ones too, so the total doesn't shrink as work is put
+     aside. "Next here" is the epic's open beads in the work screen's order (NOW, NEXT, the rest;
+     priority within), at most five, leaving out epics, icebox beads and blocked ones (a blocker
+     outside the epic counts as still blocking). Beads in progress are listed under "in another
+     session", never offered. Nothing from outside the epic is shown. Claude gets the same list,
+     reads the closed bead's notes and the epic's description, and says so if they name a different
+     next step. If you pick one, Claude claims it and moves the session onto it with `wb-focus`;
+     otherwise it finishes the close-out as above. When every bead in the epic is closed, it says
+     the epic looks finished and offers to close it. A bead with no epic gets none of this: that work
+     is over, and the next session starts fresh.
+
    Workbench can't shut the session itself: as far as the Claude Code docs show, no hook can end an
    interactive session or clear its context. So the session says it's done, and you close it.
    If Claude claims another bead in a session whose bead is done, it still asks "continue here or
-   start fresh", and recommends starting fresh.
+   start fresh", and recommends starting fresh, unless the bead is in the same epic as the closed
+   one: then it recommends continuing here, since the context carries over.
 6. **The session is named after the bead,** so `claude --resume` lists it by bead rather than by a
    generated label.
 
@@ -146,9 +170,12 @@ reading the hook JSON on stdin.
     `additionalContext` telling Claude the session's bead is closed. It should finish the close-out
     (`end-session` in a worktree space, once the work is merged or pushed), then tell the user to
     `/exit` and start the next bead from the launcher. Also return `systemMessage: "✓ <short id>
-    closed · this session is done"`.
+    closed · this session is done"`. A bead with a parent also records `epic` in the binding, and
+    both messages carry the epic's close-out (item 5): `bd list --parent <epic> --all` and `bd show
+    <epic>`, about 2s on a big store. If bd can't list the children, the plain close-out stands.
   - A claim in a session whose binding is `done`: the same ask as a different bead, saying the
-    session's bead is closed and recommending start fresh.
+    session's bead is closed and recommending start fresh (continuing here when the bead is in
+    the binding's `epic`).
   - A claim counts only when `bd show` reports the bead in progress **and** assigned to you
     (`$BEADS_ACTOR`, else `git user.name`, else `$USER`, as bd resolves it). A bead someone else
     holds is in progress too, and `bd update … --claim 2>&1 | tail` hides bd's refusal.

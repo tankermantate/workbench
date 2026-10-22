@@ -180,6 +180,84 @@ out="$(ptu o2 'bd update acme-q9z --claim')"
 assert_contains "the ask names wb-focus by its full path" "$(printf '%s' "$out" | pctx)" "$REPO/bin/wb-focus acme-q9z"
 unset BEADS_ACTOR
 
+# --- close-out names what is left in the bead's epic, to keep the flow going
+python3 - "$S/.beads/fake.json" <<'EOF'
+import json, sys
+d = json.load(open(sys.argv[1]))
+kid = lambda i, title, **kw: {**dict(id=i, title=title, parent="acme-ep", priority=2, status="open"), **kw}
+d += [
+  {"id": "acme-ep", "title": "Epic: invoice sync", "status": "open", "issue_type": "epic",
+   "description": "Match supplier invoices to purchase orders."},
+  kid("acme-e1", "Invoices without a PO number", status="in_progress"),
+  kid("acme-e2", "Already shipped", status="closed"),
+  kid("acme-e3", "Flag invoices with no matching PO", priority=1),
+  kid("acme-e4", "Match invoices to POs by supplier ref", priority=3, labels=["wave:1"]),
+  kid("acme-e5", "Import supplier refs", status="in_progress", assignee="Other Person"),
+  kid("acme-e6", "Someday: OCR the paper ones", labels=["icebox"]),
+  kid("acme-e7", "After the audit", status="deferred"),
+  kid("acme-e8", "Waits on the bank", status="blocked"),
+  kid("acme-e9", "Waits on e3", dependencies=[{"issue_id": "acme-e9", "depends_on_id": "acme-e3", "type": "blocks"}]),
+  kid("acme-ea", "Sub-epic: credit notes", issue_type="epic"),
+  kid("acme-eb", "Credit note numbering", status="in_progress"),
+  {"id": "acme-zz", "title": "Not in the epic", "status": "open", "priority": 0},
+  {"id": "acme-s1", "title": "Last one standing", "parent": "acme-ep2", "status": "in_progress"},
+  {"id": "acme-s2", "title": "Done before", "parent": "acme-ep2", "status": "closed"},
+  {"id": "acme-ep2", "title": "Small epic", "status": "open", "issue_type": "epic"},
+]
+json.dump(d, open(sys.argv[1], "w"))
+EOF
+printf '%s' '{"bead":"acme-e1","title":"Invoices without a PO number","root":"'"$S"'","since":"x","done":false,"named":null}' > "$WB_STATE_DIR/sessions/e1.json"
+setstatus acme-e1 closed
+out="$(ptu e1 'bd close acme-e1')"; m="$(printf '%s' "$out" | msg)"; c="$(printf '%s' "$out" | pctx)"
+assert_eq "epic close-out: the epic's next work, in list order, under the done line" "$m" \
+"✓ e1 closed · this session is done
+  invoice sync: 2 of 11 done
+  next here:  e4  NOW P3  Match invoices to POs by supplier ref
+              e3  P1  Flag invoices with no matching PO
+  in another session:  e5  Import supplier refs
+                       eb  Credit note numbering"
+assert_not_contains "epic close-out: nothing from outside the epic" "$m" "zz"
+printf '%s' '{"bead":"acme-e1","title":"x","root":"'"$S"'","since":"x","done":false,"named":null}' > "$WB_STATE_DIR/sessions/e3.json"
+python3 - "$S/.beads/fake.json" <<'PY'
+import json, sys
+d = json.load(open(sys.argv[1]))
+for b in d:
+    if b["id"] == "acme-ep": b["title"] = "Epic: make the supplier ledger and the bank agree on what is owed"
+json.dump(d, open(sys.argv[1], "w"))
+PY
+assert_contains "epic close-out: a long epic name is cut" "$(ptu e3 'bd close acme-e1' | msg)" "  make the supplier ledger and the bank a…: 2 of 11 done"
+assert_contains "epic close-out: Claude gets the picks by full id" "$c" "acme-e4: Match invoices to POs by supplier ref"
+assert_contains "epic close-out: Claude checks the notes for a different next step" "$c" "notes"
+assert_contains "epic close-out: Claude gets the epic's description" "$c" "Match supplier invoices to purchase orders."
+assert_contains "epic close-out: /exit only once they are done for now" "$c" "If they are done for now: Finish the close-out"
+assert_contains "epic close-out: the binding remembers the epic" "$(binding e1)" '"epic": "acme-ep"'
+setstatus acme-e3 in_progress
+out="$(BEADS_ACTOR=Me ptu e1 'bd update acme-e3 --claim')"
+assert_contains "claiming the epic's next bead: continuing here is recommended" "$(printf '%s' "$out" | pctx)" "continuing here is recommended"
+assert_not_contains "claiming the epic's next bead: not told to start fresh" "$(printf '%s' "$out" | pctx)" "starting fresh is recommended"
+
+printf '%s' '{"bead":"acme-s1","title":"Last one standing","root":"'"$S"'","since":"x","done":false,"named":null}' > "$WB_STATE_DIR/sessions/e2.json"
+setstatus acme-s1 closed
+out="$(ptu e2 'bd close acme-s1')"
+assert_eq "epic close-out: the last bead says the epic looks done" "$(printf '%s' "$out" | msg)" \
+"✓ s1 closed · this session is done
+  Small epic: 2 of 2 done · the epic looks finished"
+assert_contains "epic close-out: Claude offers to close the epic" "$(printf '%s' "$out" | pctx)" "bd close acme-ep2"
+
+python3 - "$S/.beads/fake.json" <<'PY'
+import json, sys
+d = json.load(open(sys.argv[1]))
+d += [{"id": "acme-ep3", "title": "Third epic", "status": "open", "issue_type": "epic"},
+      {"id": "acme-t1", "title": "Mine", "parent": "acme-ep3", "status": "closed"},
+      {"id": "acme-t2", "title": "Theirs", "parent": "acme-ep3", "status": "in_progress"}]
+json.dump(d, open(sys.argv[1], "w"))
+PY
+printf '%s' '{"bead":"acme-t1","title":"Mine","root":"'"$S"'","since":"x","done":false,"named":null}' > "$WB_STATE_DIR/sessions/e4.json"
+assert_eq "epic close-out: the rest in another session, so nothing called shelved" "$(ptu e4 'bd close acme-t1' | msg)" \
+"✓ t1 closed · this session is done
+  Third epic: 1 of 2 done
+  in another session:  t2  Theirs"
+
 assert_eq "failed tool: silent" "$(ptu p6 'bd update acme-x1y --claim' '' 1)" ""
 assert_eq "create without --claim: silent" "$(ptu p6 'bd create --silent --title t' 'acme-q9z')" ""
 assert_eq "no space root: silent" "$(env -u WB_SPACE_ROOT bash -c "$(declare -f ptu j); HOOK='$HOOK'; ptu p7 'bd update acme-x1y --claim'")" ""

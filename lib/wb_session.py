@@ -3,7 +3,7 @@ session hooks (bin/wb-session-hook), wb-focus and the status line segment
 (wb-statusline-bead). Spec: docs/specs/2026-10-21-session-bead-design.md
 
   $WB_STATE_DIR/sessions/<session_id>.json   (default ~/.cache/workbench)
-  {"bead", "title", "root", "since", "done", "named"}
+  {"bead", "title", "root", "since", "done", "named", "epic"}   (epic: set at close-out when the bead has a parent)
 
 The status line runs after every reply, so it reads this file and nothing
 else; the title is cached here when a session is bound so it never needs bd.
@@ -118,6 +118,37 @@ def show(root, bead_id):
     if isinstance(data, list):
         data = data[0] if data else None
     return data if isinstance(data, dict) and data.get("id") else None
+
+
+def children(root, parent_id):
+    """Every bead whose direct parent is PARENT_ID, closed ones too, or None when bd can't say."""
+    rc, out = run_bd(root, ["list", "--parent", parent_id, "--all", "-n", "0", "--json"], READ_TIMEOUT)
+    if rc != 0:
+        return None
+    start = re.search(r"^\[", out, re.M)
+    if not start:
+        return None
+    try:
+        data = json.loads(out[start.start():])
+    except ValueError:
+        return None
+    if not isinstance(data, list):
+        return None
+    # direct children only: one level, as on the work screen
+    return [b for b in data if isinstance(b, dict) and b.get("parent") == parent_id]
+
+
+def section(b):
+    """NOW / NEXT / -, from the wave labels, as in wb-backlog."""
+    waves = [int(l[5:]) for l in (b.get("labels") or []) if re.fullmatch(r"wave:\d+", str(l))]
+    return {1: "NOW", 2: "NEXT"}.get(min(waves) if waves else None, "-")
+
+
+def ordered(beads):
+    """The work screen's order (wb-backlog): NOW, NEXT, the rest; priority within each."""
+    rank = {"NOW": 0, "NEXT": 1}
+    prio = lambda b: b["priority"] if isinstance(b.get("priority"), int) else 9
+    return sorted(beads, key=lambda b: (rank.get(section(b), 2), prio(b), str(b.get("id", ""))))
 
 
 def actor(root):
