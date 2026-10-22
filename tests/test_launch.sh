@@ -104,6 +104,24 @@ out="$("$REPO/bin/wb-ui" filter-work "$T/start" 1 'wave')"
 assert_eq "filter-work: section headers give way to the count while searching" "$(rows "$out")" \
   "new:- msg: open:acme-a2 open:acme-a1 open:acme-b1 "
 
+# icebox: its own section, last; an idle claim says how long
+mkstore "$T/ice"; mkdir -p "$T/iceui"
+python3 - "$T/ice/.beads/fake.json" <<'EOF3'
+import json, sys, datetime
+ago = lambda d: (datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(days=d, hours=1)).strftime("%Y-%m-%dT%H:%M:%SZ")
+json.dump([
+  {"id": "ice-1", "title": "Someday", "status": "open", "priority": 0, "labels": ["icebox"]},
+  {"id": "ice-2", "title": "Live open", "status": "open", "priority": 1},
+  {"id": "ice-3", "title": "Forgotten tab", "status": "in_progress", "priority": 2, "updated_at": ago(23)},
+], open(sys.argv[1], "w"))
+EOF3
+printf 'Ice\t-\t%s\ttrue\t1\tx\tice\t-\t-\t0\n' "$T/ice" > "$T/iceui/spaces.tsv"
+out="$("$REPO/bin/wb-ui" render-work "$T/iceui" 1)"
+assert_eq "render-work: icebox under its own divider, last" "$(rows "$out")" "new:- sep: open:ice-2 claimed:ice-3 sep: open:ice-1 "
+assert_contains "render-work: the icebox divider" "$out" "── icebox ──"
+assert_contains "render-work: an idle claim says how long, dim" "$(row "$out" ice-3)" $'Forgotten tab  \e[2midle 23d\e[0m'
+assert_not_contains "render-work: a fresh row has no idle tag" "$(row "$out" ice-2)" "idle"
+
 # fallback menu: Acme, then the first bead (item 2; item 1 is ✦ something new)
 out="$(printf '1\n2\n' | WB_NO_FZF=1 L)"
 assert_contains "menu screen 1 shows counts" "$out" "NOW 2 · NEXT 1 · claimed 1"

@@ -31,6 +31,9 @@ Add the line `install.sh` prints to the **end** of `~/.zshrc`. Re-running `insta
 - **`launch`:** brings the launcher back from any shell.
 - **A bead already claimed in a worktree:** the launcher offers to resume it there
   (`claude --continue`).
+- **Labels the work screen reads:** `wave:1` and `wave:2` put a bead under NOW and NEXT;
+  `icebox` puts it in a last section and out of the open count, whatever its wave. A claimed bead
+  untouched for over 7 days shows `idle 23d`, so a forgotten session stands out.
 
 It stays closed inside Claude, in a nested shell, in an IDE's terminal (only Apple Terminal and
 terminals listed in `[launcher].terminals` count), and when `WORKBENCH_NO_LAUNCH=1` is set.

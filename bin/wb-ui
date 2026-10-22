@@ -136,7 +136,7 @@ def print_work(tmp, work, query):
     for r in rows:
         if waves and r[4] != current:
             current = r[4]
-            print(f"sep\t\t-\t── {current if current != '-' else 'everything else'} ──\t")
+            print(f"sep\t\t-\t── {SECTIONS.get(current, current)} ──\t")
         print_row(r, (), layout)
 
 
@@ -171,6 +171,7 @@ def print_matches(tmp, rows, pats, layout):
 
 
 EPIC_W, DIM = 20, "\033[2m"
+SECTIONS = {"-": "everything else", "ICEBOX": "icebox"}  # dividers; NOW and NEXT as they are
 
 
 def epic_cell(ptitle, pats):
@@ -187,12 +188,13 @@ def epic_cell(ptitle, pats):
 
 
 def print_row(r, pats, layout):
-    bid, short, mark, prio, _sect, title, _parent, wt, ptitle = r
+    bid, short, mark, prio, _sect, title, _parent, wt, ptitle, idle = r
     kind = "claimed" if mark == "◐" else "open"
     pad = " " * (layout["idw"] - len(short))  # padded outside the highlight, so columns stay aligned
     epic = f"{epic_cell(ptitle, pats)}  " if layout["epics"] else ""
     print(f"{kind}\t{bid}\t{wt}\t\t{mark} {wb_search.highlight(pats, short)}{pad} {prio}  "
-          f"{epic}{wb_search.highlight(pats, title)}")
+          f"{epic}{wb_search.highlight(pats, title)}"
+          + ("" if idle == "-" else f"  {DIM}idle {idle}d{wb_search.END}"))
 
 
 def main(argv):

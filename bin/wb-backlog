@@ -3,8 +3,8 @@
 
   wb-backlog list ROOT [--snapshot FILE]
       TSV, best first: id, short id, mark (○ open / ◐ in progress), P<n>,
-      section (NOW / NEXT / -), title, parent, worktree from the claim notes,
-      the parent's title.
+      section (NOW / NEXT / - / ICEBOX), title, parent, worktree from the claim
+      notes, the parent's title, days idle (a claim untouched for over IDLE_DAYS, or -).
       Exits non-zero when there is nothing to list; the code says why (STATES).
   wb-backlog summary ROOT      one line of counts for screen 1; always exits 0
   wb-backlog claimed ROOT PATH the bead whose current claim note names the
@@ -14,9 +14,10 @@
       the preview pane for one bead, from a snapshot, with QUERY's words
       highlighted in the title and description (lib/wb_search.py)
 
-Order: wave:1, then wave:2, then everything else; priority within each.
-Closed and deferred beads are hidden.
+Order: wave:1, then wave:2, then everything else, then the icebox (label
+`icebox`, whatever its wave); priority within each. Closed and deferred beads are hidden.
 """
+import datetime
 import json
 import os
 import re
@@ -31,6 +32,8 @@ import wb_search  # noqa: E402  (lives in lib/; realpath, since install.sh links
 TIMEOUT = float(os.environ.get("WB_BD_TIMEOUT", "10"))  # counts fill in after the screen draws; a big store under parallel load takes ~3s
 BD = os.environ.get("WB_BD", "bd")
 HIDDEN = {"closed", "deferred"}
+ICEBOX = "icebox"
+IDLE_DAYS = 7  # a claim untouched this long is likely a forgotten tab
 WORKTREE_RE = re.compile(r"worktree at (/[^)\n]+)\)")  # paths may contain spaces
 # state -> (list exit code, summary text)
 STATES = {
@@ -120,6 +123,8 @@ def live(data):
 
 
 def section(b):
+    if ICEBOX in (b.get("labels") or []):
+        return "ICEBOX"
     waves = [int(l[5:]) for l in (b.get("labels") or []) if re.fullmatch(r"wave:\d+", str(l))]
     return {1: "NOW", 2: "NEXT"}.get(min(waves) if waves else None, "-")
 
@@ -130,8 +135,20 @@ def priority(b):
 
 
 def ordered(beads):
-    rank = {"NOW": 0, "NEXT": 1}
+    rank = {"NOW": 0, "NEXT": 1, "ICEBOX": 3}
     return sorted(beads, key=lambda b: (rank.get(section(b), 2), priority(b), str(b.get("id", ""))))
+
+
+def idle(b):
+    """Whole days since a claimed bead was last touched, when that's over IDLE_DAYS."""
+    if b.get("status") != "in_progress":
+        return None
+    try:
+        t = datetime.datetime.fromisoformat(str(b.get("updated_at")).replace("Z", "+00:00"))
+        days = (datetime.datetime.now(datetime.timezone.utc) - t).days
+    except (TypeError, ValueError):
+        return None
+    return days if days > IDLE_DAYS else None
 
 
 def clean(v):
@@ -159,7 +176,7 @@ def cmd_list(root, snapshot=None):
         prio = f"P{b['priority']}" if isinstance(b.get("priority"), int) else "P-"
         print("\t".join(clean(x) for x in (bid, bid.rsplit("-", 1)[-1], mark, prio,
                                             section(b), b.get("title"), b.get("parent"),
-                                            worktree(b), titles.get(b.get("parent")))))
+                                            worktree(b), titles.get(b.get("parent")), idle(b))))
     return 0
 
 
@@ -181,13 +198,16 @@ def cmd_summary(root):
         print(STATES[state][1])
         return 0
     beads = live(data)
+    ice = sum(section(b) == "ICEBOX" for b in beads)
     claimed = sum(b.get("status") == "in_progress" for b in beads)
+    stale = sum(idle(b) is not None for b in beads)
+    claims = f"claimed {claimed}" + (f" ({stale} idle)" if stale else "")
     now = sum(section(b) == "NOW" for b in beads)
     nxt = sum(section(b) == "NEXT" for b in beads)
     if now or nxt:
-        print(f"NOW {now} · NEXT {nxt} · claimed {claimed}")
+        print(f"NOW {now} · NEXT {nxt} · {claims}" + (f" · icebox {ice}" if ice else ""))
     else:
-        print(f"open {len(beads)} · claimed {claimed}")
+        print(f"open {len(beads) - ice} · " + (f"icebox {ice} · " if ice else "") + claims)
     return 0
 
 

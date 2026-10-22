@@ -12,9 +12,9 @@ assert_eq "list ok exits 0" "$rc" "0"
 assert_eq "order: NOW by priority, NEXT, then the rest by priority; deferred+closed hidden" \
   "$(printf '%s\n' "$out" | cut -f1 | tr '\n' ' ')" "acme-a2 acme-a1 acme-b1 acme-c1 acme-e1 acme-c2 "
 assert_eq "row fields" "$(printf '%s\n' "$out" | head -1)" \
-  "acme-a2	a2	○	P1	NOW	High wave-1	acme-e1	-	Epic: tidy the shop"
+  "acme-a2	a2	○	P1	NOW	High wave-1	acme-e1	-	Epic: tidy the shop	-"
 assert_eq "in-progress is ◐ with its worktree from notes" "$(printf '%s\n' "$out" | tail -1)" \
-  "acme-c2	c2	◐	P3	-	Claimed elsewhere	-	/tmp/wb-fixture-wt/acme-x	-"
+  "acme-c2	c2	◐	P3	-	Claimed elsewhere	-	/tmp/wb-fixture-wt/acme-x	-	-"
 assert_eq "claimed: the bead whose current claim names the worktree" \
   "$("$WB" claimed "$T/store" /tmp/wb-fixture-wt/acme-x)" "acme-c2"
 "$WB" claimed "$T/store" /tmp/wb-fixture-wt/other >/dev/null; assert_eq "claimed: none exits 1" "$?" "1"
@@ -84,6 +84,34 @@ start=$SECONDS; out="$(WB_BD="$T/bd-daemon" "$WB" summary "$T/store")"; took=$((
 assert_eq "hang with a detached child is unavailable" "$out" "(bd unavailable)"
 if [ "$took" -lt 5 ]; then ok "a detached child does not hold the read open (${took}s)"; else bad "detached child held the read for ${took}s"; fi
 
+# icebox beads go last, under their own section, and don't count as open work;
+# a claim untouched for over 7 days is idle (likely a forgotten tab)
+reset_bd; python3 - "$FAKE_BD_DIR/stdout" <<'EOF'
+import json, sys, datetime
+ago = lambda d: (datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(days=d, hours=1)).strftime("%Y-%m-%dT%H:%M:%SZ")
+json.dump([
+  {"id": "ice-1", "title": "Someday", "status": "open", "priority": 0, "labels": ["icebox", "wave:1"], "updated_at": ago(1)},
+  {"id": "ice-2", "title": "Live open", "status": "open", "priority": 1, "updated_at": ago(1)},
+  {"id": "ice-3", "title": "Forgotten tab", "status": "in_progress", "priority": 2, "updated_at": ago(23)},
+  {"id": "ice-4", "title": "Live claim", "status": "in_progress", "priority": 3, "updated_at": ago(2)},
+  {"id": "ice-5", "title": "Old but not claimed", "status": "open", "priority": 4, "updated_at": ago(40)},
+  {"id": "ice-6", "title": "A week to the day", "status": "in_progress", "priority": 4, "updated_at": ago(7)},
+], open(sys.argv[1], "w"))
+EOF
+out="$("$WB" list "$T/store")"
+assert_eq "icebox: last, in its own section, even with a wave label" "$(printf '%s\n' "$out" | cut -f1,5 | tr '\t\n' ': ')" \
+  "ice-2:- ice-3:- ice-4:- ice-5:- ice-6:- ice-1:ICEBOX "
+assert_eq "idle: days since a claim was touched, past 7" "$(printf '%s\n' "$out" | cut -f1,10 | tr '\t\n' ': ')" \
+  "ice-2:- ice-3:23 ice-4:- ice-5:- ice-6:- ice-1:- "
+assert_eq "summary: icebox apart from open, idle claims counted" "$("$WB" summary "$T/store")" "open 5 · icebox 1 · claimed 3 (1 idle)"
+reset_bd; python3 - "$FX/waves.json" "$FAKE_BD_DIR/stdout" <<'EOF'
+import json, sys
+d = json.load(open(sys.argv[1]))
+d.append({"id": "acme-i1", "title": "Iced", "status": "open", "priority": 2, "labels": ["icebox"]})
+json.dump(d, open(sys.argv[2], "w"))
+EOF
+assert_eq "summary with waves: icebox at the end" "$("$WB" summary "$T/store")" "NOW 2 · NEXT 1 · claimed 1 · icebox 1"
+
 reset_bd
 "$WB" list "$T/nostore" >/dev/null; rc=$?
 assert_eq "no .beads exits 21" "$rc" "21"
@@ -129,7 +157,7 @@ cat > "$FAKE_BD_DIR/stdout" <<EOF
 [{"id":"bee-9","title":"tab\there \$(touch $T/pwned) \"q\"\nnext","status":"open","priority":1,"description":"\$(touch $T/pwned)"}]
 EOF
 out="$("$WB" list "$T/store" --snapshot "$T/snap2.json")"
-assert_eq "hostile title is cleaned into one row of 9 fields" "$(printf '%s\n' "$out" | awk -F'\t' '{print NR":"NF}')" "1:9"
+assert_eq "hostile title is cleaned into one row of 10 fields" "$(printf '%s\n' "$out" | awk -F'\t' '{print NR":"NF}')" "1:10"
 prev="$("$WB" preview "$T/snap2.json" bee-9)"
 assert_contains "hostile description shown literally" "$prev" "\$(touch $T/pwned)"
 if [ ! -e "$T/pwned" ]; then ok "hostile title is cleaned and not executed"; else bad "something executed the title"; fi
