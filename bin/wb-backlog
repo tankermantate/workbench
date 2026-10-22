@@ -7,7 +7,8 @@
       Exits non-zero when there is nothing to list; the code says why (STATES).
   wb-backlog summary ROOT      one line of counts for screen 1; always exits 0
   wb-backlog claimed ROOT PATH the bead whose current claim note names the
-      worktree at PATH (end-session's way back to the bead); exits 1 if none
+      worktree at PATH (end-session's way back to the bead), the one updated
+      last when several do; exits 1 if none
   wb-backlog preview FILE ID [QUERY]
       the preview pane for one bead, from a snapshot, with QUERY's words
       highlighted in the title and description (lib/wb_search.py)
@@ -163,12 +164,13 @@ def cmd_list(root, snapshot=None):
 def cmd_claimed(root, path):
     state, data = read(root)
     want = os.path.realpath(path)
-    for b in data or []:
-        wt = worktree(b)
-        if wt != "-" and os.path.realpath(wt) == want:
-            print(b.get("id", ""))
-            return 0
-    return 1
+    hits = [b for b in data or [] if worktree(b) != "-" and os.path.realpath(worktree(b)) == want]
+    if not hits:
+        return 1
+    # after "continue here" (wb-focus) the old and the new bead both name the
+    # worktree; the new one was noted last, so it was updated last
+    print(max(hits, key=lambda b: str(b.get("updated_at") or "")).get("id", ""))
+    return 0
 
 
 def cmd_summary(root):

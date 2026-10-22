@@ -111,6 +111,15 @@ assert_eq "claim notes: the newest worktree, spaces kept" \
   "$("$WB" list "$T/store" | cut -f8)" "/x/wt dir/new"
 
 reset_bd
+cat > "$FAKE_BD_DIR/stdout" <<'EOF'
+[{"id":"bee-old","title":"Old","status":"in_progress","updated_at":"2026-10-01T10:00:00Z",
+  "notes":"Branch: feat/a (worktree at /x/wt)"},
+ {"id":"bee-new","title":"New","status":"in_progress","updated_at":"2026-10-20T10:00:00Z",
+  "notes":"Branch: feat/a (worktree at /x/wt)"}]
+EOF
+assert_eq "claimed: two beads name the worktree, the newest update wins" "$("$WB" claimed "$T/store" /x/wt)" "bee-new"
+
+reset_bd
 cat > "$FAKE_BD_DIR/stdout" <<EOF
 [{"id":"bee-9","title":"tab\there \$(touch $T/pwned) \"q\"\nnext","status":"open","priority":1,"description":"\$(touch $T/pwned)"}]
 EOF

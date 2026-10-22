@@ -55,6 +55,39 @@ anyway). `--force` skips those checks and keeps the branch. A merged branch is d
 unmerged one is kept. Either way it appends a note to the session's bead saying what happened,
 without closing it: merged isn't the same as done.
 
+## While you work
+
+A session the launcher (or `new-session`) starts knows which bead it's on:
+
+- **Your status line can show it.** `wb-statusline-bead` reads the status line's JSON on stdin and
+  prints `◆ x1y <title>`, `✓ x1y done · close this session`, `◇ no bead`, or nothing outside a
+  workbench session. Call it from your own status line script:
+
+  ```bash
+  input=$(cat)
+  bead=$(printf '%s' "$input" | wb-statusline-bead)
+  printf '%s %s\n' "$bead" "$the_rest_of_your_line"
+  ```
+
+  With no status line of your own, point `statusLine` in your Claude settings at
+  `wb-statusline-bead` directly.
+- **Claude gets the goal back after compaction or resume:** the bead's title, description and
+  acceptance criteria.
+- **`✦ something new` picks up its bead.** The first bead Claude claims in the session becomes the
+  session's bead.
+- **Claiming a second bead asks first.** Claude asks whether to continue in this session or start
+  fresh. Start fresh puts the bead back to open, for you to start from the launcher in a new tab.
+- **Closing the bead ends the session's job.** Claude finishes the close-out (`end-session` in a
+  worktree space), then tells you to `/exit` and start the next bead fresh.
+- **`wb-focus`** prints this session's bead. Inside Claude, `wb-focus <id>` moves the session to
+  another bead, and `wb-focus --clear` drops it.
+
+After pulling a new workbench, rerun `./install.sh` so new commands like these are linked onto your PATH.
+
+All of this comes from hooks passed with `claude --settings` at launch. A `claude` you start by
+hand is unchanged, and nothing is written into your repos or `~/.claude`. The record of which
+session is on which bead lives in `~/.cache/workbench/sessions/`.
+
 ## Configuration
 
 Everything about your machine lives in `~/.config/workbench/spaces.toml` (or `$WORKBENCH_CONFIG`),

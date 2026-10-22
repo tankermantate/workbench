@@ -171,7 +171,12 @@ fi
 
 # ---- launch Claude on the space's account
 if [ -n "$S_CLAUDE_CONFIG" ]; then ENVS=(env "CLAUDE_CONFIG_DIR=$S_CLAUDE_CONFIG"); else ENVS=(env -u CLAUDE_CONFIG_DIR); fi
+# what the session hooks (bin/wb-session-hook) read to keep the session on its bead
+ENVS+=("WB_SPACE_ROOT=$S_ROOT" "WB_WORKTREE=$WORKTREE")
+if [ -n "$BEAD" ]; then ENVS+=("WB_BEAD=$BEAD"); fi
 CMD=(claude)
+# Without the hooks the session still starts; it just won't know its bead.
+if SETTINGS=$("$WB_HOME/bin/wb-session-hook" settings 2>/dev/null); then CMD+=(--settings "$SETTINGS"); fi
 if [ "$SAFE" -eq 0 ] && [ "$S_SAFE" != 1 ]; then CMD+=(--dangerously-skip-permissions); fi
 cd "$PROJECT"
 if [ -n "${WORKBENCH_DRY_RUN:-}" ]; then

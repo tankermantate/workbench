@@ -138,11 +138,12 @@ end-session [<worktree>]                    # remove it once the work is merged/
 
 ## Architecture Overview
 
-User guide: `README.md`. Designs: `docs/specs/` (launcher, session scripts); plans: `docs/plans/`.
+User guide: `README.md`. Designs: `docs/specs/` (launcher, session scripts, session's bead); plans: `docs/plans/`.
 
 - `shell/workbench.zsh` — the launcher (zsh, sourced at the end of `~/.zshrc`). Auto-starts once, at the first prompt, via a self-removing precmd hook; `launch` runs it by hand. Two fzf screens (space, then work), a numbered menu without fzf, then the handoff to Claude.
 - `bin/wb-spaces` (python) — reads `~/.config/workbench/spaces.toml` and prints one 13-field TSV row per space; every other piece reads spaces through it.
 - `bin/wb-backlog`, `bin/wb-ui` (python) — a space's beads through `bd`, and the fzf screen helpers.
+- `bin/wb-session-hook`, `bin/wb-focus`, `bin/wb-statusline-bead` (python) with `lib/wb_session.py` — keep a launched Claude session on its bead: hooks passed with `claude --settings`, the session→bead record in `~/.cache/workbench/sessions/`, and the status line segment.
 - `bin/new-session`, `bin/end-session` (bash) with `lib/session.sh` — worktree sessions for `worktrees = true` spaces; the space's private setup runs as `on_create` / `before_end` hooks from `spaces.toml`.
 - `prompts/*.txt` — the opening prompts handed to Claude.
 

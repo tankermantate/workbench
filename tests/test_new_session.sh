@@ -124,10 +124,12 @@ assert_eq "gh missing: still starts" "$rc" "0"
 
 # --- launching (dry run), safe, nested guard
 out="$(WORKBENCH_DRY_RUN=1 "$NS" acme dry run 2>&1)"
-assert_eq "launch: config dir for the one command, prompts off" "$(printf '%s\n' "$out" | tail -1)" \
-  "DRY-RUN: cd $W/acme-dry-run/app && env CLAUDE_CONFIG_DIR=$T/cfg claude --dangerously-skip-permissions"
+assert_contains "launch: config dir and env for the one command" "$(printf '%s\n' "$out" | tail -1)" \
+  "DRY-RUN: cd $W/acme-dry-run/app && env CLAUDE_CONFIG_DIR=$T/cfg WB_SPACE_ROOT=$A/app WB_WORKTREE=$W/acme-dry-run claude --settings "
+assert_contains "launch: prompts off" "$(printf '%s\n' "$out" | tail -1)" " --dangerously-skip-permissions"
+assert_not_contains "launch: no bead, no WB_BEAD" "$(printf '%s\n' "$out" | tail -1)" "WB_BEAD="
 out="$(WORKBENCH_DRY_RUN=1 "$NS" beta safe one 2>&1)"
-assert_contains "safe space: no config dir, prompts on" "$(printf '%s\n' "$out" | tail -1)" "env -u CLAUDE_CONFIG_DIR claude"
+assert_contains "safe space: no config dir, prompts on" "$(printf '%s\n' "$out" | tail -1)" "env -u CLAUDE_CONFIG_DIR WB_SPACE_ROOT="
 assert_not_contains "safe space: no skip flag" "$(printf '%s\n' "$out" | tail -1)" "dangerously"
 out="$(WORKBENCH_DRY_RUN=1 "$NS" acme with flag --safe 2>&1)"
 assert_not_contains "--safe: no skip flag" "$(printf '%s\n' "$out" | tail -1)" "dangerously"
@@ -187,8 +189,8 @@ out="$(WB_WORKTREES_DIR="$SW" WORKBENCH_DRY_RUN=1 "$NS" acme spaced 2>&1)"; rc=$
 assert_eq "space in path: starts" "$rc" "0"
 assert_eq "space in path: hook saw the project" "$(grep '^WB_PROJECT=' "$HOOK_OUT")" "WB_PROJECT=$SW/acme-spaced/app"
 assert_eq "space in path: redirect resolves" "$(cd "$SW/acme-spaced" && cd "$(cat .beads/redirect)" && pwd -P)" "$A/.beads"
-assert_eq "space in path: DRY-RUN line is quoted" "$(printf '%s\n' "$out" | tail -1)" \
-  "DRY-RUN: cd $(printf '%q' "$SW/acme-spaced/app") && env $(printf '%q' "CLAUDE_CONFIG_DIR=$T/cfg") claude --dangerously-skip-permissions"
+assert_contains "space in path: DRY-RUN line is quoted" "$(printf '%s\n' "$out" | tail -1)" \
+  "DRY-RUN: cd $(printf '%q' "$SW/acme-spaced/app") && env $(printf '%q' "CLAUDE_CONFIG_DIR=$T/cfg") WB_SPACE_ROOT=$A/app $(printf '%q' "WB_WORKTREE=$SW/acme-spaced") claude --settings "
 out="$(WB_WORKTREES_DIR="$SW" CLAUDECODE=1 "$NS" loc spaced too 2>&1)"
 assert_contains "space in path: nested guard's cd line is quoted" "$out" "cd $(printf '%q' "$SW/loc-spaced-too")"
 finish

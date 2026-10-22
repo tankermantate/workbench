@@ -1,0 +1,184 @@
+#!/usr/bin/env bash
+source "$(dirname "$0")/lib.sh"
+T="$(newtmp)"; trap 'rm -rf "$T"' EXIT
+HOOK="$REPO/bin/wb-session-hook"
+export WB_STATE_DIR="$T/state" FAKE_BD_LOG="$T/bd.log"
+unset WB_SPACE_ROOT WB_WORKTREE WB_BEAD CLAUDE_CODE_SESSION_ID
+S="$T/store"; mkstore "$S"
+python3 - "$S/.beads/fake.json" <<'EOF'
+import json, sys
+json.dump([
+  {"id": "acme-x1y", "title": "Fix fabric PO search", "status": "in_progress",
+   "description": "Typing fabric PO matches scattered letters.", "notes": ""},
+  {"id": "acme-ac1", "title": "With acceptance", "status": "open", "description": "d",
+   "acceptance_criteria": "Search ranks both words first."},
+  {"id": "acme-big", "title": "Big", "status": "open", "description": "x" * 5000},
+], open(sys.argv[1], "w"))
+EOF
+# j EXPR: evaluate a python expression over the JSON on stdin (d), print it
+j() { python3 -c 'import json,sys; d=json.load(sys.stdin); print(eval(sys.argv[1]))' "$1"; }
+ss() { printf '{"session_id":"%s","source":"%s"}' "$1" "$2" | "$HOOK" session-start; }
+ups() { printf '{"session_id":"%s","prompt":"hi"}' "$1" | "$HOOK" user-prompt-submit; }
+binding() { cat "$WB_STATE_DIR/sessions/$1.json" 2>/dev/null; }
+setstatus() { python3 - "$S/.beads/fake.json" "$1" "$2" <<'EOF'
+import json, sys
+p, i, st = sys.argv[1:]
+d = json.load(open(p))
+found = [b for b in d if b["id"] == i]
+if found: found[0]["status"] = st
+else: d.append({"id": i, "title": "Picked up", "status": st, "notes": ""})
+json.dump(d, open(p, "w"))
+EOF
+}
+
+# --- the command parser
+parse() { python3 -c 'import sys; sys.path.insert(0, sys.argv[1]); import wb_session; print(wb_session.parse(sys.argv[2]))' "$REPO/lib" "$1"; }
+assert_eq "parse: claim" "$(parse 'bd update acme-x1y --claim')" "[('claim', ['acme-x1y'])]"
+assert_eq "parse: cd && two ids, --status=" "$(parse 'cd /r && bd update acme-x1y acme-q9z --status=in_progress')" "[('claim', ['acme-x1y', 'acme-q9z'])]"
+assert_eq "parse: -s in_progress" "$(parse 'bd update acme-x1y -s in_progress')" "[('claim', ['acme-x1y'])]"
+assert_eq "parse: --status in_progress" "$(parse 'bd update acme-x1y --status in_progress --notes x')" "[('claim', ['acme-x1y'])]"
+assert_eq "parse: close" "$(parse 'bd close acme-x1y --reason "done"')" "[('close', ['acme-x1y'])]"
+assert_eq "parse: create --claim" "$(parse 'bd create --title t --claim')" "[('create-claim', [])]"
+assert_eq "parse: a path to bd" "$(parse '/opt/bin/bd close acme-x1y')" "[('close', ['acme-x1y'])]"
+assert_eq "parse: update without a claim" "$(parse 'bd update acme-x1y --notes x')" "[]"
+assert_eq "parse: bd text inside a description" "$(parse 'bd create --description "then bd close acme-x1y; bd update acme-x1y --claim"')" "[]"
+assert_eq "parse: bd text in an echo" "$(parse 'echo "bd update acme-x1y --claim"')" "[]"
+assert_eq "parse: junk quoting" "$(parse 'bd close "unterminated')" "[]"
+
+# --- settings
+mkdir -p "$T/wb home"; cp -R "$REPO/bin" "$REPO/lib" "$T/wb home/"
+out="$("$T/wb home/bin/wb-session-hook" settings)"
+assert_eq "settings: valid JSON with three events" "$(printf '%s' "$out" | j 'sorted(d["hooks"])')" "['PostToolUse', 'SessionStart', 'UserPromptSubmit']"
+assert_eq "settings: no statusLine" "$(printf '%s' "$out" | j '"statusLine" in d')" "False"
+assert_eq "settings: PostToolUse is for Bash" "$(printf '%s' "$out" | j 'd["hooks"]["PostToolUse"][0]["matcher"]')" "Bash"
+assert_eq "settings: commands survive a space in the path" \
+  "$(printf '%s' "$out" | j '__import__("shlex").split(d["hooks"]["SessionStart"][0]["hooks"][0]["command"])')" \
+  "['$(cd "$T" && pwd -P)/wb home/bin/wb-session-hook', 'session-start']"
+
+# --- session-start
+out="$(WB_BEAD=acme-x1y WB_SPACE_ROOT="$S" ss s1 startup)"
+ctx="$(printf '%s' "$out" | j 'd["hookSpecificOutput"]["additionalContext"]')"
+assert_contains "start: binds from WB_BEAD" "$(binding s1)" '"bead": "acme-x1y"'
+assert_contains "start: context names the bead" "$ctx" "This session serves bead acme-x1y: Fix fabric PO search."
+assert_contains "start: context has the description" "$ctx" "Typing fabric PO matches scattered letters."
+assert_contains "start: context says to ask before switching" "$ctx" "Before you start work on a different bead"
+assert_not_contains "start: no acceptance line without criteria" "$ctx" "Acceptance:"
+assert_eq "start: names the session" "$(printf '%s' "$out" | j 'd["hookSpecificOutput"]["sessionTitle"]')" "x1y Fix fabric PO search"
+assert_contains "start: remembers the name" "$(binding s1)" '"named": "x1y Fix fabric PO search"'
+
+out="$(ss s1 compact)"
+assert_contains "compact: re-injects from the binding (no WB_BEAD)" "$(printf '%s' "$out" | j 'd["hookSpecificOutput"]["additionalContext"]')" "acme-x1y"
+assert_eq "compact: no sessionTitle when already named" "$(printf '%s' "$out" | j '"sessionTitle" in d["hookSpecificOutput"]')" "False"
+
+out="$(WB_BEAD=acme-ac1 WB_SPACE_ROOT="$S" ss s2 startup)"
+assert_contains "start: acceptance criteria included" "$(printf '%s' "$out" | j 'd["hookSpecificOutput"]["additionalContext"]')" $'Acceptance: Search ranks both words first.'
+out="$(WB_BEAD=acme-big WB_SPACE_ROOT="$S" ss s3 startup)"
+assert_eq "start: description cut to 1,500" "$(printf '%s' "$out" | j 'max(len(l) for l in d["hookSpecificOutput"]["additionalContext"].splitlines())')" "1500"
+
+setstatus acme-ac1 closed
+out="$(WB_BEAD=acme-ac1 WB_SPACE_ROOT="$S" ss c1 clear)"
+assert_contains "start: a closed launch bead binds as done" "$(binding c1)" '"done": true'
+assert_contains "start: and says so" "$(printf '%s' "$out" | j 'd["hookSpecificOutput"]["additionalContext"]')" "It is closed"
+setstatus acme-ac1 open
+
+out="$(WB_SPACE_ROOT="$S" ss s4 startup)"
+assert_eq "start: no bead, no output" "$out" ""
+[ -z "$(binding s4)" ] && ok "start: no bead, no file" || bad "start: no bead wrote a file"
+
+start=$SECONDS; out="$(FAKE_BD_SLEEP=5 WB_BEAD=acme-x1y WB_SPACE_ROOT="$S" ss s5 startup)"; rc=$?; took=$((SECONDS - start))
+assert_eq "start: bd hangs → silent, exit 0" "$out:$rc" ":0"
+if [ "$took" -lt 3 ]; then ok "start: hang cut off (${took}s)"; else bad "start: hang took ${took}s"; fi
+
+touch -t "$(date -v-31d +%Y%m%d%H%M)" "$WB_STATE_DIR/sessions/s2.json"
+touch -t "$(date -v-29d +%Y%m%d%H%M)" "$WB_STATE_DIR/sessions/s3.json"
+ss s9 startup >/dev/null
+[ ! -e "$WB_STATE_DIR/sessions/s2.json" ] && ok "prune: 31 days old is gone" || bad "prune: 31-day file kept"
+[ -e "$WB_STATE_DIR/sessions/s3.json" ] && ok "prune: 29 days old stays" || bad "prune: 29-day file removed"
+
+# --- user-prompt-submit
+printf '%s' '{"bead":"acme-x1y","title":"Fix fabric PO search","root":"'"$S"'","since":"x","done":false,"named":null}' > "$WB_STATE_DIR/sessions/u1.json"
+assert_eq "prompt: names a session not yet named" "$(ups u1 | j 'd["hookSpecificOutput"]["sessionTitle"]')" "x1y Fix fabric PO search"
+assert_eq "prompt: then nothing" "$(ups u1)" ""
+assert_eq "prompt: no binding, nothing" "$(ups u9)" ""
+
+# --- post-tool-use
+# ptu SID COMMAND [STDOUT] [IS_ERROR]
+ptu() { python3 -c 'import json,sys; print(json.dumps({"session_id":sys.argv[1],"tool_name":"Bash","tool_input":{"command":sys.argv[2]},"tool_response":{"stdout":sys.argv[3],"stderr":"","is_error":sys.argv[4]=="1"}}))' "$1" "$2" "${3:-}" "${4:-0}" | "$HOOK" post-tool-use; }
+msg() { j 'd.get("systemMessage","")'; }
+pctx() { j 'd.get("hookSpecificOutput",{}).get("additionalContext","")'; }
+export WB_SPACE_ROOT="$S"
+setstatus acme-q9z in_progress
+
+out="$(ptu p1 'bd update acme-x1y --claim')"
+assert_eq "pick up: notice" "$(printf '%s' "$out" | msg)" "→ this session is now on x1y Fix fabric PO search"
+assert_contains "pick up: binds" "$(binding p1)" '"bead": "acme-x1y"'
+mkdir -p "$T/wt"; git -C "$T/wt" init -q -b feat/x; : > "$FAKE_BD_LOG"
+WB_WORKTREE="$T/wt" ptu p2 'bd update acme-x1y --claim' >/dev/null
+assert_contains "pick up: claim note in a worktree" "$(cat "$FAKE_BD_LOG")" "update acme-x1y --append-notes Branch: feat/x (worktree at $T/wt)"
+ptu p3 'bd create --silent --claim --title "Picked up"' 'acme-q9z' >/dev/null
+assert_contains "pick up: from create --claim (--silent)" "$(binding p3)" '"bead": "acme-q9z"'
+ptu p4 'bd create --claim --title "Picked up"' '✓ Created issue: acme-q9z' >/dev/null
+assert_contains "pick up: from create --claim (Created issue:)" "$(binding p4)" '"bead": "acme-q9z"'
+assert_eq "same bead: silent" "$(ptu p1 'bd update acme-x1y --claim')" ""
+
+before="$(binding p1)"; out="$(ptu p1 'bd update acme-q9z --claim')"
+assert_eq "switch: notice" "$(printf '%s' "$out" | msg)" "→ claimed q9z while this session is on x1y"
+assert_contains "switch: continue-here command" "$(printf '%s' "$out" | pctx)" "wb-focus acme-q9z"
+assert_contains "switch: start-fresh command" "$(printf '%s' "$out" | pctx)" "bd update acme-q9z --status open"
+assert_eq "switch: binding unchanged" "$(binding p1)" "$before"
+setstatus acme-big open
+assert_eq "claim that didn't take: silent" "$(ptu p1 'bd update acme-big --claim')" ""
+assert_eq "claim that didn't take: no pick up" "$(ptu p5 'bd update acme-big --claim'; binding p5)" ""
+
+assert_eq "close refused: silent" "$(ptu p1 'bd close acme-x1y')" ""
+assert_contains "close refused: not done" "$(binding p1)" '"done": false'
+setstatus acme-x1y closed
+out="$(ptu p1 'bd close acme-x1y --reason "shipped"')"
+assert_eq "close: notice" "$(printf '%s' "$out" | msg)" "✓ x1y closed · this session is done"
+assert_contains "close: tells Claude to say /exit" "$(printf '%s' "$out" | pctx)" "/exit"
+assert_contains "close: marks done" "$(binding p1)" '"done": true'
+setstatus acme-x1y in_progress
+assert_eq "close of another bead: silent" "$(ptu p3 'bd close acme-x1y')" ""
+out="$(ptu p1 'bd update acme-q9z --claim')"
+assert_contains "claim after done: recommends fresh" "$(printf '%s' "$out" | pctx)" "starting fresh is recommended"
+assert_contains "claim after done: says it's closed" "$(printf '%s' "$out" | pctx)" "which is closed"
+
+printf '%s' '{"bead":"acme-x1y","title":"Fix fabric PO search","root":"'"$S"'","since":"x","done":false,"named":null}' > "$WB_STATE_DIR/sessions/p9.json"
+setstatus acme-x1y closed
+out="$(ptu p9 'bd close acme-x1y && bd update acme-q9z --claim')"
+assert_contains "close and claim in one command: both notices" "$(printf '%s' "$out" | msg)" $'✓ x1y closed · this session is done\n→ claimed q9z while this session is on x1y'
+assert_contains "close and claim in one command: still asks" "$(printf '%s' "$out" | pctx)" "starting fresh is recommended"
+setstatus acme-x1y in_progress
+
+# a bead someone else holds is in_progress too; claiming it changed nothing
+setstatus acme-oth in_progress
+python3 - "$S/.beads/fake.json" <<'EOF'
+import json, sys
+d = json.load(open(sys.argv[1]))
+for b in d:
+    if b["id"] == "acme-oth": b["assignee"] = "Other Person"
+    if b["id"] == "acme-q9z": b["assignee"] = "Me"
+json.dump(d, open(sys.argv[1], "w"))
+EOF
+export BEADS_ACTOR="Me"
+out="$(ptu o1 'bd update acme-oth --claim 2>&1 | tail -3')"
+assert_eq "someone else's bead: no pick up" "$out|$(binding o1)" "|"
+printf '%s' '{"bead":"acme-x1y","title":"Fix fabric PO search","root":"'"$S"'","since":"x","done":false,"named":null}' > "$WB_STATE_DIR/sessions/o2.json"
+assert_eq "someone else's bead: no ask" "$(ptu o2 'bd update acme-oth --claim')" ""
+assert_contains "my own claim still counts" "$(ptu o3 'bd update acme-q9z --claim' | msg)" "now on q9z"
+out="$(ptu o2 'bd update acme-q9z --claim')"
+assert_contains "the ask names wb-focus by its full path" "$(printf '%s' "$out" | pctx)" "$REPO/bin/wb-focus acme-q9z"
+unset BEADS_ACTOR
+
+assert_eq "failed tool: silent" "$(ptu p6 'bd update acme-x1y --claim' '' 1)" ""
+assert_eq "create without --claim: silent" "$(ptu p6 'bd create --silent --title t' 'acme-q9z')" ""
+assert_eq "no space root: silent" "$(env -u WB_SPACE_ROOT bash -c "$(declare -f ptu j); HOOK='$HOOK'; ptu p7 'bd update acme-x1y --claim'")" ""
+start=$SECONDS; out="$(FAKE_BD_SLEEP=5 ptu p8 'bd update acme-x1y --claim')"; rc=$?; took=$((SECONDS - start))
+assert_eq "post: bd hangs → silent, exit 0" "$out:$rc" ":0"
+if [ "$took" -lt 3 ]; then ok "post: hang cut off (${took}s)"; else bad "post: hang took ${took}s"; fi
+
+for sub in session-start user-prompt-submit post-tool-use; do
+  out="$(printf 'not json' | "$HOOK" $sub 2>&1)"; rc=$?
+  assert_eq "junk stdin: $sub is silent, exit 0" "$out:$rc" ":0"
+done
+finish

@@ -1,0 +1,27 @@
+#!/usr/bin/env python3
+"""wb-statusline-bead — the status line segment naming this session's bead.
+
+  <status line JSON on stdin> | wb-statusline-bead
+      ◆ x1y <title> · ✓ x1y done · close this session · ◇ no bead · or nothing
+      outside a workbench session. Call it from your own status line script.
+"""
+import json
+import os
+import sys
+
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.realpath(__file__)), "..", "lib"))
+import wb_session  # noqa: E402  (lives in lib/; realpath, since install.sh links bin/ elsewhere)
+
+
+def main():
+    try:
+        seg = wb_session.segment(json.loads(sys.stdin.read()), os.environ)
+    except Exception:
+        return 0  # a status line must never show a traceback
+    if seg:
+        print(seg)
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

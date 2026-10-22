@@ -1,0 +1,46 @@
+#!/usr/bin/env python3
+"""wb-focus — which bead this Claude session is on. Run it inside Claude.
+
+  wb-focus <id>     this session is now on that bead ("continue here")
+  wb-focus          print the bead this session is on
+  wb-focus --clear  this session is on no bead
+"""
+import os
+import sys
+
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.realpath(__file__)), "..", "lib"))
+import wb_session  # noqa: E402  (lives in lib/; realpath, since install.sh links bin/ elsewhere)
+
+
+def main(args):
+    sid = os.environ.get("CLAUDE_CODE_SESSION_ID", "")
+    if not wb_session.binding_path(sid):
+        print("wb-focus: run it inside Claude (as '! wb-focus …'), where the session id is set.",
+              file=sys.stderr)
+        return 1
+    current = wb_session.load(sid)
+    if not args:
+        print(f"{current['bead']} {current.get('title', '')}" if current else "no bead")
+        return 0
+    if args == ["--clear"]:
+        wb_session.clear(sid)
+        print("→ unbound")
+        return 0
+    if len(args) != 1 or args[0].startswith("-"):
+        print(__doc__, file=sys.stderr)
+        return 2
+    root = (current or {}).get("root") or os.environ.get("WB_SPACE_ROOT") or os.getcwd()
+    bead = wb_session.show(root, args[0])
+    if not bead:
+        print(f"wb-focus: bd show {args[0]} found nothing (in {root}); the session is unchanged.",
+              file=sys.stderr)
+        return 1
+    b = wb_session.bind(sid, bead, root)
+    msg = f"→ this session is now on {wb_session.short(b['bead'])} {b['title']}"
+    err = wb_session.note_claim(root, bead, os.environ.get("WB_WORKTREE", ""))
+    print(msg + (f" (claim note not written: {err})" if err else ""))
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv[1:]))

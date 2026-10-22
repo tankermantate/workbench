@@ -21,13 +21,20 @@ _wb_prompt() {
   print -r -- $text
 }
 
-# $1 prompt|continue, $2 prompt text. Starts Claude in $PWD on the space's
-# account. CLAUDE_CONFIG_DIR is set for this one command, or removed, never
-# exported. `env claude` also skips the user's claude() shell function.
+# $1 prompt|continue, $2 prompt text, $3 bead id (or -). Starts Claude in $PWD
+# on the space's account. CLAUDE_CONFIG_DIR and the WB_* variables the session
+# hooks read (bin/wb-session-hook) are set for this one command, or removed,
+# never exported. `env claude` also skips the user's claude() shell function.
 _wb_claude() {
   local -a cmd
+  local top js
   if [[ $s[8] != - ]]; then cmd=(env CLAUDE_CONFIG_DIR=$s[8]); else cmd=(env -u CLAUDE_CONFIG_DIR); fi
+  cmd+=(WB_SPACE_ROOT=$s[3])
+  [[ ${3:--} != - ]] && cmd+=(WB_BEAD=$3)
+  [[ $s[5] == 1 ]] && top=$(git rev-parse --show-toplevel 2>/dev/null) && cmd+=(WB_WORKTREE=$top)
   cmd+=(claude)
+  # Without the hooks the session still starts; it just won't know its bead.
+  js=$($WORKBENCH_HOME/bin/wb-session-hook settings 2>/dev/null) && cmd+=(--settings $js)
   [[ $s[10] == 1 ]] || cmd+=(--dangerously-skip-permissions)
   if [[ $1 == continue ]]; then cmd+=(--continue); else cmd+=($2); fi
   # Terminal learns the folder from a precmd hook, which won't run again until
@@ -69,13 +76,13 @@ _wb_session_cd() {
 _wb_start_bead() {
   if [[ $s[5] == 1 ]]; then _wb_session_cd $1 --space $s[7] || return 0
   else cd -- $s[3] || return 0; fi
-  _wb_claude prompt "$(_wb_prompt work-on-bead $1)"
+  _wb_claude prompt "$(_wb_prompt work-on-bead $1)" $1
 }
 
 _wb_start_new() {
   if [[ $s[5] == 1 ]]; then _wb_session_cd $s[7] || return 0
   else cd -- $s[3] || return 0; fi
-  _wb_claude prompt "$(_wb_prompt something-new -)"
+  _wb_claude prompt "$(_wb_prompt something-new -)" -
 }
 
 # ◐ beads are probably another session's. $1 id, $2 worktree from the claim
@@ -94,7 +101,7 @@ _wb_start_claimed() {
     read -r "ans?$id is claimed; its worktree is ${dir%/}. Resume there? [Y/n] " || return 1
     [[ $ans == [nN]* ]] && return 1
     cd -- $dir || return 1
-    _wb_claude continue
+    _wb_claude continue "" $id
     return 0
   fi
   [[ $wt == - ]] && wt="(no worktree recorded)"
