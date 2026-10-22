@@ -123,21 +123,24 @@ def print_work(tmp, work, query):
     if work["msg"]:
         print(f"msg\t\t-\t{work['msg']}\t")
         return
+    rows = work["rows"]
+    # a space with no epics gets no empty column; ids pad to the longest
+    # ("abcd.12", a sub-epic's child), so the columns after them line up
+    layout = {"epics": any(r[8] != "-" for r in rows), "idw": max([6] + [len(r[1]) for r in rows])}
     pats = wb_search.patterns(query)
     if pats:
-        print_matches(tmp, work["rows"], pats)
+        print_matches(tmp, rows, pats, layout)
         return
-    rows = work["rows"]
     waves = any(r[4] != "-" for r in rows)
     current = None
     for r in rows:
         if waves and r[4] != current:
             current = r[4]
             print(f"sep\t\t-\t── {current if current != '-' else 'everything else'} ──\t")
-        print_row(r)
+        print_row(r, (), layout)
 
 
-def print_matches(tmp, rows, pats):
+def print_matches(tmp, rows, pats, layout):
     """A count, then beads matching every word, then beads matching some,
     with the matched words highlighted. Within each, beads with more words in
     the title come first (a highlighted row shows why it's there), then
@@ -150,7 +153,7 @@ def print_matches(tmp, rows, pats):
     every, some = [], []
     for r in rows:
         # the short id, not the full one: every id shares the space's prefix ("acme-")
-        n = wb_search.hits(pats, f"{r[1]}\n{r[5]}\n{(beads.get(r[0]) or {}).get('description') or ''}")
+        n = wb_search.hits(pats, f"{r[1]}\n{r[5]}\n{r[8]}\n{(beads.get(r[0]) or {}).get('description') or ''}")
         if n:
             (every if n == len(pats) else some).append(r)
     if not every and not some:
@@ -164,15 +167,32 @@ def print_matches(tmp, rows, pats):
         if group and len(pats) > 1:
             print(f"sep\t\t-\t── {label} ──\t")
         for r in group:
-            print_row(r, pats)
+            print_row(r, pats, layout)
 
 
-def print_row(r, pats=()):
-    bid, short, mark, prio, _sect, title, _parent, wt = r
+EPIC_W, DIM = 20, "\033[2m"
+
+
+def epic_cell(ptitle, pats):
+    """The parent's title, cut to a fixed width so the bead titles after it
+    line up; dim, since the bead's own title is what the row is about."""
+    t = "" if ptitle == "-" else re.sub(r"^epic:\s*", "", ptitle, flags=re.I)
+    if len(t) > EPIC_W:
+        t = t[:EPIC_W - 1] + "…"
+    pad = " " * (EPIC_W - len(t))
+    if not t:
+        return pad
+    # a highlight's reset would end the dim too, so dim again after each one
+    return DIM + wb_search.highlight(pats, t).replace(wb_search.END, wb_search.END + DIM) + pad + wb_search.END
+
+
+def print_row(r, pats, layout):
+    bid, short, mark, prio, _sect, title, _parent, wt, ptitle = r
     kind = "claimed" if mark == "◐" else "open"
-    pad = " " * max(0, 6 - len(short))  # padded outside the highlight, so columns stay aligned
+    pad = " " * (layout["idw"] - len(short))  # padded outside the highlight, so columns stay aligned
+    epic = f"{epic_cell(ptitle, pats)}  " if layout["epics"] else ""
     print(f"{kind}\t{bid}\t{wt}\t\t{mark} {wb_search.highlight(pats, short)}{pad} {prio}  "
-          f"{wb_search.highlight(pats, title)}")
+          f"{epic}{wb_search.highlight(pats, title)}")
 
 
 def main(argv):

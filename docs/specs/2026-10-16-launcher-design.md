@@ -56,7 +56,12 @@ you are working before deciding what to do in it.
          …
 ```
 
-- **Type to search** every live bead in the space by short id, title and description, ignoring case. A word
+- **Each row names its epic** (added 2026-10-22): between the priority and the title, a dim column
+  of fixed width (20) holds the bead's direct parent's title, a leading "EPIC:" dropped and a long
+  one cut with `…`. Urgency stays the order; the column is so the most urgent work in one epic can
+  be found without scrolling the whole list. A space with no epics gets no column, and ids pad to
+  the longest, so a sub-epic's child (`abcd.12`) doesn't push the columns out of line.
+- **Type to search** every live bead in the space by short id, title, parent's title and description, ignoring case. A word
   of 1-2 letters matches only whole or as a plural ("po": "PO", "POs"); a longer word matches from
   the start of a word ("fab": "fabric"). A count line comes first, then the beads matching every
   word, then (below a divider) those matching some. Within each, beads with more of the words in
@@ -144,7 +149,7 @@ worktrees     = false
 |---|---|---|
 | `launch` (zsh function in `shell/workbench.zsh`) | Draws the two screens, runs the handoff, and `cd`s the shell. It holds no bead logic. It is a **function, not a `bin/` script**: a child process can't change the parent shell's folder, and landing in the session's folder after Claude exits depends on that. | `wb-spaces`, `wb-backlog`, fzf (numbered-menu fallback) |
 | `bin/wb-spaces` | Reads `spaces.toml`, expands globs, prints one line per space. | python3 ≥ 3.11 (stdlib `tomllib`; this Mac has 3.14, the second laptop is unchecked) |
-| `bin/wb-backlog <space>` | Prints the space's live beads as tab-separated `id, status, priority, wave, title, parent`, and with `--summary`, one count line. | `bd` |
+| `bin/wb-backlog <space>` | Prints the space's live beads as tab-separated `id, status, priority, wave, title, parent, worktree, parent's title`, and with `--summary`, one count line. | `bd` |
 | `prompts/*.txt` | Opening prompts. | — |
 | `shell/workbench.zsh` | Sourced from `~/.zshrc`. Defines `launch` and registers a **run-once `precmd` hook** that decides whether to call it at the first prompt. Running at the first prompt, not partway through `.zshrc`, means everything `.zshrc` defines later (the `claude()` function, aliases, `PATH`) already exists. | — |
 | `install.sh` | Links `bin/*` into `~/.local/bin`, prints the one line to add to `~/.zshrc`. Idempotent. Never edits `~/.zshrc` itself. | — |

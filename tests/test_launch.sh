@@ -31,6 +31,16 @@ assert_eq "render-work kinds and order" "$(printf '%s\n' "$out" | cut -f1,2 | tr
 assert_contains "render-work NOW header" "$out" "── NOW ──"
 assert_contains "render-work everything-else header" "$out" "── everything else ──"
 assert_contains "render-work claimed row keeps its worktree" "$out" "claimed	acme-c2	/tmp/wb-fixture-wt/acme-x"
+# the epic column: the direct parent's title, "Epic:" dropped, dim, fixed width
+row() { printf '%s\n' "$1" | awk -F'\t' -v id="$2" '$2==id {print $5}'; }
+assert_eq "epic column: a child shows its parent" "$(row "$out" acme-a1)" \
+  $'○ a1     P2  \e[2mtidy the shop       \e[0m  Low wave-1'
+assert_eq "epic column: no parent, blank but aligned" "$(row "$out" acme-b1)" \
+  "○ b1     P0                        Wave-2 urgent"
+out="$("$REPO/bin/wb-ui" filter-work "$T/start" 1 'tidy')"
+assert_eq "search: the parent's title is searched" "$(printf '%s\n' "$out" | cut -f1,2 | tr '\t\n' ': ')" \
+  "new:- msg: open:acme-e1 open:acme-a2 open:acme-a1 "
+assert_contains "search: a match in the column is highlighted" "$(row "$out" acme-a1)" $'\e[1;33mtidy\e[0m'
 assert_eq "render-spaces: the q row has no stray dash" "$("$REPO/bin/wb-ui" render-spaces "$T/start" | tail -1)" "q	[q] just give me a shell	"
 
 # wb-ui filter-work: words across title and description; every word first, then some
@@ -38,7 +48,8 @@ mkstore "$T/fab"; mkdir -p "$T/srch"
 cat > "$T/fab/.beads/fake.json" <<'EOF'
 [
   {"id":"fab-1","title":"Fabric swatches","status":"open","priority":1,"description":"Pick three."},
-  {"id":"fab-2","title":"Fabric order","status":"open","priority":2,"description":"Raise PO 4471 with the mill."},
+  {"id":"fab-e","title":"EPIC: Fabric sourcing for the spring line","status":"closed","priority":2},
+  {"id":"fab-2","title":"Fabric order","status":"open","priority":2,"description":"Raise PO 4471 with the mill.","parent":"fab-e"},
   {"id":"fab-3","title":"Fix a bug in the router","status":"open","priority":0,"description":"Comes up in the profile page."},
   {"id":"fab-4","title":"Deposit the report","status":"open","priority":3},
   {"id":"fab-5","title":"Fabric samples","status":"open","priority":0,"description":"Possibly next week."},
@@ -48,6 +59,7 @@ cat > "$T/fab/.beads/fake.json" <<'EOF'
 EOF
 printf 'Fab\t-\t%s\ttrue\t1\tx\tfab\t-\t-\t0\n' "$T/fab" > "$T/srch/spaces.tsv"
 full="$("$REPO/bin/wb-ui" render-work "$T/srch" 1)"
+assert_contains "epic column: a long parent is cut to 20 with …" "$(row "$full" fab-2)" $'\e[2mFabric sourcing for…\e[0m'
 rows() { printf '%s\n' "$1" | cut -f1,2 | tr '\t\n' ': '; }
 out="$("$REPO/bin/wb-ui" filter-work "$T/srch" 1 'fabric PO')"
 assert_eq "filter-work: all words, then some words, scattered letters never" "$(rows "$out")" \
@@ -73,7 +85,21 @@ out="$("$REPO/bin/wb-ui" filter-work "$T/srch" 1 'fabric')"
 assert_contains "filter-work: matched words are highlighted" "$out" $'\e[1;33mFabric\e[0m order'
 assert_not_contains "filter-work: no colour outside the shown text" "$(printf '%s\n' "$out" | cut -f1-4)" $'\e'
 assert_eq "filter-work: empty query is the full list, uncoloured" "$("$REPO/bin/wb-ui" filter-work "$T/srch" 1 '')" "$full"
-assert_not_contains "render-work: no colour" "$full" $'\e'
+assert_not_contains "render-work: no highlights" "$full" $'\e[1;33m'
+
+# ids longer than 6 (a sub-epic's children: "abcd.12") still line up the columns
+mkstore "$T/dot"; mkdir -p "$T/dotui"
+cat > "$T/dot/.beads/fake.json" <<'EOF2'
+[
+  {"id":"dot-1","title":"Short id","status":"open","priority":1,"parent":"dot-e"},
+  {"id":"dot-abcd.123","title":"Long id","status":"open","priority":2,"parent":"dot-e"},
+  {"id":"dot-e","title":"The epic","status":"closed","priority":2}
+]
+EOF2
+printf 'Dot\t-\t%s\ttrue\t1\tx\tdot\t-\t-\t0\n' "$T/dot" > "$T/dotui/spaces.tsv"
+cols="$("$REPO/bin/wb-ui" render-work "$T/dotui" 1 | grep -E '^open' | cut -f5 | sed $'s/\e\\[[0-9;]*m//g' | awk '{print index($0, "The epic")}' | sort -u | wc -l | tr -d ' ')"
+assert_eq "epic column: lines up when an id is longer than 6" "$cols" "1"
+assert_eq "render-work: no colour but the dim epic column" "$(printf '%s\n' "$full" | sed $'s/\e\\[2m//g; s/\e\\[0m//g' | grep -c $'\e')" "0"
 out="$("$REPO/bin/wb-ui" filter-work "$T/start" 1 'wave')"
 assert_eq "filter-work: section headers give way to the count while searching" "$(rows "$out")" \
   "new:- msg: open:acme-a2 open:acme-a1 open:acme-b1 "

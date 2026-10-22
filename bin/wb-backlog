@@ -3,7 +3,8 @@
 
   wb-backlog list ROOT [--snapshot FILE]
       TSV, best first: id, short id, mark (○ open / ◐ in progress), P<n>,
-      section (NOW / NEXT / -), title, parent, worktree from the claim notes.
+      section (NOW / NEXT / -), title, parent, worktree from the claim notes,
+      the parent's title.
       Exits non-zero when there is nothing to list; the code says why (STATES).
   wb-backlog summary ROOT      one line of counts for screen 1; always exits 0
   wb-backlog claimed ROOT PATH the bead whose current claim note names the
@@ -151,13 +152,14 @@ def cmd_list(root, snapshot=None):
         os.replace(snapshot + ".part", snapshot)
     if state != "ok":
         return STATES[state][0]
+    titles = {b.get("id"): b.get("title") for b in data}  # all of them: a parent may be closed
     for b in ordered(live(data)):
         bid = str(b.get("id", ""))
         mark = "◐" if b.get("status") == "in_progress" else "○"
         prio = f"P{b['priority']}" if isinstance(b.get("priority"), int) else "P-"
         print("\t".join(clean(x) for x in (bid, bid.rsplit("-", 1)[-1], mark, prio,
                                             section(b), b.get("title"), b.get("parent"),
-                                            worktree(b))))
+                                            worktree(b), titles.get(b.get("parent")))))
     return 0
 
 

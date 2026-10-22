@@ -12,9 +12,9 @@ assert_eq "list ok exits 0" "$rc" "0"
 assert_eq "order: NOW by priority, NEXT, then the rest by priority; deferred+closed hidden" \
   "$(printf '%s\n' "$out" | cut -f1 | tr '\n' ' ')" "acme-a2 acme-a1 acme-b1 acme-c1 acme-e1 acme-c2 "
 assert_eq "row fields" "$(printf '%s\n' "$out" | head -1)" \
-  "acme-a2	a2	○	P1	NOW	High wave-1	acme-e1	-"
+  "acme-a2	a2	○	P1	NOW	High wave-1	acme-e1	-	Epic: tidy the shop"
 assert_eq "in-progress is ◐ with its worktree from notes" "$(printf '%s\n' "$out" | tail -1)" \
-  "acme-c2	c2	◐	P3	-	Claimed elsewhere	-	/tmp/wb-fixture-wt/acme-x"
+  "acme-c2	c2	◐	P3	-	Claimed elsewhere	-	/tmp/wb-fixture-wt/acme-x	-"
 assert_eq "claimed: the bead whose current claim names the worktree" \
   "$("$WB" claimed "$T/store" /tmp/wb-fixture-wt/acme-x)" "acme-c2"
 "$WB" claimed "$T/store" /tmp/wb-fixture-wt/other >/dev/null; assert_eq "claimed: none exits 1" "$?" "1"
@@ -129,7 +129,7 @@ cat > "$FAKE_BD_DIR/stdout" <<EOF
 [{"id":"bee-9","title":"tab\there \$(touch $T/pwned) \"q\"\nnext","status":"open","priority":1,"description":"\$(touch $T/pwned)"}]
 EOF
 out="$("$WB" list "$T/store" --snapshot "$T/snap2.json")"
-assert_eq "hostile title is cleaned into one row of 8 fields" "$(printf '%s\n' "$out" | awk -F'\t' '{print NR":"NF}')" "1:8"
+assert_eq "hostile title is cleaned into one row of 9 fields" "$(printf '%s\n' "$out" | awk -F'\t' '{print NR":"NF}')" "1:9"
 prev="$("$WB" preview "$T/snap2.json" bee-9)"
 assert_contains "hostile description shown literally" "$prev" "\$(touch $T/pwned)"
 if [ ! -e "$T/pwned" ]; then ok "hostile title is cleaned and not executed"; else bad "something executed the title"; fi
