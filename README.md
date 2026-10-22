@@ -85,8 +85,8 @@ A session the launcher (or `new-session`) starts knows which bead it's on:
 After pulling a new workbench, rerun `./install.sh` so new commands like these are linked onto your PATH.
 
 All of this comes from hooks passed with `claude --settings` at launch. A `claude` you start by
-hand is unchanged, and nothing is written into your repos or `~/.claude`. The record of which
-session is on which bead lives in `~/.cache/workbench/sessions/`.
+hand is unchanged, and nothing is written into your repos or `~/.claude`. Those hooks, and the
+record of which session is on which bead, live in `~/.cache/workbench/`.
 
 ## Configuration
 

@@ -5,7 +5,7 @@ T="$(cd "$T" && pwd -P)"
 unset CLAUDECODE FAKE_BD_DIR WORKBENCH_DRY_RUN
 NS="$REPO/bin/new-session"
 export WB_WORKTREES_DIR="$T/wts" WORKBENCH_CONFIG="$T/spaces.toml"
-export FAKE_BD_LOG="$T/bd.log" FAKE_GH_LOG="$T/gh.log" HOOK_OUT="$T/hook.env"
+export FAKE_BD_LOG="$T/bd.log" FAKE_GH_LOG="$T/gh.log" HOOK_OUT="$T/hook.env" WB_STATE_DIR="$T/state"
 
 # Acme: origin; project in app/; tracked bead store at the repo top.
 A="$T/acme"; setup_repo "$A"
@@ -125,7 +125,7 @@ assert_eq "gh missing: still starts" "$rc" "0"
 # --- launching (dry run), safe, nested guard
 out="$(WORKBENCH_DRY_RUN=1 "$NS" acme dry run 2>&1)"
 assert_contains "launch: config dir and env for the one command" "$(printf '%s\n' "$out" | tail -1)" \
-  "DRY-RUN: cd $W/acme-dry-run/app && env CLAUDE_CONFIG_DIR=$T/cfg WB_SPACE_ROOT=$A/app WB_WORKTREE=$W/acme-dry-run claude --settings "
+  "DRY-RUN: cd $W/acme-dry-run/app && env CLAUDE_CONFIG_DIR=$T/cfg WB_SPACE_ROOT=$A/app WB_WORKTREE=$W/acme-dry-run claude --settings $T/state/claude-settings.json "
 assert_contains "launch: prompts off" "$(printf '%s\n' "$out" | tail -1)" " --dangerously-skip-permissions"
 assert_not_contains "launch: no bead, no WB_BEAD" "$(printf '%s\n' "$out" | tail -1)" "WB_BEAD="
 out="$(WORKBENCH_DRY_RUN=1 "$NS" beta safe one 2>&1)"

@@ -97,7 +97,9 @@ Files older than 30 days are pruned by the SessionStart hook, on the way past.
 ### At launch
 
 `_wb_claude` (launcher) and `new-session` add the following to the `claude` command:
-- `--settings <json>`: workbench's hooks, with absolute paths under `WORKBENCH_HOME`
+- `--settings <file>`: workbench's hooks, with absolute paths under `WORKBENCH_HOME`, written by
+  `wb-session-hook settings-file` to `~/.cache/workbench/claude-settings.json`. A file, not inline
+  JSON, because the terminal shows the command line in its window title (2026-10-22).
 - `WB_BEAD=<id>`, `WB_SPACE_ROOT=<root>` and, in a worktree session, `WB_WORKTREE=<worktree top>`
   in the environment, set for this one command the way `CLAUDE_CONFIG_DIR` is, never exported to
   the shell. "Something new" doesn't set `WB_BEAD`. `WB_WORKTREE` is how the hooks know to keep
@@ -246,7 +248,7 @@ call `wb-statusline-bead` (a private step).
 
 ## Left to the builder
 
-- The exact hook JSON in `--settings` (inline JSON or a file generated into the launch's tmp dir).
+- The exact hook JSON in `--settings`.
 - The regex for spotting claims. It must cover the forms above and not much more.
 - The wording of the injected blocks, kept short.
 

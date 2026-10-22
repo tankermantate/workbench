@@ -3,7 +3,7 @@ source "$(dirname "$0")/lib.sh"
 T="$(newtmp)"; trap 'rm -rf "$T"' EXIT
 unset FAKE_BD_DIR   # fake bd reads each store's .beads/fake.json
 export WORKBENCH_DRY_RUN=1 FAKE_NS_LOG="$T/ns.log" FAKE_NS_DIR="$T/wt/proj" XDG_STATE_HOME="$T/state"
-export WORKBENCH_CONFIG="$T/spaces.toml"
+export WORKBENCH_CONFIG="$T/spaces.toml" WB_STATE_DIR="$T/wbstate"
 mkstore "$T/acme" "$T/side/beta"; mkdir -p "$T/side/gamma" "$T/start"
 cp "$REPO/tests/fixtures/waves.json" "$T/acme/.beads/fake.json"
 cp "$REPO/tests/fixtures/plain.json" "$T/side/beta/.beads/fake.json"

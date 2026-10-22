@@ -3,6 +3,7 @@
 Spec: docs/specs/2026-10-21-session-bead-design.md
 
   wb-session-hook settings            the --settings JSON the launcher starts claude with
+  wb-session-hook settings-file       write it to a file and print the path
   wb-session-hook session-start       bind from WB_BEAD; hand Claude the bead's goal again
   wb-session-hook post-tool-use       a bd claim or close in a Bash command
   wb-session-hook user-prompt-submit  rename the session when its bead changed
@@ -163,6 +164,17 @@ def main(argv):
     sub = argv[1] if len(argv) > 1 else ""
     if sub == "settings":
         print(json.dumps(settings()))
+        return 0
+    if sub == "settings-file":
+        # the launcher passes this path, not the JSON: the terminal shows the
+        # command line in its window title
+        p = os.path.join(ws.state_dir(), "claude-settings.json")
+        os.makedirs(os.path.dirname(p), exist_ok=True)
+        part = f"{p}.{os.getpid()}.part"  # its own: sessions starting at once write it together
+        with open(part, "w") as f:
+            f.write(json.dumps(settings()) + "\n")
+        os.replace(part, p)
+        print(p)
         return 0
     run = {"session-start": session_start, "post-tool-use": post_tool_use,
            "user-prompt-submit": user_prompt_submit}.get(sub)

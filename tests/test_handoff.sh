@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 source "$(dirname "$0")/lib.sh"
 T="$(newtmp)"; trap 'rm -rf "$T"' EXIT
-export WORKBENCH_DRY_RUN=1 FAKE_NS_LOG="$T/ns.log" FAKE_NS_DIR="$T/wt/proj"
+export WORKBENCH_DRY_RUN=1 FAKE_NS_LOG="$T/ns.log" FAKE_NS_DIR="$T/wt/proj" WB_STATE_DIR="$T/state"
 NS="$REPO/tests/fake/new-session"
 mkdir -p "$T/proj dir" "$T/repo/sub" "$T/scratch" "$T/wt-x/sub" "$T/wt"
 git -C "$T/repo" init -q; git -C "$T/wt" init -q; git -C "$T/wt-x" init -q
@@ -14,7 +14,7 @@ WT="Acme	-	$T/repo/sub	true	1	$NS	acme	$T/cfg	docs/PROTOCOL.md	0"
 
 out="$(z "$PLAIN" '_wb_start_bead bee-1; print "PWD=$PWD"' 2>&1)"
 assert_contains "plain bead: unsets config" "$out" "env -u CLAUDE_CONFIG_DIR 'WB_SPACE_ROOT=$T/proj dir' WB_BEAD=bee-1 claude"
-assert_contains "plain bead: hooks passed, prompts off" "$out" "claude --settings "
+assert_contains "plain bead: hooks passed as a file" "$out" "claude --settings $T/state/claude-settings.json "
 assert_contains "plain bead: prompts off" "$out" " --dangerously-skip-permissions "
 assert_not_contains "plain bead: no worktree" "$out" "WB_WORKTREE="
 assert_contains "plain bead: work-on-bead prompt" "$out" "Work on bead bee-1 in Beta."

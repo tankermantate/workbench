@@ -34,7 +34,7 @@ _wb_claude() {
   [[ $s[5] == 1 ]] && top=$(git rev-parse --show-toplevel 2>/dev/null) && cmd+=(WB_WORKTREE=$top)
   cmd+=(claude)
   # Without the hooks the session still starts; it just won't know its bead.
-  js=$($WORKBENCH_HOME/bin/wb-session-hook settings 2>/dev/null) && cmd+=(--settings $js)
+  js=$($WORKBENCH_HOME/bin/wb-session-hook settings-file 2>/dev/null) && cmd+=(--settings $js)
   [[ $s[10] == 1 ]] || cmd+=(--dangerously-skip-permissions)
   if [[ $1 == continue ]]; then cmd+=(--continue); else cmd+=($2); fi
   # Terminal learns the folder from a precmd hook, which won't run again until

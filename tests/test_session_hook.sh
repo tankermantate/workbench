@@ -55,6 +55,11 @@ assert_eq "settings: commands survive a space in the path" \
   "$(printf '%s' "$out" | j '__import__("shlex").split(d["hooks"]["SessionStart"][0]["hooks"][0]["command"])')" \
   "['$(cd "$T" && pwd -P)/wb home/bin/wb-session-hook', 'session-start']"
 
+# a file, not inline JSON: the command line shows in the terminal's window title
+out="$("$HOOK" settings-file)"
+assert_eq "settings-file: prints the file's path" "$out" "$WB_STATE_DIR/claude-settings.json"
+assert_eq "settings-file: holds the settings" "$(cat "$out" 2>/dev/null)" "$("$HOOK" settings)"
+
 # --- session-start
 out="$(WB_BEAD=acme-x1y WB_SPACE_ROOT="$S" ss s1 startup)"
 ctx="$(printf '%s' "$out" | j 'd["hookSpecificOutput"]["additionalContext"]')"
