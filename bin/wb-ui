@@ -207,7 +207,7 @@ def epic_cell(ptitle, pats):
 
 
 def print_row(r, pats, layout, why=None):
-    bid, short, mark, prio, _sect, title, _parent, wt, ptitle, idle, _pick = r
+    bid, short, mark, prio, _sect, title, _parent, wt, ptitle, idle, _pick, _attn = r
     kind = "claimed" if mark == "◐" else "open"
     pad = " " * (layout["idw"] - len(short))  # padded outside the highlight, so columns stay aligned
     epic = f"{epic_cell(ptitle, pats)}  " if layout["epics"] else ""

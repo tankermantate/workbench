@@ -12,9 +12,9 @@ assert_eq "list ok exits 0" "$rc" "0"
 assert_eq "order: NOW by priority, NEXT, then the rest by priority; deferred+closed hidden" \
   "$(printf '%s\n' "$out" | cut -f1 | tr '\n' ' ')" "acme-a2 acme-a1 acme-b1 acme-c1 acme-e1 acme-c2 "
 assert_eq "row fields" "$(printf '%s\n' "$out" | head -1)" \
-  "acme-a2	a2	○	P1	NOW	High wave-1	acme-e1	-	Epic: tidy the shop	-	1 NOW · P1 · shape first"
+  "acme-a2	a2	○	P1	NOW	High wave-1	acme-e1	-	Epic: tidy the shop	-	1 NOW · P1 · shape first	-"
 assert_eq "in-progress is ◐ with its worktree from notes" "$(printf '%s\n' "$out" | tail -1)" \
-  "acme-c2	c2	◐	P3	-	Claimed elsewhere	-	/tmp/wb-fixture-wt/acme-x	-	-	-"
+  "acme-c2	c2	◐	P3	-	Claimed elsewhere	-	/tmp/wb-fixture-wt/acme-x	-	-	-	-"
 assert_eq "claimed: the bead whose current claim names the worktree" \
   "$("$WB" claimed "$T/store" /tmp/wb-fixture-wt/acme-x)" "acme-c2"
 "$WB" claimed "$T/store" /tmp/wb-fixture-wt/other >/dev/null; assert_eq "claimed: none exits 1" "$?" "1"
@@ -157,7 +157,7 @@ cat > "$FAKE_BD_DIR/stdout" <<EOF
 [{"id":"bee-9","title":"tab\there \$(touch $T/pwned) \"q\"\nnext","status":"open","priority":1,"description":"\$(touch $T/pwned)"}]
 EOF
 out="$("$WB" list "$T/store" --snapshot "$T/snap2.json")"
-assert_eq "hostile title is cleaned into one row of 11 fields" "$(printf '%s\n' "$out" | awk -F'\t' '{print NR":"NF}')" "1:11"
+assert_eq "hostile title is cleaned into one row of 12 fields" "$(printf '%s\n' "$out" | awk -F'\t' '{print NR":"NF}')" "1:12"
 prev="$("$WB" preview "$T/snap2.json" bee-9)"
 assert_contains "hostile description shown literally" "$prev" "\$(touch $T/pwned)"
 if [ ! -e "$T/pwned" ]; then ok "hostile title is cleaned and not executed"; else bad "something executed the title"; fi
@@ -200,6 +200,38 @@ assert_eq "start here ties: a done line first, then what unblocks the most" \
 reset_bd; cp "$FX/plain.json" "$FAKE_BD_DIR/stdout"
 assert_eq "start here: none in a backlog of three or fewer, it's all on screen" \
   "$("$WB" list "$T/store" | cut -f11 | sort -u)" "-"
+
+# one fresh claim at most: the rest of the picks are fresh work, not a pile of tabs
+reset_bd; python3 - "$FAKE_BD_DIR/stdout" <<'EOF2'
+import json, sys, datetime
+ago = lambda d: (datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(days=d, hours=1)).strftime("%Y-%m-%dT%H:%M:%SZ")
+json.dump([{"id": f"fc-{i}", "title": "claim", "status": "in_progress", "priority": 1, "updated_at": ago(1)} for i in range(1, 5)]
+          + [{"id": f"fo-{i}", "title": "open", "status": "open", "priority": 2} for i in range(1, 3)],
+          open(sys.argv[1], "w"))
+EOF2
+out="$("$WB" list "$T/store")"
+assert_eq "picks: at most one fresh claim" \
+  "$(printf '%s\n' "$out" | awk -F'\t' '$11 != "-" {print $1 "=" $11}' | sort -t= -k2 | tr '\n' '|')" \
+  "fc-1=1 resume · P1 · shape first|fo-1=2 P2 · shape first|fo-2=3 P2 · shape first|"
+
+# attention: beads flagged for the planning rituals, ranked apart from the picks
+reset_bd; cat > "$FAKE_BD_DIR/stdout" <<'EOF2'
+[{"id":"at-1","title":"due","status":"open","priority":2,"labels":["attention"],"notes":"x\nattention: old\nattention: due Nov 2 · money"},
+ {"id":"at-2","title":"urgent","status":"open","priority":1,"labels":["attention"]},
+ {"id":"at-3","title":"iced","status":"open","priority":3,"labels":["icebox","attention"]},
+ {"id":"at-4","title":"a","status":"open","priority":1},
+ {"id":"at-5","title":"b","status":"open","priority":2},
+ {"id":"at-6","title":"c","status":"open","priority":3}]
+EOF2
+out="$("$WB" list "$T/store")"
+assert_eq "attention: field 12 ranks flagged beads by priority, reason from the last attention note" \
+  "$(printf '%s\n' "$out" | cut -f1,12 | sort | tr '\t\n' ':|')" \
+  "at-1:2 due Nov 2 · money|at-2:1 attention|at-3:3 attention|at-4:-|at-5:-|at-6:-|"
+assert_eq "attention: never also a pick" \
+  "$(printf '%s\n' "$out" | awk -F'\t' '$11 != "-" && $12 != "-"' | wc -l | tr -d ' ')" "0"
+assert_eq "attention: the others are still picked" \
+  "$(printf '%s\n' "$out" | awk -F'\t' '$11 != "-" {print $1}' | sort | tr '\n' ' ')" "at-4 at-5 at-6 "
+assert_eq "summary: attention first" "$("$WB" summary "$T/store")" "! 3 need attention · open 5 · icebox 1 · claimed 0"
 
 # the 30-day flow: beads created vs closed, closed ones read apart (bd hides them)
 reset_bd; python3 - "$FAKE_BD_DIR" <<'EOF'
