@@ -16,8 +16,11 @@
 #   update    sleeps $FAKE_BD_UPDATE_SLEEP, exits $FAKE_BD_UPDATE_RC (default 0)
 # FAKE_BD_STATEFUL=1 makes writes real against that same .beads/fake.json (wb-groom's apply and
 # undo read back what they wrote): `update` handles --add-label, --remove-label, --append-notes,
-# --notes, -p/--priority and -s/--status, `close ID` sets status closed and `undefer ID` open;
-# each bumps the bead's updated_at to a new second. A leading --sandbox is ignored.
+# --notes, -p/--priority, -s/--status and --defer, `close ID --reason R` sets status closed with
+# closed_at and close_reason and `undefer ID` opens it and drops defer_until; each bumps the
+# bead's updated_at to a new second. As in bd (checked on a scratch store), a status other than
+# closed drops closed_at and close_reason, and --defer D sets defer_until and status deferred
+# (--defer= clears it and, from deferred, opens). A leading --sandbox is ignored.
 #   FAKE_BD_UPDATE_FAIL_ID=ID   writes to that bead exit 1, changing nothing
 #   FAKE_BD_REQUIRE_FILE=PATH   a write exits 9, changing nothing, unless PATH exists and is not empty
 # FAKE_BD_LOG: every call's args are appended to it.
@@ -53,8 +56,12 @@ def val():
         return a.split("=", 1)[1]
     i += 1
     return rest[i]
-if cmd == "close": b["status"] = "closed"
-if cmd == "undefer": b["status"] = "open"
+try: tick = int(open(dotbeads + "/fake-clock").read()) + 1
+except OSError: tick = 1
+open(dotbeads + "/fake-clock", "w").write(str(tick))
+stamp = "2026-10-23T12:%02d:%02dZ" % divmod(tick, 60)
+if cmd == "close": b["status"], b["closed_at"] = "closed", stamp
+if cmd == "undefer": b["status"] = "open"; b.pop("defer_until", None)
 while i < len(rest):
     a = rest[i]
     flag = a.split("=", 1)[0]
@@ -69,16 +76,21 @@ while i < len(rest):
         if v: b["notes"] = v
         else: b.pop("notes", None)
     elif flag in ("-p", "--priority"): b["priority"] = int(val().lstrip("P"))
-    elif flag in ("-s", "--status"): b["status"] = val()
-    elif flag == "--reason": val()
+    elif flag in ("-s", "--status"):
+        b["status"] = val()
+        if b["status"] != "closed": b.pop("closed_at", None); b.pop("close_reason", None)
+    elif flag == "--defer":
+        v = val()
+        if v: b["defer_until"], b["status"] = v, "deferred"
+        else:
+            b.pop("defer_until", None)
+            if b.get("status") == "deferred": b["status"] = "open"
+    elif flag == "--reason": b["close_reason"] = val()
     else:
         print(f"fake bd: unsupported flag {a}", file=sys.stderr); sys.exit(2)
     i += 1
 b["labels"] = labels
-try: tick = int(open(dotbeads + "/fake-clock").read()) + 1
-except OSError: tick = 1
-open(dotbeads + "/fake-clock", "w").write(str(tick))
-b["updated_at"] = "2026-10-23T12:%02d:%02dZ" % divmod(tick, 60)
+b["updated_at"] = stamp
 json.dump(beads, open(path, "w"))
 print(f"Updated {bid}")
 PY

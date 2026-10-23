@@ -9,6 +9,7 @@ import datetime
 import json
 import os
 import re
+import shlex
 import subprocess
 
 WAVES = {"now": "wave:1", "next": "wave:2"}  # sprint section -> label, as in bin/wb-backlog
@@ -316,8 +317,10 @@ def plan_ops(decisions, beads, plan, today):
 # has changed it since.
 
 BY_HAND = {"merge", "dep", "date"}  # proposal kinds that are not a single-bead edit
-UPDATE_KINDS = {"wave", "unwave", "icebox", "priority", "attention", "unattention"}
-STATE_KEYS = ("labels", "priority", "status", "notes", "updated_at")
+# defer_until, closed_at and close_reason: undefer drops the date and close stamps the others, so
+# an exact undo has to see them (bd clears closed_at/close_reason itself when the status leaves
+# closed, and takes --defer=<date> to bring a deferral back).
+STATE_KEYS = ("labels", "priority", "status", "notes", "defer_until", "closed_at", "close_reason", "updated_at")
 
 
 class WriteError(Exception):
@@ -340,7 +343,8 @@ def bd_show(root, bd, id, timeout=30):
 def snapshot(bead):
     """What a record keeps of a bead: the fields apply and undo change, and updated_at."""
     return {"id": bead["id"], "labels": sorted(bead.get("labels") or []), "priority": bead.get("priority"),
-            "status": bead.get("status"), "notes": bead.get("notes") or "", "updated_at": bead.get("updated_at")}
+            "status": bead.get("status"), "notes": bead.get("notes") or "",
+            **{k: bead.get(k) for k in ("defer_until", "closed_at", "close_reason", "updated_at")}}
 
 
 def append_jsonl(path, rows):
@@ -387,8 +391,7 @@ def edit_for(ops, labels, today):
         elif o.kind in ("close", "undefer"):
             commands.append(o.kind)
             reason = _line(o.why)
-        if o.kind in UPDATE_KINDS:
-            notes.append(f"groomed {today}: {o.kind} \u2014 {_line(o.why)}")
+        notes.append(f"groomed {today}: {o.kind} \u2014 {_line(o.why)}")
         if o.kind == "attention":
             notes.append(f"attention: {_line(o.why)}")
     return sorted(now - set(labels)), sorted(set(labels) - now), priority, notes, commands, reason
@@ -423,8 +426,10 @@ def _run(argv, root, timeout):
 
 def apply_ops(run_dir, root, ops, bd, today, proposal=None, timeout=60):
     """Apply OPS (Op objects, any kind) to ROOT's beads, one bd update per bead. Returns
-    (applied ids, failed id or None, error). Raises BdReadError before any write when a bead
-    can't be read, and OSError before any write when before.jsonl can't be written."""
+    (applied ids, failed id or None, error, recorded): recorded is False when the failed bead
+    was written but applied.jsonl could not say so (error then holds the manual restore).
+    Raises BdReadError before any write when a bead can't be read, and OSError before any
+    write when before.jsonl can't be written; nothing raises after the first write."""
     order = list(dict.fromkeys(o.id for o in ops))
     current = {id: bd_show(root, bd, id) for id in order}
     append_jsonl(os.path.join(run_dir, "before.jsonl"), [snapshot(current[id]) for id in order])
@@ -436,41 +441,86 @@ def apply_ops(run_dir, root, ops, bd, today, proposal=None, timeout=60):
             error = _run(argv, root, timeout)
             if error:
                 break
-        row = {"id": id, "root": os.path.abspath(root), "ops": [{"kind": o.kind, "value": o.value, "why": o.why} for o in mine],
+        row = {"id": id, "root": os.path.abspath(root),
+               "ops": [{"kind": o.kind, "value": o.value, "why": o.why} for o in mine],
                "proposal": proposal, "applied_at": datetime.datetime.now().isoformat(timespec="seconds")}
+        now = None
         try:
-            row.update(snapshot(bd_show(root, bd, id)))
+            now = snapshot(bd_show(root, bd, id))
+            row.update(now)
         except BdReadError as e:
             row["updated_at"] = None  # unverifiable: undo will refuse it
             error = error or str(e)
         if error:
             row["error"] = error
-        append_jsonl(os.path.join(run_dir, "applied.jsonl"), [row])
+        try:
+            append_jsonl(os.path.join(run_dir, "applied.jsonl"), [row])
+        except OSError as e:
+            # The write happened and undo can't see it: say so, and hand over the way back.
+            restore = " ".join(shlex.quote(a) for a in restore_argv(bd, snapshot(current[id]), now))
+            return applied, id, f"written but not recorded ({e}); restore by hand: {restore}", False
         if error:
-            return applied, id, error
+            return applied, id, error, True
         applied.append(id)
-    return applied, None, None
+    return applied, None, None, True
+
+
+def restore_argv(bd, was, now):
+    """The bd update argv that takes a bead from NOW (a snapshot, or None when unknown) back
+    to WAS, or just [bd, --sandbox, update, id] when there is nothing to change."""
+    now = now or {"labels": [], "priority": None, "status": None, "notes": None, "defer_until": None}
+    argv = [bd, "--sandbox", "update", was["id"]]
+    for l in sorted(set(was["labels"]) - set(now["labels"])):
+        argv += ["--add-label", l]
+    for l in sorted(set(now["labels"]) - set(was["labels"])):
+        argv += ["--remove-label", l]
+    if was["priority"] != now["priority"]:
+        argv += [f"--priority={was['priority']}"]
+    # --defer=<date> also sets the status deferred, so it comes before the status.
+    if was.get("defer_until") != now.get("defer_until"):
+        argv += [f"--defer={was.get('defer_until') or ''}"]
+    if was["status"] != now["status"] or (was.get("defer_until") or None) != (now.get("defer_until") or None):
+        argv += [f"--status={was['status']}"]
+    if was["notes"] != now["notes"]:
+        argv += [f"--notes={was['notes']}"]  # wholesale; an empty value clears them
+    return argv
 
 
 def undo_run(run_dir, root, bd, only=None, timeout=60):
     """Restore beads to their before.jsonl state. Returns (messages, refused): refused is
-    True when a named bead was changed since the run, can't be read, or isn't in the run."""
-    before = {}
+    True when a named bead was changed since the run, can't be read, isn't in the run or was
+    never applied.
+
+    A bead can be applied several times (the full run, then proposals). before.jsonl line i
+    and applied.jsonl line i belong together; undo goes back to the before line of the first
+    apply not yet undone, and only if nothing but the applies touched the bead in between."""
+    before, applied, through = {}, {}, {}
     for r in read_jsonl(os.path.join(run_dir, "before.jsonl")):
-        before.setdefault(r["id"], r)  # the first record is the state before the run touched it
-    applied = {r["id"]: r for r in read_jsonl(os.path.join(run_dir, "applied.jsonl"))}  # the last wins
-    done = {r["id"] for r in read_jsonl(os.path.join(run_dir, "undone.jsonl"))}
+        before.setdefault(r["id"], []).append(r)
+    for r in read_jsonl(os.path.join(run_dir, "applied.jsonl")):
+        applied.setdefault(r["id"], []).append(r)
+    for r in read_jsonl(os.path.join(run_dir, "undone.jsonl")):
+        through[r["id"]] = max(through.get(r["id"], 0), r.get("through", 0))  # applies undone so far
     msgs, refused = [], False
     for id in ([only] if only else list(before)):
+        ran, was, k = applied.get(id, []), before.get(id, []), through.get(id, 0)
         if id not in before:
             msgs.append(f"{id}: not in this run's before.jsonl; skipped")
             refused = True
-        elif id not in applied:
+        elif not ran:
             msgs.append(f"{id}: not applied; skipped")
-        elif id in done:
+            refused = refused or bool(only)
+        elif k >= len(ran):
             msgs.append(f"{id}: already undone")
         else:
-            ok, msg = _undo_one(run_dir, root, bd, before[id], applied[id], timeout)
+            # Each later apply must have started from where the one before it left the bead.
+            gap = any(any(snapshot(was[i])[key] != snapshot(ran[i - 1])[key] for key in STATE_KEYS)
+                      for i in range(k + 1, len(ran)))
+            if gap:
+                msgs.append(f"{id} changed since the run; not undone")
+                refused = True
+                continue
+            ok, msg = _undo_one(run_dir, root, bd, was[k], ran, timeout)
             msgs.append(msg)
             refused = refused or not ok
     return msgs, refused
@@ -483,27 +533,23 @@ def _undo_one(run_dir, root, bd, was, ran, timeout):
     except BdReadError as e:
         return False, f"{id}: cannot read it ({e}); not undone"
     # updated_at has one-second resolution, so a same-second edit is caught by the fields.
-    if ran.get("updated_at") is None or any(now[k] != snapshot(ran)[k] for k in STATE_KEYS):
+    if ran[-1].get("updated_at") is None or any(now[k] != snapshot(ran[-1])[k] for k in STATE_KEYS):
         return False, f"{id} changed since the run; not undone"
-    argv = [bd, "--sandbox", "update", id]
-    for l in sorted(set(was["labels"]) - set(now["labels"])):
-        argv += ["--add-label", l]
-    for l in sorted(set(now["labels"]) - set(was["labels"])):
-        argv += ["--remove-label", l]
-    if was["priority"] != now["priority"]:
-        argv += [f"--priority={was['priority']}"]
-    if was["status"] != now["status"]:
-        argv += [f"--status={was['status']}"]
-    if was["notes"] != now["notes"]:
-        argv += [f"--notes={was['notes']}"]  # wholesale; an empty value clears them
+    was = snapshot(was)
+    argv = restore_argv(bd, was, now)
     if len(argv) > 4:
         error = _run(argv, root, timeout)
         if error:
-            return False, f"{id}: undo failed ({error})"
+            return False, f"{id}: undo failed ({error}); by hand: {' '.join(shlex.quote(a) for a in argv)}"
     try:
-        stamp = bd_show(root, bd, id).get("updated_at")
+        after = snapshot(bd_show(root, bd, id))
     except BdReadError:
-        stamp = None
+        after = None
     append_jsonl(os.path.join(run_dir, "undone.jsonl"),
-                 [{"id": id, "undone_at": datetime.datetime.now().isoformat(timespec="seconds"), "updated_at": stamp}])
+                 [{"id": id, "through": len(ran), "undone_at": datetime.datetime.now().isoformat(timespec="seconds"),
+                   "updated_at": after and after["updated_at"]}])
+    off = [k for k in STATE_KEYS if k != "updated_at" and (after is None or after[k] != was[k])]
+    if off:
+        # bd could not put it back exactly: never say "restored" for that.
+        return False, f"{id}: restored, but {', '.join(off)} differ from before; fix by hand"
     return True, f"{id}: restored"

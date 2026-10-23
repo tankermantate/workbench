@@ -95,7 +95,7 @@ def write_proposals(run_dir, proposals):
 
 def run_apply(run_dir, root, ops, day, proposal=None):
     try:
-        applied, failed, error = wb_groom.apply_ops(run_dir, root, ops, BD, day.isoformat(), proposal)
+        applied, failed, error, recorded = wb_groom.apply_ops(run_dir, root, ops, BD, day.isoformat(), proposal)
     except wb_groom.BdReadError as e:
         print(f"wb-groom: nothing applied: {e}", file=sys.stderr)
         return EXIT_BD
@@ -103,8 +103,9 @@ def run_apply(run_dir, root, ops, day, proposal=None):
         print(f"wb-groom: nothing applied: cannot write the run record: {e}", file=sys.stderr)
         return EXIT_RUN_DIR
     if failed:
-        print(f"wb-groom: {failed} failed ({error}); stopped after {len(applied)} bead(s), "
-              f"recorded in applied.jsonl; undo with: wb-groom undo {run_dir}", file=sys.stderr)
+        after = f"recorded in applied.jsonl; undo with: wb-groom undo {run_dir}" if recorded else \
+            f"{failed} is NOT in applied.jsonl, so undo cannot see it"
+        print(f"wb-groom: {failed} failed ({error}); stopped after {len(applied)} bead(s) ({after})", file=sys.stderr)
         return EXIT_WRITE
     print(f"applied {len(applied)} bead(s)")
     return 0

@@ -181,6 +181,10 @@ if sys.argv[1] == "applied":
     live = {b["id"]: b for b in json.load(open(t + "/s/.beads/fake.json"))}
     rec = [json.loads(l) for l in open(t + "/r/applied.jsonl")]
     print(len(rec) == 3 and all(r["updated_at"] == live[r["id"]]["updated_at"] != "2026-10-01T00:00:00Z" for r in rec))
+elif sys.argv[1] == "close":
+    c = [c for c in map(json.loads, open(sys.argv[2])) if "close" in c][0]
+    r = [a for a in c if "$(touch" in a]
+    print(len(r), r[0].startswith("--reason="), "\n" in r[0])
 else:
     calls = [json.loads(l) for l in open(sys.argv[2])]
     u = [c for c in calls if "update" in c and "acme-9" in c][0]
@@ -325,6 +329,110 @@ assert_eq "apply --proposal with no such proposal: refused" "$?" "7"
 fresh; printf '{' > "$T/r/decisions.json"; apply >/dev/null 2>&1
 assert_eq "apply: unreadable decisions: exit 3" "$?" "3"
 assert_eq "... nothing applied" "$(grep -cE '(^| )update ' "$T/bd.log")" "0"
+
+# --- fix round 1 ---
+# edit ID KEY VALUE(JSON): a human editing a bead behind the run's back
+edit() { python3 - "$T/s/.beads/fake.json" "$1" "$2" "$3" <<'PY'
+import json, sys
+p, id, k, v = sys.argv[1:]
+b = json.load(open(p))
+for x in b:
+    if x["id"] == id:
+        x[k] = json.loads(v); x["updated_at"] = "2026-10-23T13:30:00Z"
+json.dump(b, open(p, "w"))
+PY
+}
+addbead() { python3 - "$T/s/.beads/fake.json" "$1" <<'PY'
+import json, sys
+p = sys.argv[1]; b = json.load(open(p)); b.append(json.loads(sys.argv[2])); json.dump(b, open(p, "w"))
+PY
+}
+pnum() { python3 -c "import json; print([i+1 for i,p in enumerate(json.load(open('$T/r/proposals.json'))) if p['kind']=='$1'][0])"; }
+nwrites() { grep -cE '(^| )(update|close|undefer) ' "$T/bd.log"; }
+
+# I1: a write that can't be recorded is reported as written, not as "nothing applied"
+fresh; cp "$T/D.json" "$T/r/decisions.json"; : > "$T/r/applied.jsonl"; chmod 444 "$T/r/applied.jsonl"
+if [ "$(id -u)" != 0 ]; then
+  apply >"$T/out" 2>"$T/err"; rc=$?
+  assert_eq "unrecordable write: exit 5, not 6" "$rc" "5"
+  assert_contains "... says the bead was written but not recorded" "$(cat "$T/err")" "acme-4"
+  assert_contains "... " "$(cat "$T/err")" "written but not recorded"
+  assert_not_contains "... and does not claim nothing was applied" "$(cat "$T/err")" "nothing applied"
+  assert_contains "... and prints the manual restore argv" "$(cat "$T/err")" "--sandbox update acme-4"
+  assert_contains "... restoring the wave label" "$(cat "$T/err")" "--add-label wave:1"
+  assert_eq "... and stops after that bead" "$(grep -cE '(^| )update ' "$T/bd.log")" "1"
+fi
+chmod 644 "$T/r/applied.jsonl"
+
+# I2: undo checks the chain of applies
+fresh; cp "$T/D.json" "$T/r/decisions.json"; apply >/dev/null 2>&1
+PRI=$(pnum priority)
+edit acme-9 labels '["human"]'
+apply --proposal "$PRI" >/dev/null 2>&1
+out="$(undo 2>&1)"; rc=$?
+assert_eq "undo: a human edit between two applies is refused, exit 8" "$rc" "8"
+assert_contains "... naming the bead" "$out" "acme-9 changed since the run; not undone"
+assert_eq "... leaving it alone" "$(field acme-9 labels)" "['human']"
+assert_eq "... while the other beads are restored" "$(field acme-4 labels)" "['wave:1']"
+fresh; cp "$T/D.json" "$T/r/decisions.json"; apply >/dev/null 2>&1
+PRI=$(pnum priority); undo >/dev/null 2>&1
+apply --proposal "$PRI" >/dev/null 2>&1
+assert_eq "a proposal applied after an undo: the bead has it" "$(field acme-9 priority)" "1"
+out="$(undo 2>&1)"; rc=$?
+assert_eq "... and is undoable, exit 0" "$rc" "0"
+assert_contains "... the bead is restored, not 'already undone'" "$out" "acme-9: restored"
+assert_eq "... to its priority" "$(field acme-9 priority)" "2"
+assert_contains "... earlier beads are still 'already undone'" "$out" "acme-4: already undone"
+
+# I3 and M4: undefer and close come back exactly, and note the op
+fresh; addbead '{"id":"acme-14","title":"Later","status":"deferred","priority":2,"labels":[],"defer_until":"2027-01-05T00:00:00Z","updated_at":"2026-10-01T00:00:00Z"}'
+printf '%s' '{"changes":[{"id":"acme-14","kind":"undefer","why":"back","protected":false},{"id":"acme-1","kind":"close","why":"done","protected":false}]}' > "$T/r/decisions.json"
+apply >/dev/null 2>&1; UND=$(pnum undefer); CLO=$(pnum close)
+apply --proposal "$UND" >/dev/null 2>&1; apply --proposal "$CLO" >/dev/null 2>&1
+assert_eq "undefer: opens it and drops the date" "$(field acme-14 status) $(field acme-14 defer_until)" "open "
+assert_contains "undefer: gets a groomed note (M4)" "$(field acme-14 notes)" "groomed 2026-10-23: undefer — back"
+assert_contains "close: gets a groomed note (M4)" "$(field acme-1 notes)" "groomed 2026-10-23: close — done"
+assert_eq "close: closed with a reason" "$(field acme-1 status) $(field acme-1 close_reason)" "closed done"
+out="$(undo 2>&1)"; rc=$?
+assert_eq "undo of undefer and close: exit 0" "$rc" "0"
+assert_eq "undo: undefer comes back deferred with the same date" "$(field acme-14 status) $(field acme-14 defer_until)" "deferred 2027-01-05T00:00:00Z"
+assert_eq "undo: close comes back open, closed_at and close_reason gone" "$(field acme-1 status)|$(field acme-1 closed_at)|$(field acme-1 close_reason)|$(field acme-1 notes)" "open|||"
+assert_not_contains "undo: nothing to do by hand" "$out" "by hand"
+
+# M5: a named bead that was never applied exits 8
+fresh; cp "$T/D.json" "$T/r/decisions.json"; FAKE_BD_UPDATE_FAIL_ID=acme-4 apply >/dev/null 2>&1
+undo acme-10 >"$T/out" 2>&1; rc=$?
+assert_eq "undo ID for a bead in before.jsonl but not applied: exit 8" "$rc" "8"
+assert_contains "... and says so" "$(cat "$T/out")" "acme-10: not applied"
+
+# M8: before.jsonl unwritable (proposals.json writable): exit 6, nothing written
+if [ "$(id -u)" != 0 ]; then
+  fresh; cp "$T/D.json" "$T/r/decisions.json"; : > "$T/r/before.jsonl"; chmod 444 "$T/r/before.jsonl"
+  apply >/dev/null 2>"$T/err"; rc=$?
+  assert_eq "unwritable before.jsonl: exit 6" "$rc" "6"
+  assert_eq "... nothing applied" "$(nwrites)" "0"
+  assert_contains "... proposals.json was still written" "$(ls "$T/r")" "proposals.json"
+  chmod 644 "$T/r/before.jsonl"
+  fresh; cp "$T/D.json" "$T/r/decisions.json"; apply >/dev/null 2>&1; PRI=$(pnum priority); n=$(nwrites)
+  chmod 444 "$T/r/before.jsonl"
+  apply --proposal "$PRI" >/dev/null 2>"$T/err"; rc=$?
+  assert_eq "unwritable before.jsonl, --proposal: exit 6" "$rc" "6"
+  assert_eq "... nothing applied" "$(nwrites)" "$n"
+  assert_eq "... the bead is untouched" "$(field acme-9 priority)" "2"
+  chmod 644 "$T/r/before.jsonl"
+fi
+
+# M9: a hostile close reason is one argv element
+fresh
+python3 - "$T/r/decisions.json" "$HOSTILE" <<'PY'
+import json, sys
+json.dump({"changes": [{"id": "acme-1", "kind": "close", "why": sys.argv[2], "protected": False}]}, open(sys.argv[1], "w"))
+PY
+apply >/dev/null 2>&1; apply --proposal "$(pnum close)" >/dev/null 2>&1
+assert_eq "hostile close reason: the bead is closed" "$(field acme-1 status)" "closed"
+assert_eq "hostile close reason: nothing executed" "$(ls "$T" | grep -c '^pwned')" "0"
+assert_eq "hostile close reason: one --reason= element, no newline" "$(chk close "$T/argv.log")" "1 True False"
+
 unset FAKE_BD_STATEFUL FAKE_BD_LOG FAKE_BD_ARGV_LOG
 
 finish
