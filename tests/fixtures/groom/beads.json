@@ -1,0 +1,15 @@
+[
+  {"id":"acme-1","title":"Plain","status":"open","priority":2,"labels":[]},
+  {"id":"acme-2","title":"Money by label","status":"open","priority":2,"labels":["ws:money"]},
+  {"id":"acme-3","title":"Claimed","status":"in_progress","priority":2,"labels":["wave:1"]},
+  {"id":"acme-4","title":"NOW, unprotected","status":"open","priority":2,"labels":["wave:1"]},
+  {"id":"acme-5","title":"NOW, protected","status":"open","priority":2,"labels":["wave:1","customer"]},
+  {"id":"acme-6","title":"NEXT already","status":"open","priority":2,"labels":["wave:2"]},
+  {"id":"acme-7","title":"NEXT, protected","status":"open","priority":2,"labels":["wave:2","ws:money"]},
+  {"id":"acme-8","title":"NOW, protected","status":"open","priority":2,"labels":["wave:1","ws:money"]},
+  {"id":"acme-9","title":"Plain","status":"open","priority":2,"labels":[]},
+  {"id":"acme-10","title":"Plain","status":"open","priority":2,"labels":[]},
+  {"id":"acme-11","title":"Plain","status":"open","priority":2,"labels":[]},
+  {"id":"acme-12","title":"Iceboxed","status":"open","priority":4,"labels":["icebox"]},
+  {"id":"acme-13","title":"Flagged","status":"open","priority":1,"labels":["attention"]}
+]

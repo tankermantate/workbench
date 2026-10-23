@@ -1,0 +1,72 @@
+#!/usr/bin/env python3
+"""wb-groom — the apply half of weekly grooming (the judge writes decisions.json).
+
+  wb-groom ops RUN_DIR SPACE_ROOT [--plan PLAN_DIR]
+      What RUN_DIR/decisions.json comes to against the live beads in SPACE_ROOT, as TSV:
+        id, kind, value, why      an op workbench may apply by itself
+        proposal, id, kind, to, why, reason   a change left for review (numbered by line order)
+        dropped, "<id>: <reason>" a decision refused
+      PLAN_DIR is the space's plan directory; without one the plan is missing and every op
+      becomes a proposal. Exits 3 (decisions.json unreadable) or 4 (bd could not be read)
+      with nothing on stdout. WB_TODAY=YYYY-MM-DD fixes "today" for tests.
+"""
+import datetime
+import json
+import os
+import sys
+
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.realpath(__file__)), "..", "lib"))
+import wb_groom  # noqa: E402  (lives in lib/; realpath, since install.sh links bin/ elsewhere)
+
+BD = os.environ.get("WB_BD", "bd")
+EXIT_DECISIONS, EXIT_BD = 3, 4
+
+
+def tsv(*fields):
+    return "\t".join(" ".join(str(f).split()) for f in fields)
+
+
+def cmd_ops(run_dir, root, plan_dir):
+    try:
+        with open(os.path.join(run_dir, "decisions.json"), encoding="utf-8") as f:
+            decisions = json.load(f)
+        if not isinstance(decisions, dict):
+            raise ValueError("not an object")
+    except (OSError, ValueError):  # JSONDecodeError and UnicodeDecodeError are ValueErrors
+        print("decisions.json unreadable", file=sys.stderr)
+        return EXIT_DECISIONS
+    try:
+        beads = wb_groom.read_beads(root, BD)
+    except wb_groom.BdReadError as e:
+        print(f"wb-groom: {e}", file=sys.stderr)
+        return EXIT_BD
+    today = datetime.date.fromisoformat(os.environ["WB_TODAY"]) if os.environ.get("WB_TODAY") else datetime.date.today()
+    plan = wb_groom.read_plan(plan_dir) if plan_dir else None
+    ops, proposals, dropped = wb_groom.plan_ops(decisions, beads, plan, today)
+    for o in ops:
+        print(tsv(o.id, o.kind, o.value, o.why))
+    for p in proposals:
+        print(tsv("proposal", p["id"], p["kind"], p["to"], p["why"], p["reason"]))
+    for d in dropped:
+        print(tsv("dropped", d))
+    return 0
+
+
+def main(argv):
+    if len(argv) >= 3 and argv[0] == "ops":
+        rest, plan_dir = argv[1:], None
+        if "--plan" in rest:
+            i = rest.index("--plan")
+            if i + 1 >= len(rest):
+                print(__doc__, file=sys.stderr)
+                return 2
+            plan_dir = rest[i + 1]
+            del rest[i:i + 2]
+        if len(rest) == 2:
+            return cmd_ops(rest[0], rest[1], plan_dir)
+    print(__doc__, file=sys.stderr)
+    return 2
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv[1:]))
