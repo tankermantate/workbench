@@ -11,7 +11,7 @@ spaces.tsv (wb-spaces output).
                                screen 2 lines: kind, id, worktree, header, text
                                (sep and msg rows have an empty id, so the
                                preview shows nothing for them); start here
-                               (wb-backlog's picks, then the 30-day flow) comes
+                               (flagged beads, wb-backlog's picks, then the 30-day flow) comes
                                first; reads bd and keeps what it read in
                                TMP/work.<INDEX>.json
   wb-ui filter-work TMP INDEX QUERY
@@ -144,8 +144,15 @@ def print_work(tmp, work, query):
         print_matches(tmp, rows, pats, layout)
         return
     picks = sorted((r for r in rows if r[10] != "-"), key=lambda r: int(r[10].split(" ", 1)[0]))
-    if picks:
+    # flagged beads lead and are never capped away: the rest are counted, not hidden
+    # (every bead is still in its own section below)
+    flagged = sorted((r for r in rows if r[11] != "-"), key=lambda r: int(r[11].split(" ", 1)[0]))
+    if flagged or picks:
         print("sep\t\t-\t── start here ──\t")
+        for r in flagged[:ATTENTION_SHOWN]:
+            print_row(r, (), layout, "! " + r[11].split(" ", 1)[1])
+        if len(flagged) > ATTENTION_SHOWN:
+            print(f"msg\t\t-\t+{len(flagged) - ATTENTION_SHOWN} more need attention\t")
         for r in picks:
             print_row(r, (), layout, r[10].split(" ", 1)[1])
         if work.get("flow"):
@@ -153,7 +160,7 @@ def print_work(tmp, work, query):
     waves = any(r[4] != "-" for r in rows)
     current = None
     for r in rows:
-        if (waves or picks) and r[4] != current:
+        if (waves or picks or flagged) and r[4] != current:
             current = r[4]
             print(f"sep\t\t-\t── {SECTIONS.get(current, current)} ──\t")
         print_row(r, (), layout)
@@ -189,6 +196,7 @@ def print_matches(tmp, rows, pats, layout):
             print_row(r, pats, layout)
 
 
+ATTENTION_SHOWN = 5
 EPIC_W, DIM = 20, "\033[2m"
 SECTIONS = {"-": "everything else", "ICEBOX": "icebox"}  # dividers; NOW and NEXT as they are
 

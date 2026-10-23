@@ -100,6 +100,9 @@ you are working before deciding what to do in it.
   unblock. Each pick ends with why, dim; one without a done line says `shape first`. The picks are
   listed again in their own sections, and aren't shown while searching. Fixed rules, so the same
   backlog always gives the same picks.
+  Beads labelled `attention` (planning rituals) come first under the divider, even in a backlog of
+  three or fewer: up to five, by priority then id, each ending with its reason, dim, prefixed `! `,
+  then `+N more need attention`. They are never also picks, and each is still listed in its section.
 - **The 30-day flow** (added 2026-10-23): under the picks, one line counts beads created and closed
   in the last 30 days and the difference. Closed beads need a second bd read, run alongside the
   first (about 0.8s more on a 400-bead store); if it fails, the line is left out, never guessed.

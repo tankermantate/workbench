@@ -131,6 +131,23 @@ assert_contains "render-work: the icebox divider" "$out" "── icebox ──"
 assert_contains "render-work: an idle claim says how long, dim" "$(row "$out" ice-3)" $'Forgotten tab  \e[2midle 23d\e[0m'
 assert_not_contains "render-work: a fresh row has no idle tag" "$(row "$out" ice-2)" "idle"
 
+# attention: flagged beads lead start-here, five then a count, even in a tiny backlog
+mkstore "$T/att"; mkdir -p "$T/attui"
+python3 - "$T/att/.beads/fake.json" <<'EOF4'
+import json, sys
+beads = [{"id": f"att-{i}", "title": f"Flagged {i}", "status": "open", "priority": i % 3 + 1,
+          "labels": ["attention"], "notes": "attention: due Nov 2 · money" if i == 1 else ""} for i in range(1, 8)]
+json.dump(beads, open(sys.argv[1], "w"))
+EOF4
+printf 'Att\t-\t%s\ttrue\t1\tx\tatt\t-\t-\t0\n' "$T/att" > "$T/attui/spaces.tsv"
+out="$("$REPO/bin/wb-ui" render-work "$T/attui" 1)"
+assert_eq "render-work: attention first, five then a count" \
+  "$(printf '%s\n' "$out" | sed -n 2,8p | cut -f1,2 | tr '\t\n' ': ')" "sep: open:att-3 open:att-6 open:att-1 open:att-4 open:att-7 msg: "
+assert_contains "render-work: the count line" "$(printf '%s\n' "$out" | sed -n 8p)" "+2 more need attention"
+assert_contains "render-work: attention reason dim with !" "$(printf '%s\n' "$out" | awk -F'\t' '$2=="att-1" {print $5; exit}')" $'\e[2m! due Nov 2 · money\e[0m'
+assert_contains "render-work: attention shown in a tiny backlog" "$out" "── start here ──"
+assert_contains "render-work: every attention bead still sits in its section" "$(printf '%s\n' "$out" | sed -n '9,$p')" "att-2"
+
 # fallback menu: Acme, then the first bead (item 2; item 1 is ✦ something new)
 out="$(printf '1\n2\n' | WB_NO_FZF=1 L)"
 assert_contains "menu screen 1 shows counts" "$out" "NOW 2 · NEXT 1 · claimed 1"
