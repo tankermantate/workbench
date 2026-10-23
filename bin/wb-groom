@@ -9,6 +9,27 @@
       PLAN_DIR is the space's plan directory; without one the plan is missing and every op
       becomes a proposal. Exits 3 (decisions.json unreadable) or 4 (bd could not be read)
       with nothing on stdout. WB_TODAY=YYYY-MM-DD fixes "today" for tests.
+
+  wb-groom apply RUN_DIR SPACE_ROOT [--plan PLAN_DIR] [--proposal N]
+      Applies the ops (above) to SPACE_ROOT's beads, with bd --sandbox, one update per bead.
+      Writes in RUN_DIR: proposals.json (the proposals, numbered by position from 1), then
+      before.jsonl (each touched bead's labels, priority, status, notes, updated_at, fsynced
+      before the first bd write), then applied.jsonl (one line per bead: the ops, the same
+      fields read back after the writes, "proposal" N or null, "error" on a failure).
+      --proposal N applies only proposal N of proposals.json (its before-state is appended
+      to before.jsonl, its result to applied.jsonl): icebox, wave, unwave, priority, close,
+      undefer, attention, unattention. merge, dep and date are applied by hand in review.
+      A full apply of a run that has a before.jsonl is refused, as is a proposal applied twice.
+  wb-groom undo RUN_DIR [ID]
+      Restores labels, priority, status and notes from before.jsonl (the first record of a
+      bead wins) and appends no note; each is recorded in undone.jsonl and skipped on a second
+      undo. A bead whose state no longer matches its applied.jsonl line is refused:
+      "ID changed since the run; not undone".
+
+Exit codes: 0 ok; 2 usage; 3 decisions.json unreadable; 4 bd could not be read; 5 a bd write
+failed (the run stops; what was applied is in applied.jsonl); 6 RUN_DIR not writable (nothing
+applied); 7 apply refused (already applied, no such proposal, applied by hand); 8 undo refused
+or skipped a named bead.
 """
 import datetime
 import json
@@ -19,14 +40,15 @@ sys.path.insert(0, os.path.join(os.path.dirname(os.path.realpath(__file__)), "..
 import wb_groom  # noqa: E402  (lives in lib/; realpath, since install.sh links bin/ elsewhere)
 
 BD = os.environ.get("WB_BD", "bd")
-EXIT_DECISIONS, EXIT_BD = 3, 4
+EXIT_DECISIONS, EXIT_BD, EXIT_WRITE, EXIT_RUN_DIR, EXIT_REFUSED, EXIT_UNDO = 3, 4, 5, 6, 7, 8
 
 
 def tsv(*fields):
     return "\t".join(" ".join(str(f).split()) for f in fields)
 
 
-def cmd_ops(run_dir, root, plan_dir):
+def load(run_dir, root, plan_dir):
+    """(decisions, beads, plan, today), or an exit code after saying what is wrong."""
     try:
         with open(os.path.join(run_dir, "decisions.json"), encoding="utf-8") as f:
             decisions = json.load(f)
@@ -40,9 +62,19 @@ def cmd_ops(run_dir, root, plan_dir):
     except wb_groom.BdReadError as e:
         print(f"wb-groom: {e}", file=sys.stderr)
         return EXIT_BD
-    today = datetime.date.fromisoformat(os.environ["WB_TODAY"]) if os.environ.get("WB_TODAY") else datetime.date.today()
-    plan = wb_groom.read_plan(plan_dir) if plan_dir else None
-    ops, proposals, dropped = wb_groom.plan_ops(decisions, beads, plan, today)
+    return decisions, beads, wb_groom.read_plan(plan_dir) if plan_dir else None, today()
+
+
+def today():
+    return datetime.date.fromisoformat(os.environ["WB_TODAY"]) if os.environ.get("WB_TODAY") else datetime.date.today()
+
+
+def cmd_ops(run_dir, root, plan_dir):
+    got = load(run_dir, root, plan_dir)
+    if isinstance(got, int):
+        return got
+    decisions, beads, plan, day = got
+    ops, proposals, dropped = wb_groom.plan_ops(decisions, beads, plan, day)
     for o in ops:
         print(tsv(o.id, o.kind, o.value, o.why))
     for p in proposals:
@@ -52,18 +84,118 @@ def cmd_ops(run_dir, root, plan_dir):
     return 0
 
 
-def main(argv):
-    if len(argv) >= 3 and argv[0] == "ops":
-        rest, plan_dir = argv[1:], None
-        if "--plan" in rest:
-            i = rest.index("--plan")
+def write_proposals(run_dir, proposals):
+    path = os.path.join(run_dir, "proposals.json")
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump(proposals, f, indent=1)
+        f.write("\n")
+        f.flush()
+        os.fsync(f.fileno())
+
+
+def run_apply(run_dir, root, ops, day, proposal=None):
+    try:
+        applied, failed, error = wb_groom.apply_ops(run_dir, root, ops, BD, day.isoformat(), proposal)
+    except wb_groom.BdReadError as e:
+        print(f"wb-groom: nothing applied: {e}", file=sys.stderr)
+        return EXIT_BD
+    except OSError as e:
+        print(f"wb-groom: nothing applied: cannot write the run record: {e}", file=sys.stderr)
+        return EXIT_RUN_DIR
+    if failed:
+        print(f"wb-groom: {failed} failed ({error}); stopped after {len(applied)} bead(s), "
+              f"recorded in applied.jsonl; undo with: wb-groom undo {run_dir}", file=sys.stderr)
+        return EXIT_WRITE
+    print(f"applied {len(applied)} bead(s)")
+    return 0
+
+
+def cmd_apply(run_dir, root, plan_dir, number):
+    def refuse(msg):
+        print(f"wb-groom: {msg}", file=sys.stderr)
+        return EXIT_REFUSED
+
+    if number is None and wb_groom.read_jsonl(os.path.join(run_dir, "before.jsonl")):
+        return refuse(f"{run_dir} already applied; start a new run")
+    if number is not None:
+        try:
+            with open(os.path.join(run_dir, "proposals.json"), encoding="utf-8") as f:
+                proposals = json.load(f)
+        except (OSError, ValueError):
+            return refuse("no proposals.json in the run; apply the run first")
+        if not (isinstance(proposals, list) and 1 <= number <= len(proposals)):
+            return refuse(f"no proposal {number} in this run")
+        p = proposals[number - 1]
+        if p["kind"] in wb_groom.BY_HAND:
+            return refuse(f"proposal {number} ({p['kind']}) is applied by hand in review")
+        if any(r.get("proposal") == number for r in wb_groom.read_jsonl(os.path.join(run_dir, "applied.jsonl"))):
+            return refuse(f"proposal {number} already applied")
+        # the label an op names; wave, unwave and priority carry theirs in `to`
+        value = {"icebox": wb_groom.ICEBOX, "attention": wb_groom.ATTENTION,
+                 "unattention": wb_groom.ATTENTION}.get(p["kind"], p["to"])
+        if value == "" and p["kind"] in ("wave", "unwave", "priority"):
+            return refuse(f"proposal {number} ({p['kind']}) has no value to apply")
+        return run_apply(run_dir, root, [wb_groom.Op(p["id"], p["kind"], value, p["why"])], today(), number)
+    got = load(run_dir, root, plan_dir)
+    if isinstance(got, int):
+        return got
+    decisions, beads, plan, day = got
+    ops, proposals, dropped = wb_groom.plan_ops(decisions, beads, plan, day)
+    try:
+        write_proposals(run_dir, proposals)
+    except OSError as e:
+        print(f"wb-groom: nothing applied: cannot write the run record: {e}", file=sys.stderr)
+        return EXIT_RUN_DIR
+    for d in dropped:
+        print(f"dropped: {d}")
+    print(f"{len(proposals)} proposal(s) left for review")
+    return run_apply(run_dir, root, ops, day)
+
+
+def cmd_undo(run_dir, only):
+    # The bead store is wherever the run was applied; bd finds it from the run's own record.
+    try:
+        root = wb_groom.read_jsonl(os.path.join(run_dir, "applied.jsonl"))[0].get("root")
+    except IndexError:
+        root = None
+    msgs, refused = wb_groom.undo_run(run_dir, root, BD, only)
+    for m in msgs:
+        print(m)
+    return EXIT_UNDO if refused else 0
+
+
+def options(rest, names):
+    """(positionals, {name: value}) from REST, or None for a missing value or unknown option."""
+    found, pos, i = {}, [], 0
+    while i < len(rest):
+        if rest[i] in names:
             if i + 1 >= len(rest):
-                print(__doc__, file=sys.stderr)
-                return 2
-            plan_dir = rest[i + 1]
-            del rest[i:i + 2]
-        if len(rest) == 2:
-            return cmd_ops(rest[0], rest[1], plan_dir)
+                return None
+            found[rest[i]] = rest[i + 1]
+            i += 2
+        elif rest[i].startswith("--"):
+            return None
+        else:
+            pos.append(rest[i])
+            i += 1
+    return pos, found
+
+
+def main(argv):
+    cmd, rest = (argv[0], argv[1:]) if argv else ("", [])
+    if cmd in ("ops", "apply"):
+        got = options(rest, ("--plan", "--proposal") if cmd == "apply" else ("--plan",))
+        if got and len(got[0]) == 2:
+            (run_dir, root), opt = got
+            if cmd == "ops":
+                return cmd_ops(run_dir, root, opt.get("--plan"))
+            number = opt.get("--proposal")
+            if number is None or number.isdigit():
+                return cmd_apply(run_dir, root, opt.get("--plan"), int(number) if number else None)
+    elif cmd == "undo":
+        got = options(rest, ())
+        if got and len(got[0]) in (1, 2):
+            return cmd_undo(got[0][0], got[0][1] if len(got[0]) == 2 else None)
     print(__doc__, file=sys.stderr)
     return 2
 

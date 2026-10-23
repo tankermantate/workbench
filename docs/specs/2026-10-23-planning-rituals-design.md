@@ -115,8 +115,11 @@ confirm it has no other effect), so applied changes stay local until the user sy
 Each run lives in `~/.local/state/workbench/groom/<space>/<run-id>/`: inputs' hashes, `decisions.json`,
 `summary.md`, and `before.jsonl` — each touched bead's labels, priority, status and notes **before**
 the change, written and synced to disk before the first bd write. If `before.jsonl` can't be
-written, the run applies nothing. `wb-groom undo <run> [<bead>]` restores from it, and refuses
-(saying why) when a bead has changed since the run.
+written, the run applies nothing. After its writes `apply` reads each bead back and records it in
+`applied.jsonl` (with that `updated_at`). `wb-groom undo <run> [<bead>]` restores labels, priority,
+status and notes exactly from `before.jsonl` (it appends no note) and records each bead in
+`undone.jsonl`; it refuses, naming the bead, when the bead no longer matches its `applied.jsonl`
+line, i.e. someone changed it since the run.
 
 ### Shared stores
 

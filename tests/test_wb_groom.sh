@@ -158,4 +158,173 @@ echo "not json" > "$T/bd/stdout"; echo 0 > "$T/bd/rc"; rm "$T/bd/stderr"
 FAKE_BD_DIR="$T/bd" "$WG" ops "$RUN" "$T/store" >/dev/null 2>&1
 assert_eq "bd output that is not a bead list: exit 4" "$?" "4"
 
+# --- apply and undo ---
+# A fresh store and run dir per case; fakes write for real (FAKE_BD_STATEFUL) and log every call.
+fresh() {
+  chmod -R u+w "$T/r" 2>/dev/null; rm -rf "$T/s" "$T/r"; mkstore "$T/s"; mkdir -p "$T/r"
+  python3 - "$FX/beads.json" "$T/s/.beads/fake.json" <<'PY'
+import json, sys
+b = json.load(open(sys.argv[1]))
+for x in b: x["updated_at"] = "2026-10-01T00:00:00Z"
+b[3]["notes"] = "kept from before"
+json.dump(b, open(sys.argv[2], "w"))
+PY
+  : > "$T/bd.log"; : > "$T/argv.log"
+}
+bead() { python3 -c "import json,sys; print(json.dumps([b for b in json.load(open('$T/s/.beads/fake.json')) if b['id']=='$1'][0], sort_keys=True))"; }
+field() { bead "$1" | python3 -c "import json,sys; print(json.load(sys.stdin).get('$2', ''))"; }
+# chk: checks too long for $(…) with a heredoc, which bash 3.2 misparses
+cat > "$T/chk.py" <<'PY'
+import json, sys
+if sys.argv[1] == "applied":
+    t = sys.argv[2]
+    live = {b["id"]: b for b in json.load(open(t + "/s/.beads/fake.json"))}
+    rec = [json.loads(l) for l in open(t + "/r/applied.jsonl")]
+    print(len(rec) == 3 and all(r["updated_at"] == live[r["id"]]["updated_at"] != "2026-10-01T00:00:00Z" for r in rec))
+else:
+    calls = [json.loads(l) for l in open(sys.argv[2])]
+    u = [c for c in calls if "update" in c and "acme-9" in c][0]
+    note = u[u.index("--append-notes") + 1]
+    print(sum("$(touch" in a for a in u), "\nsecond line" in note, "second line; touch" in note)
+PY
+chk() { python3 "$T/chk.py" "$1" "$2"; }
+export FAKE_BD_STATEFUL=1 FAKE_BD_LOG="$T/bd.log" FAKE_BD_ARGV_LOG="$T/argv.log"
+apply() { "$WG" apply "$T/r" "$T/s" --plan "$FX/plan" "$@"; }
+undo() { "$WG" undo "$T/r" "$@"; }
+HOSTILE=$'due soon $(touch '"$T"$'/pwned) `touch '"$T"$'/pwned2`\nsecond line; touch '"$T"$'/pwned3'
+python3 - "$T/D.json" "$HOSTILE" <<'PY'
+import json, sys
+json.dump({"sprint": {"next": [{"id": "acme-4", "why": "slip", "protected": False}]},
+ "changes": [{"id": "acme-10", "kind": "icebox", "why": "no goal", "protected": False},
+             {"id": "acme-9", "kind": "priority", "to": "1", "why": "p"},
+             {"id": "acme-11", "kind": "icebox", "why": "unsure"},
+             {"id": "acme-1", "kind": "close", "why": "done", "protected": False},
+             {"id": "acme-10", "kind": "merge", "to": "acme-9", "why": "dup"}],
+ "attention": {"add": [{"id": "acme-9", "why": sys.argv[2]}]}}, open(sys.argv[1], "w"))
+PY
+fresh; cp "$T/D.json" "$T/r/decisions.json"
+FAKE_BD_REQUIRE_FILE="$T/r/before.jsonl" apply >"$T/out" 2>"$T/err"; rc=$?
+assert_eq "apply: exit 0 (before.jsonl existed, non-empty, at the first write)" "$rc" "0"
+assert_eq "apply: every write has --sandbox" "$(grep -E '(^| )(update|close|undefer) ' "$T/bd.log" | grep -vc '^--sandbox ')" "0"
+assert_eq "apply: wave move adds wave:2, removes wave:1" "$(field acme-4 labels)" "['wave:2']"
+assert_eq "apply: icebox adds the label" "$(field acme-10 labels)" "['icebox']"
+assert_contains "apply: the groomed note names the date, kind and why" "$(field acme-4 notes)" "groomed 2026-10-23: wave — NEXT: slip"
+assert_contains "apply: ... after the notes it already had" "$(field acme-4 notes)" "kept from before"
+assert_contains "apply: an attention op also notes attention:" "$(field acme-9 notes)" "attention: due soon"
+assert_eq "apply: only the op beads were written" "$(grep -E '(^| )update ' "$T/bd.log" | awk '{print $3}' | sort | tr '\n' ' ')" "acme-10 acme-4 acme-9 "
+assert_eq "apply: one update call per bead" "$(grep -cE '(^| )update ' "$T/bd.log")" "3"
+assert_eq "apply: before.jsonl has one line per touched bead" "$(wc -l < "$T/r/before.jsonl" | tr -d ' ')" "3"
+assert_eq "apply: before.jsonl keeps the notes and updated_at from before" \
+  "$(python3 -c "import json; r=[json.loads(l) for l in open('$T/r/before.jsonl')]; b=[x for x in r if x['id']=='acme-4'][0]; print(b['labels'], b['priority'], b['status'], b['notes'], b['updated_at'])")" \
+  "['wave:1'] 2 open kept from before 2026-10-01T00:00:00Z"
+assert_eq "apply: applied.jsonl stores each bead's updated_at read back after the writes" "$(chk applied "$T")" "True"
+assert_eq "apply: proposals.json holds the proposals, in order" \
+  "$(python3 -c "import json; print([(p['id'], p['kind']) for p in json.load(open('$T/r/proposals.json'))])")" \
+  "[('acme-6', 'unwave'), ('acme-7', 'unwave'), ('acme-9', 'priority'), ('acme-11', 'icebox'), ('acme-1', 'close'), ('acme-10', 'merge')]"
+assert_eq "hostile why: nothing executed" "$(ls "$T" | grep -c '^pwned')" "0"
+assert_eq "hostile why: one argv element, newline-free, behind --append-notes" "$(chk argv "$T/argv.log")" "1 False True"
+assert_eq "apply: argv starts bd --sandbox update ID" "$(python3 -c "import json; print([json.loads(l) for l in open('$T/argv.log') if 'acme-9' in l and 'update' in l][0][:3])")" "['--sandbox', 'update', 'acme-9']"
+assert_contains "apply: summary line on stdout" "$(cat "$T/out")" "applied 3"
+apply >/dev/null 2>"$T/err"; assert_eq "apply: a second full apply of a run is refused" "$?" "7"
+assert_contains "... and says why" "$(cat "$T/err")" "already applied"
+
+# undo
+undo >"$T/out" 2>"$T/err"; rc=$?
+assert_eq "undo: exit 0" "$rc" "0"
+assert_eq "undo: labels restored" "$(field acme-4 labels)" "['wave:1']"
+assert_eq "undo: labels restored to empty" "$(field acme-10 labels)" "[]"
+assert_eq "undo: notes restored exactly, no note appended" "$(field acme-4 notes)" "kept from before"
+assert_eq "undo: notes restored to none" "$(field acme-9 notes)" ""
+assert_eq "undo: appends no note anywhere" "$(grep -c 'groomed undo' "$T/s/.beads/fake.json")" "0"
+assert_eq "undo: writes pass --sandbox" "$(grep -E '(^| )update ' "$T/bd.log" | grep -vc '^--sandbox ')" "0"
+assert_eq "undo: undone.jsonl records the three beads" "$(wc -l < "$T/r/undone.jsonl" | tr -d ' ')" "3"
+out="$(undo 2>&1)"; rc=$?
+assert_eq "undo: idempotent, exit 0" "$rc" "0"
+assert_contains "undo: names an already-undone bead" "$out" "acme-4: already undone"
+assert_eq "undo: ... and writes nothing more" "$(grep -cE '(^| )update ' "$T/bd.log")" "6"
+
+# undo refuses what changed
+fresh; printf '%s' '{"changes":[{"id":"acme-10","kind":"icebox","why":"w","protected":false}]}' > "$T/r/decisions.json"
+apply >/dev/null 2>&1
+python3 - "$T/s/.beads/fake.json" <<'PY'
+import json, sys
+p = sys.argv[1]; b = json.load(open(p))
+for x in b:
+    if x["id"] == "acme-10": x["priority"], x["updated_at"] = 0, "2026-10-23T13:00:00Z"
+json.dump(b, open(p, "w"))
+PY
+out="$(undo acme-10 2>&1)"; rc=$?
+assert_eq "undo: a bead changed after the run is refused" "$rc" "8"
+assert_contains "undo: ... naming it" "$out" "acme-10 changed since the run; not undone"
+assert_eq "undo: ... and left alone" "$(field acme-10 labels)" "['icebox']"
+fresh; printf '%s' '{"changes":[{"id":"acme-10","kind":"icebox","why":"w","protected":false}]}' > "$T/r/decisions.json"
+apply >/dev/null 2>&1
+python3 - "$T/s/.beads/fake.json" <<'PY'
+import json, sys
+p = sys.argv[1]; b = json.load(open(p))
+for x in b:
+    if x["id"] == "acme-10": x["labels"].append("sneaky")   # same updated_at: the state check still sees it
+json.dump(b, open(p, "w"))
+PY
+undo acme-10 >/dev/null 2>&1; assert_eq "undo: a changed label set is refused even when updated_at matches" "$?" "8"
+undo acme-1 >"$T/out" 2>&1; rc=$?
+assert_eq "undo: a bead not in the run: skipped, non-zero" "$rc" "8"
+assert_contains "undo: ... says so" "$(cat "$T/out")" "acme-1: not in this run"
+
+# proposals, then undo of priority, status and labels
+fresh; cp "$T/D.json" "$T/r/decisions.json"; apply >/dev/null 2>&1
+ix() { python3 -c "import json; print([i+1 for i,p in enumerate(json.load(open('$T/r/proposals.json'))) if p['kind']=='$1'][0])"; }
+PRI=$(ix priority); CLO=$(ix close); MER=$(ix merge); ICE=$(ix icebox)
+apply --proposal "$PRI" >"$T/out" 2>&1; rc=$?
+assert_eq "proposal: priority applies, exit 0" "$rc" "0"
+assert_eq "proposal: the bead has the priority" "$(field acme-9 priority)" "1"
+assert_eq "proposal: only that bead was written" "$(field acme-1 status)" "open"
+apply --proposal "$PRI" >/dev/null 2>"$T/err"; assert_eq "proposal: the same one twice is refused" "$?" "7"
+assert_contains "proposal: ... says so" "$(cat "$T/err")" "already applied"
+apply --proposal "$MER" >/dev/null 2>"$T/err"; assert_eq "proposal: merge is not applied, non-zero" "$?" "7"
+assert_contains "proposal: merge is by hand" "$(cat "$T/err")" "proposal $MER (merge) is applied by hand in review"
+apply --proposal 99 >/dev/null 2>&1; assert_eq "proposal: no such number is refused" "$?" "7"
+apply --proposal "$CLO" >/dev/null 2>&1
+assert_eq "proposal: close sets the status" "$(field acme-1 status)" "closed"
+assert_contains "proposal: close passes --reason" "$(grep -E '(^| )close ' "$T/bd.log")" "--reason=done"
+apply --proposal "$ICE" >/dev/null 2>&1
+assert_eq "proposal: icebox applies" "$(field acme-11 labels)" "['icebox']"
+undo >"$T/out" 2>&1; rc=$?
+assert_eq "undo after proposals: exit 0" "$rc" "0"
+assert_eq "undo: priority back" "$(field acme-9 priority)" "2"
+assert_eq "undo: status back" "$(field acme-1 status)" "open"
+assert_eq "undo: proposal icebox back" "$(field acme-11 labels)" "[]"
+assert_eq "undo: a bead touched twice goes back to its first before-state" "$(field acme-9 labels)" "[]"
+
+# failures
+fresh; cp "$T/D.json" "$T/r/decisions.json"
+FAKE_BD_UPDATE_FAIL_ID=acme-9 apply >"$T/out" 2>"$T/err"; rc=$?
+assert_eq "apply: a failing write stops the run, exit 5" "$rc" "5"
+assert_contains "apply: ... naming the bead" "$(cat "$T/err")" "acme-9"
+assert_eq "apply: ... earlier beads stay applied and recorded, and so does the failed one, with its error" \
+  "$(python3 -c "import json; print([(r['id'], 'error' in r) for r in map(json.loads, open('$T/r/applied.jsonl'))])")" \
+  "[('acme-4', False), ('acme-10', False), ('acme-9', True)]"
+assert_eq "apply: ... before.jsonl covers every bead the run might touch" "$(wc -l < "$T/r/before.jsonl" | tr -d ' ')" "3"
+n=$(grep -cE '(^| )update ' "$T/bd.log")
+out="$(undo 2>&1)"; rc=$?
+assert_eq "undo after a failed run: exit 0" "$rc" "0"
+assert_eq "undo after a failed run: the applied beads are restored" "$(field acme-4 labels)" "['wave:1']"
+assert_eq "undo: the bead whose write failed needed no write" "$(grep -cE '(^| )update ' "$T/bd.log")" "$((n + 2))"
+fresh; cp "$T/D.json" "$T/r/decisions.json"
+FAKE_BD_UPDATE_FAIL_ID=acme-4 apply >/dev/null 2>&1
+assert_contains "undo: a bead the run never reached is skipped" "$(undo 2>&1)" "acme-10: not applied"
+fresh; cp "$T/D.json" "$T/r/decisions.json"; chmod 555 "$T/r"
+if [ "$(id -u)" != 0 ]; then
+  apply >/dev/null 2>"$T/err"; rc=$?
+  assert_eq "apply: unwritable run dir: exit 6" "$rc" "6"
+  assert_eq "apply: ... nothing applied" "$(grep -cE '(^| )(update|close) ' "$T/bd.log")" "0"
+fi
+chmod 755 "$T/r"
+fresh; printf '{}' > "$T/r/decisions.json"; apply --proposal 1 >/dev/null 2>&1
+assert_eq "apply --proposal with no such proposal: refused" "$?" "7"
+fresh; printf '{' > "$T/r/decisions.json"; apply >/dev/null 2>&1
+assert_eq "apply: unreadable decisions: exit 3" "$?" "3"
+assert_eq "... nothing applied" "$(grep -cE '(^| )update ' "$T/bd.log")" "0"
+unset FAKE_BD_STATEFUL FAKE_BD_LOG FAKE_BD_ARGV_LOG
+
 finish

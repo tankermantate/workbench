@@ -14,9 +14,77 @@
 #             FAKE_BD_SLEEP sleeps first, FAKE_BD_WARN prints a Warning line first
 #             (FAKE_BD_WARN=bracket: a '[warn] …' line, which looks like JSON)
 #   update    sleeps $FAKE_BD_UPDATE_SLEEP, exits $FAKE_BD_UPDATE_RC (default 0)
+# FAKE_BD_STATEFUL=1 makes writes real against that same .beads/fake.json (wb-groom's apply and
+# undo read back what they wrote): `update` handles --add-label, --remove-label, --append-notes,
+# --notes, -p/--priority and -s/--status, `close ID` sets status closed and `undefer ID` open;
+# each bumps the bead's updated_at to a new second. A leading --sandbox is ignored.
+#   FAKE_BD_UPDATE_FAIL_ID=ID   writes to that bead exit 1, changing nothing
+#   FAKE_BD_REQUIRE_FILE=PATH   a write exits 9, changing nothing, unless PATH exists and is not empty
 # FAKE_BD_LOG: every call's args are appended to it.
+# FAKE_BD_ARGV_LOG: every call's argv, one JSON list per line (the log above flattens a newline).
 set -u
 [ -n "${FAKE_BD_LOG:-}" ] && echo "$*" >> "$FAKE_BD_LOG"
+[ -n "${FAKE_BD_ARGV_LOG:-}" ] && python3 -c 'import json,sys; print(json.dumps(sys.argv[1:]))' "$@" >> "$FAKE_BD_ARGV_LOG"
+[ "${1:-}" = --sandbox ] && shift
+if [ -n "${FAKE_BD_STATEFUL:-}" ]; then
+  case "${1:-}" in
+    update|close|undefer)
+      [ -z "${FAKE_BD_REQUIRE_FILE:-}" ] || [ -s "$FAKE_BD_REQUIRE_FILE" ] || { echo "Error: $FAKE_BD_REQUIRE_FILE not written yet" >&2; exit 9; }
+      d=$PWD
+      while [ ! -f "$d/.beads/fake.json" ] && [ "$d" != / ]; do d=$(dirname "$d"); done
+      python3 - "$d/.beads" "${FAKE_BD_UPDATE_FAIL_ID:-}" "$@" <<'PY'
+import json, sys
+dotbeads, fail_id, cmd, bid, *rest = sys.argv[1:]
+if bid == fail_id:
+    print(f"Error: cannot update {bid}", file=sys.stderr)
+    sys.exit(1)
+path = dotbeads + "/fake.json"
+beads = json.load(open(path))
+b = next((x for x in beads if x["id"] == bid), None)
+if b is None:
+    print(f"Error: no issue found matching {bid!r}", file=sys.stderr)
+    sys.exit(1)
+labels = list(b.get("labels") or [])
+i = 0
+def val():
+    global i
+    a = rest[i]
+    if "=" in a and a.startswith("--"):
+        return a.split("=", 1)[1]
+    i += 1
+    return rest[i]
+if cmd == "close": b["status"] = "closed"
+if cmd == "undefer": b["status"] = "open"
+while i < len(rest):
+    a = rest[i]
+    flag = a.split("=", 1)[0]
+    if flag == "--add-label":
+        v = val(); labels.append(v) if v not in labels else None
+    elif flag == "--remove-label":
+        v = val(); labels = [l for l in labels if l != v]
+    elif flag == "--append-notes":
+        v = val(); b["notes"] = (b["notes"] + "\n" if b.get("notes") else "") + v
+    elif flag == "--notes":
+        v = val()
+        if v: b["notes"] = v
+        else: b.pop("notes", None)
+    elif flag in ("-p", "--priority"): b["priority"] = int(val().lstrip("P"))
+    elif flag in ("-s", "--status"): b["status"] = val()
+    elif flag == "--reason": val()
+    else:
+        print(f"fake bd: unsupported flag {a}", file=sys.stderr); sys.exit(2)
+    i += 1
+b["labels"] = labels
+try: tick = int(open(dotbeads + "/fake-clock").read()) + 1
+except OSError: tick = 1
+open(dotbeads + "/fake-clock", "w").write(str(tick))
+b["updated_at"] = "2026-10-23T12:%02d:%02dZ" % divmod(tick, 60)
+json.dump(beads, open(path, "w"))
+print(f"Updated {bid}")
+PY
+      exit $? ;;
+  esac
+fi
 if [ -z "${FAKE_BD_DIR:-}" ]; then
   case "${1:-}" in
     show)
