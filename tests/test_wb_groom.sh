@@ -384,6 +384,23 @@ assert_contains "... the bead is restored, not 'already undone'" "$out" "acme-9:
 assert_eq "... to its priority" "$(field acme-9 priority)" "2"
 assert_contains "... earlier beads are still 'already undone'" "$out" "acme-4: already undone"
 
+# I2 again: a before line with no applied line (a run that stopped) must not pair with a later apply
+fresh; cp "$T/D.json" "$T/r/decisions.json"; FAKE_BD_UPDATE_FAIL_ID=acme-4 apply >/dev/null 2>&1
+PRI=$(pnum priority)
+edit acme-9 labels '["human"]'
+apply --proposal "$PRI" >/dev/null 2>&1
+assert_eq "stopped run, human edit, proposal: the proposal applied" "$(field acme-9 priority)" "1"
+out="$(undo 2>&1)"; rc=$?
+assert_eq "... undo refuses the edited bead, exit 8" "$rc" "8"
+assert_contains "... naming it" "$out" "acme-9 changed since the run; not undone"
+assert_eq "... and keeps the human edit" "$(field acme-9 labels)" "['human']"
+assert_eq "... and the priority it was left with" "$(field acme-9 priority)" "1"
+# a bead never applied in a stopped run is restorable to the state before its first real apply
+fresh; cp "$T/D.json" "$T/r/decisions.json"; FAKE_BD_UPDATE_FAIL_ID=acme-4 apply >/dev/null 2>&1
+apply --proposal "$(pnum priority)" >/dev/null 2>&1
+assert_contains "stopped run then a proposal, no edit: undo restores it" "$(undo 2>&1)" "acme-9: restored"
+assert_eq "... to its priority" "$(field acme-9 priority)" "2"
+
 # I3 and M4: undefer and close come back exactly, and note the op
 fresh; addbead '{"id":"acme-14","title":"Later","status":"deferred","priority":2,"labels":[],"defer_until":"2027-01-05T00:00:00Z","updated_at":"2026-10-01T00:00:00Z"}'
 printf '%s' '{"changes":[{"id":"acme-14","kind":"undefer","why":"back","protected":false},{"id":"acme-1","kind":"close","why":"done","protected":false}]}' > "$T/r/decisions.json"

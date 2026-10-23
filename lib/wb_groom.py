@@ -11,6 +11,7 @@ import os
 import re
 import shlex
 import subprocess
+import uuid
 
 WAVES = {"now": "wave:1", "next": "wave:2"}  # sprint section -> label, as in bin/wb-backlog
 ICEBOX = "icebox"
@@ -432,7 +433,8 @@ def apply_ops(run_dir, root, ops, bd, today, proposal=None, timeout=60):
     write when before.jsonl can't be written; nothing raises after the first write."""
     order = list(dict.fromkeys(o.id for o in ops))
     current = {id: bd_show(root, bd, id) for id in order}
-    append_jsonl(os.path.join(run_dir, "before.jsonl"), [snapshot(current[id]) for id in order])
+    step = uuid.uuid4().hex  # ties this call's before rows to its applied rows, which position cannot
+    append_jsonl(os.path.join(run_dir, "before.jsonl"), [{**snapshot(current[id]), "step": step} for id in order])
     applied = []
     for id in order:
         mine = [o for o in ops if o.id == id]
@@ -441,7 +443,7 @@ def apply_ops(run_dir, root, ops, bd, today, proposal=None, timeout=60):
             error = _run(argv, root, timeout)
             if error:
                 break
-        row = {"id": id, "root": os.path.abspath(root),
+        row = {"id": id, "step": step, "root": os.path.abspath(root),
                "ops": [{"kind": o.kind, "value": o.value, "why": o.why} for o in mine],
                "proposal": proposal, "applied_at": datetime.datetime.now().isoformat(timespec="seconds")}
         now = None
@@ -491,9 +493,14 @@ def undo_run(run_dir, root, bd, only=None, timeout=60):
     True when a named bead was changed since the run, can't be read, isn't in the run or was
     never applied.
 
-    A bead can be applied several times (the full run, then proposals). before.jsonl line i
-    and applied.jsonl line i belong together; undo goes back to the before line of the first
-    apply not yet undone, and only if nothing but the applies touched the bead in between."""
+    A bead can be applied several times (the full run, then proposals), and a run that
+    stopped leaves before rows for beads it never wrote. Rows are paired by `step`, the id of
+    the apply call that wrote them: a before row with no applied row of its step wrote
+    nothing, so it is never a restore target. Undo goes back to the before row of the first
+    apply not yet undone, and only if the bead's rows chain: each before row, applied or not,
+    must equal where the previous step left the bead (its applied row, or its own before row
+    when nothing was written). A break means someone changed the bead, or a write went
+    unrecorded; undo refuses it rather than wipe that."""
     before, applied, through = {}, {}, {}
     for r in read_jsonl(os.path.join(run_dir, "before.jsonl")):
         before.setdefault(r["id"], []).append(r)
@@ -503,7 +510,7 @@ def undo_run(run_dir, root, bd, only=None, timeout=60):
         through[r["id"]] = max(through.get(r["id"], 0), r.get("through", 0))  # applies undone so far
     msgs, refused = [], False
     for id in ([only] if only else list(before)):
-        ran, was, k = applied.get(id, []), before.get(id, []), through.get(id, 0)
+        ran, k = applied.get(id, []), through.get(id, 0)
         if id not in before:
             msgs.append(f"{id}: not in this run's before.jsonl; skipped")
             refused = True
@@ -513,17 +520,27 @@ def undo_run(run_dir, root, bd, only=None, timeout=60):
         elif k >= len(ran):
             msgs.append(f"{id}: already undone")
         else:
-            # Each later apply must have started from where the one before it left the bead.
-            gap = any(any(snapshot(was[i])[key] != snapshot(ran[i - 1])[key] for key in STATE_KEYS)
-                      for i in range(k + 1, len(ran)))
-            if gap:
+            rows = before[id]
+            target = next((i for i, r in enumerate(rows) if r.get("step") == ran[k].get("step")), None)
+            if target is None or not _chains(rows[0 if k == 0 else target:], ran):
                 msgs.append(f"{id} changed since the run; not undone")
                 refused = True
                 continue
-            ok, msg = _undo_one(run_dir, root, bd, was[k], ran, timeout)
+            ok, msg = _undo_one(run_dir, root, bd, rows[target], ran, timeout)
             msgs.append(msg)
             refused = refused or not ok
     return msgs, refused
+
+
+def _chains(rows, ran):
+    """True when each of the before ROWS starts where the step before it left the bead."""
+    left = {r.get("step"): r for r in ran}  # step -> its applied row
+    prev = None
+    for r in rows:
+        if prev is not None and any(snapshot(r)[k] != prev[k] for k in STATE_KEYS):
+            return False
+        prev = snapshot(left.get(r.get("step"), r))  # no applied row: nothing was written
+    return True
 
 
 def _undo_one(run_dir, root, bd, was, ran, timeout):
