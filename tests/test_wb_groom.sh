@@ -38,13 +38,15 @@ assert_eq "unprotected only when the judge says false and no label" \
 
 # --- sprint ---
 out="$(ops '{"sprint":{"now":[{"id":"acme-1","why":"g1"},{"id":"acme-7","why":"money"},{"id":"acme-9","why":"x"},{"id":"acme-3","why":"x"},{"id":"acme-99","why":"x"}],
- "next":[{"id":"acme-8","why":"later"},{"id":"acme-6","why":"same"}]}}')"; rc=$?
+ "next":[{"id":"acme-8","why":"later"},{"id":"acme-6","why":"same"}],
+ "leaving":[{"id":"acme-4","why":"no goal","protected":false}]}}')"; rc=$?
 assert_eq "ops exits 0" "$rc" "0"
 assert_contains "sprint: add an unprotected bead to NOW" "$out" $'acme-1\twave\twave:1\tNOW: g1'
 assert_contains "sprint: a protected bead moving NEXT to NOW is applied" "$out" $'acme-7\twave\twave:1\t'
-assert_contains "sprint: unwave an unprotected bead that left" "$out" $'acme-4\tunwave\twave:1\t'
+ops_only() { printf '%s\n' "$1" | grep -v '^proposal\|^dropped'; }
+assert_contains "sprint: leaving with protected:false is an unwave op, with the leaving why" "$(ops_only "$out")" $'acme-4\tunwave\twave:1\tno goal'
 assert_contains "sprint: unwave of a protected bead is a proposal" "$out" $'proposal\tacme-5\tunwave\twave:1\t'
-assert_not_contains "sprint: ... and not an op" "$(printf '%s\n' "$out" | grep -v '^proposal')" $'acme-5\tunwave'
+assert_not_contains "sprint: ... and not an op" "$(ops_only "$out")" $'acme-5\tunwave'
 assert_contains "sprint: protected NOW to NEXT is a proposal" "$out" $'proposal\tacme-8\twave\twave:2\tlater\tprotected'
 assert_not_contains "sprint: already in the named wave: no op" "$out" "acme-6"$'\twave'
 assert_contains "sprint: past size is dropped" "$out" $'dropped\tacme-9: over size'
@@ -52,6 +54,29 @@ assert_contains "sprint: claimed is dropped" "$out" $'dropped\tacme-3: claimed'
 assert_contains "sprint: unknown id is dropped" "$out" $'dropped\tacme-99: unknown id'
 out2="$(ops '{"sprint":{"now":[]},"changes":[{"id":"acme-4","kind":"priority","to":"3","why":"p","protected":null}]}')"
 assert_contains "sprint: a leaving bead the judge called unsure is a proposal" "$out2" $'proposal\tacme-4\tunwave'
+out2="$(ops '{"sprint":{"now":[]}}')"
+assert_contains "sprint: leaving with no verdict at all is a proposal" "$out2" $'proposal\tacme-4\tunwave\twave:1\tleft the sprint\tprotected'
+assert_not_contains "sprint: ... not an op" "$(ops_only "$out2")" "acme-4"
+out2="$(ops '{"sprint":{"now":[],"leaving":[{"id":"acme-4","why":"w","protected":false}]},"changes":[{"id":"acme-4","kind":"bogus","protected":false},{"id":"acme-4","kind":"priority","to":"3","why":"p","protected":true}]}')"
+assert_contains "sprint: a protected:true change vetoes the leaving verdict" "$out2" $'proposal\tacme-4\tunwave'
+out2="$(ops '{"sprint":{"now":[]},"changes":[{"id":"acme-4","kind":"bogus","protected":false}]}')"
+assert_contains "sprint: a verdict from an invalid change does not count" "$out2" $'proposal\tacme-4\tunwave'
+out2="$(ops '{"sprint":{"next":[{"id":"acme-4","why":"slip","protected":false}]}}')"
+assert_contains "sprint: NOW to NEXT with protected:false is applied" "$(ops_only "$out2")" $'acme-4\twave\twave:2\tNEXT: slip'
+out2="$(ops '{"sprint":{"next":[{"id":"acme-4","why":"slip"}]}}')"
+assert_contains "sprint: NOW to NEXT with no verdict is a proposal" "$out2" $'proposal\tacme-4\twave\twave:2\tslip\tprotected'
+out2="$(ops '{"sprint":{"now":[{"id":"acme-3","why":"x"},{"id":"acme-1","why":"a"},{"id":"acme-9","why":"b"}]}}')"
+assert_contains "sprint: a claimed bead doesn't use up a NOW slot (1)" "$(ops_only "$out2")" $'acme-1\twave'
+assert_contains "sprint: a claimed bead doesn't use up a NOW slot (2)" "$(ops_only "$out2")" $'acme-9\twave'
+assert_not_contains "sprint: ... so nothing is over size" "$out2" "over size"
+out2="$(ops '{"sprint":{"now":[{"id":"acme-1","why":"a","protected":"yes"}],"next":[{"id":"acme-6","why":"n"}]}}')"
+assert_contains "sprint: wrong-typed protected drops that section" "$out2" $'dropped\tsprint.now: bad field now'
+out2="$(ops '{"sprint":{"leaving":"acme-4"}}')"
+assert_contains "sprint: wrong-typed leaving is dropped" "$out2" $'dropped\tsprint.leaving: bad field leaving'
+out2="$(ops '{"changes":[{"id":"acme-1","kind":["icebox"],"why":"c"},{"id":"acme-10","kind":{"a":1}},{"id":"acme-9","kind":"priority","to":"1","why":"p"}]}')"; rc=$?
+assert_eq "unhashable kind: exit 0" "$rc" "0"
+assert_contains "unhashable kind: dropped" "$out2" $'dropped\tacme-1: bad field kind'
+assert_contains "unhashable kind: the rest is kept" "$out2" $'proposal\tacme-9\tpriority'
 assert_not_contains "sprint: a claimed bead's wave is never unwaved" "$out" $'acme-3\tunwave'
 
 # --- changes ---
@@ -85,7 +110,7 @@ assert_not_contains "attention remove on an unflagged bead: no op" "$out" "acme-
 
 # --- plan state ---
 D='{"sprint":{"now":[{"id":"acme-1","why":"g"}]},"changes":[{"id":"acme-10","kind":"icebox","why":"i","protected":false}],"attention":{"add":[{"id":"acme-9","why":"d"}]}}'
-mkdir -p "$T/stale"; printf 'date: 2026-08-01\n' > "$T/stale/goals.md"
+mkdir -p "$T/stale"; printf 'date: 2026-08-01\n' > "$T/stale/goals.md"; cp "$FX/plan/protected.md" "$T/stale/"
 out="$(ops "$D" "$T/stale")"
 assert_eq "stale plan: every line is a proposal or dropped" "$(printf '%s\n' "$out" | grep -vc '^proposal')" "0"
 assert_contains "stale plan: the reason" "$out" $'proposal\tacme-1\twave\twave:1\tNOW: g\tplan stale'
@@ -95,6 +120,15 @@ out="$(ops "$D" "$T/none")"
 assert_contains "missing plan: proposals too" "$out" $'proposal\tacme-10\ticebox\ticebox\ti\tplan missing'
 out="$("$WG" ops "$RUN" "$T/store")"
 assert_contains "no --plan means a missing plan" "$out" $'plan missing'
+
+mkdir -p "$T/noprot"; cp "$FX/plan/goals.md" "$T/noprot/"
+assert_eq "plan without protected.md is missing, though goals.md is fresh" \
+  "$(py "p = g.read_plan('$T/noprot'); print(g.plan_state(p, datetime.date(2026,10,23)))")" "missing"
+out="$(ops "$D" "$T/noprot")"
+assert_contains "... so everything is proposed" "$out" $'proposal\tacme-10\ticebox\ticebox\ti\tplan missing'
+mkdir -p "$T/two"; cp "$FX/plan/goals.md" "$T/two/"; printf 'labels: a\n\nmore:\nlabels: b, c\n' > "$T/two/protected.md"
+assert_eq "protected.md: every labels: line counts" \
+  "$(py "print(sorted(g.read_plan('$T/two').protected_labels))")" "['a', 'b', 'c']"
 
 # --- malformed input ---
 printf '{"sprint": ' > "$RUN/decisions.json"
