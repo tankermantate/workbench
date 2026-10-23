@@ -27,12 +27,16 @@ L() { (cd "$T/start" && zsh -f -c "source '$REPO/shell/workbench.zsh'; launch; p
 printf 'Acme\t-\t%s\ttrue\t1\tx\tacme\t-\t-\t0\n' "$T/acme" > "$T/start/spaces.tsv"
 out="$("$REPO/bin/wb-ui" render-work "$T/start" 1)"
 assert_eq "render-work kinds and order" "$(printf '%s\n' "$out" | cut -f1,2 | tr '\n' ' ')" \
-  "new	- sep	 open	acme-a2 open	acme-a1 sep	 open	acme-b1 sep	 open	acme-c1 open	acme-e1 claimed	acme-c2 "
+  "new	- sep	 open	acme-a2 open	acme-a1 open	acme-b1 sep	 open	acme-a2 open	acme-a1 sep	 open	acme-b1 sep	 open	acme-c1 open	acme-e1 claimed	acme-c2 "
+assert_contains "render-work: start here first" "$(printf '%s\n' "$out" | sed -n 2p)" "── start here ──"
+assert_contains "render-work: a pick says why, dim" "$(printf '%s\n' "$out" | sed -n 3p)" $'High wave-1  \e[2mNOW · P1 · shape first\e[0m'
+assert_not_contains "render-work: no flow line when nothing was created or closed" "$out" "last 30 days"
 assert_contains "render-work NOW header" "$out" "── NOW ──"
 assert_contains "render-work everything-else header" "$out" "── everything else ──"
 assert_contains "render-work claimed row keeps its worktree" "$out" "claimed	acme-c2	/tmp/wb-fixture-wt/acme-x"
 # the epic column: the direct parent's title, "Epic:" dropped, dim, fixed width
-row() { printf '%s\n' "$1" | awk -F'\t' -v id="$2" '$2==id {print $5}'; }
+# (a start-here pick is listed twice; row is the one in its own section)
+row() { printf '%s\n' "$1" | awk -F'\t' -v id="$2" '$2==id {r=$5} END {print r}'; }
 assert_eq "epic column: a child shows its parent" "$(row "$out" acme-a1)" \
   $'○ a1     P2  \e[2mtidy the shop       \e[0m  Low wave-1'
 assert_eq "epic column: no parent, blank but aligned" "$(row "$out" acme-b1)" \
@@ -58,7 +62,12 @@ cat > "$T/fab/.beads/fake.json" <<'EOF'
 ]
 EOF
 printf 'Fab\t-\t%s\ttrue\t1\tx\tfab\t-\t-\t0\n' "$T/fab" > "$T/srch/spaces.tsv"
+printf '[{"id":"fab-c","title":"Done","status":"closed","created_at":"%s","closed_at":"%s"}]' \
+  "$(date -u -v-2d +%Y-%m-%dT%H:%M:%SZ)" "$(date -u -v-1d +%Y-%m-%dT%H:%M:%SZ)" > "$T/fab/.beads/fake-closed.json"
 full="$("$REPO/bin/wb-ui" render-work "$T/srch" 1)"
+assert_eq "render-work: the flow line closes the start-here section" \
+  "$(printf '%s\n' "$full" | sed -n 6p | cut -f1,4)" "msg	last 30 days: 0 · 1 created, 1 closed"
+assert_eq "render-work: picks P0 first, then P1" "$(printf '%s\n' "$full" | sed -n 3,5p | cut -f2 | tr '\n' ' ')" "fab-3 fab-5 fab-1 "
 assert_contains "epic column: a long parent is cut to 20 with …" "$(row "$full" fab-2)" $'\e[2mFabric sourcing for…\e[0m'
 rows() { printf '%s\n' "$1" | cut -f1,2 | tr '\t\n' ': '; }
 out="$("$REPO/bin/wb-ui" filter-work "$T/srch" 1 'fabric PO')"

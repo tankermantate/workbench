@@ -34,6 +34,9 @@ Add the line `install.sh` prints to the **end** of `~/.zshrc`. Re-running `insta
 - **Labels the work screen reads:** `wave:1` and `wave:2` put a bead under NOW and NEXT;
   `icebox` puts it in a last section and out of the open count, whatever its wave. A claimed bead
   untouched for over 7 days shows `idle 23d`, so a forgotten session stands out.
+- **Start here:** a long backlog opens with its top three ready beads and why each was picked
+  (a fresh claim, NOW/NEXT, priority, a "Done when" line, what it unblocks), then how many beads
+  were created and closed in the last 30 days.
 
 It stays closed inside Claude, in a nested shell, in an IDE's terminal (only Apple Terminal and
 terminals listed in `[launcher].terminals` count), and when `WORKBENCH_NO_LAUNCH=1` is set.

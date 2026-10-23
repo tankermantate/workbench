@@ -1,10 +1,13 @@
 #!/usr/bin/env python3
 """wb-backlog — one space's live beads, read through bd.
 
-  wb-backlog list ROOT [--snapshot FILE]
+  wb-backlog list ROOT [--snapshot FILE] [--flow FILE]
       TSV, best first: id, short id, mark (○ open / ◐ in progress), P<n>,
       section (NOW / NEXT / - / ICEBOX), title, parent, worktree from the claim
-      notes, the parent's title, days idle (a claim untouched for over IDLE_DAYS, or -).
+      notes, the parent's title, days idle (a claim untouched for over IDLE_DAYS, or -),
+      start here (rank 1-3 and why, or -; see picks()).
+      --flow writes one line, the last FLOW_DAYS' beads created vs closed, to FILE;
+      nothing when the closed beads can't be read.
       Exits non-zero when there is nothing to list; the code says why (STATES).
   wb-backlog summary ROOT      one line of counts for screen 1; always exits 0
   wb-backlog claimed ROOT PATH the bead whose current claim note names the
@@ -25,6 +28,7 @@ import shutil
 import signal
 import subprocess
 import sys
+import threading
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.realpath(__file__)), "..", "lib"))
 import wb_search  # noqa: E402  (lives in lib/; realpath, since install.sh links bin/ elsewhere)
@@ -34,6 +38,9 @@ BD = os.environ.get("WB_BD", "bd")
 HIDDEN = {"closed", "deferred"}
 ICEBOX = "icebox"
 IDLE_DAYS = 7  # a claim untouched this long is likely a forgotten tab
+PICKS = 3  # start here: few enough to choose from at a glance
+FLOW_DAYS = 30
+DONE_RE = re.compile(r"^[\s>*#-]*(?:\*\*)?\s*done when\b", re.I | re.M)  # the "Done when …" line beads use
 WORKTREE_RE = re.compile(r"worktree at (/[^)\n]+)\)")  # paths may contain spaces
 # state -> (list exit code, summary text)
 STATES = {
@@ -51,9 +58,9 @@ class BdError(Exception):
         self.state = state
 
 
-def run_bd(root):
+def run_bd(root, *extra):
     try:
-        p = subprocess.Popen([BD, "list", "-n", "0", "--json"], cwd=root, text=True,
+        p = subprocess.Popen([BD, "list", "-n", "0", "--json", *extra], cwd=root, text=True,
                              stdout=subprocess.PIPE, stderr=subprocess.PIPE,
                              start_new_session=True)
     except OSError:
@@ -139,16 +146,85 @@ def ordered(beads):
     return sorted(beads, key=lambda b: (rank.get(section(b), 2), priority(b), str(b.get("id", ""))))
 
 
+def age(stamp):
+    """Whole days since an ISO timestamp, or None if it isn't one."""
+    try:
+        t = datetime.datetime.fromisoformat(str(stamp).replace("Z", "+00:00"))
+        return (datetime.datetime.now(datetime.timezone.utc) - t).days
+    except (TypeError, ValueError):
+        return None
+
+
 def idle(b):
     """Whole days since a claimed bead was last touched, when that's over IDLE_DAYS."""
     if b.get("status") != "in_progress":
         return None
+    days = age(b.get("updated_at"))
+    return days if days is not None and days > IDLE_DAYS else None
+
+
+def has_done_line(b):
+    return bool((b.get("acceptance_criteria") or "").strip()) or bool(DONE_RE.search(b.get("description") or ""))
+
+
+def picks(beads):
+    """{id: "rank why"} for the start-here few: ready beads (no icebox, epic or
+    open blocker; bd leaves closed beads out, so a blocker it didn't return is
+    closed), a fresh claim first so work in hand gets finished, then NOW, NEXT,
+    priority, a done line, and how many beads each would unblock. None in a
+    backlog short enough to see whole."""
+    ids = {b.get("id") for b in beads}
+    blockers = {b.get("id"): {d.get("depends_on_id") for d in b.get("dependencies") or []
+                              if d.get("type") == "blocks"} & ids for b in beads}
+    unblocks = {}
+    for bs in blockers.values():
+        for i in bs:
+            unblocks[i] = unblocks.get(i, 0) + 1
+    if sum(section(b) != "ICEBOX" for b in beads) <= PICKS:
+        return {}
+    ready = [b for b in beads if section(b) != "ICEBOX" and b.get("issue_type") != "epic"
+             and b.get("status") != "blocked" and not blockers[b.get("id")]]
+
+    def resume(b):
+        days = age(b.get("updated_at"))
+        return b.get("status") == "in_progress" and days is not None and days <= IDLE_DAYS
+
+    rank = {"NOW": 0, "NEXT": 1}
+    ready.sort(key=lambda b: (not resume(b), rank.get(section(b), 2), priority(b),
+                              not has_done_line(b), -unblocks.get(b.get("id"), 0), str(b.get("id", ""))))
+    out = {}
+    for n, b in enumerate(ready[:PICKS], 1):
+        why = (["resume"] if resume(b) else []) + ([section(b)] if section(b) in rank else [])
+        why.append(f"P{b['priority']}" if isinstance(b.get("priority"), int) else "P-")
+        if unblocks.get(b.get("id")):
+            why.append(f"unblocks {unblocks[b.get('id')]}")
+        if not has_done_line(b):
+            why.append("shape first")  # nothing says what done looks like yet
+        out[b.get("id")] = f"{n} " + " · ".join(why)
+    return out
+
+
+def read_closed(root, out):
+    """Beads closed in the last FLOW_DAYS, into out["closed"]; left unset if bd fails."""
+    since = (datetime.date.today() - datetime.timedelta(days=FLOW_DAYS)).isoformat()
     try:
-        t = datetime.datetime.fromisoformat(str(b.get("updated_at")).replace("Z", "+00:00"))
-        days = (datetime.datetime.now(datetime.timezone.utc) - t).days
-    except (TypeError, ValueError):
-        return None
-    return days if days > IDLE_DAYS else None
+        out["closed"] = [b for b in run_bd(root, "--all", "--closed-after", since)
+                         if b.get("status") == "closed"]
+    except BdError:
+        pass
+
+
+def write_flow(path, data, closed):
+    """A bead created in the window and since closed was closed in it too, so
+    created = live ones created in it + closed ones created in it."""
+    new = lambda b: (lambda d: d is not None and d < FLOW_DAYS)(age(b.get("created_at")))
+    made = sum(map(new, data)) + sum(map(new, closed))
+    if not made and not closed:
+        return  # nothing to say (or a store without timestamps)
+    net = made - len(closed)
+    with open(path + ".part", "w") as f:
+        f.write(f"last {FLOW_DAYS} days: {'+' if net > 0 else ''}{net} · {made} created, {len(closed)} closed\n")
+    os.replace(path + ".part", path)
 
 
 def clean(v):
@@ -161,8 +237,17 @@ def worktree(b):
     return found[-1] if found else "-"  # notes are appended to, so the last claim is current
 
 
-def cmd_list(root, snapshot=None):
+def cmd_list(root, snapshot=None, flow=None):
+    found = {}
+    reader = None
+    if flow and shutil.which(BD) and has_store(root):  # read alongside the main list: it costs as much
+        reader = threading.Thread(target=read_closed, args=(root, found))
+        reader.start()
     state, data = read(root)
+    if reader:
+        reader.join()
+        if state == "ok" and "closed" in found:
+            write_flow(flow, data, found["closed"])
     if snapshot and data:  # write-then-rename: the preview may be reading it during a ctrl-r reload
         with open(snapshot + ".part", "w") as f:
             json.dump({b.get("id"): b for b in data}, f, ensure_ascii=False)
@@ -170,13 +255,15 @@ def cmd_list(root, snapshot=None):
     if state != "ok":
         return STATES[state][0]
     titles = {b.get("id"): b.get("title") for b in data}  # all of them: a parent may be closed
+    start = picks(live(data))
     for b in ordered(live(data)):
         bid = str(b.get("id", ""))
         mark = "◐" if b.get("status") == "in_progress" else "○"
         prio = f"P{b['priority']}" if isinstance(b.get("priority"), int) else "P-"
         print("\t".join(clean(x) for x in (bid, bid.rsplit("-", 1)[-1], mark, prio,
                                             section(b), b.get("title"), b.get("parent"),
-                                            worktree(b), titles.get(b.get("parent")), idle(b))))
+                                            worktree(b), titles.get(b.get("parent")), idle(b),
+                                            start.get(b.get("id")))))
     return 0
 
 
@@ -243,8 +330,11 @@ def cmd_preview(snapshot, bead_id, query=""):
 def main(argv):
     args = argv[1:]
     if len(args) >= 2 and args[0] == "list":
-        snap = args[3] if len(args) == 4 and args[2] == "--snapshot" else None
-        return cmd_list(args[1], snap)
+        opts = dict(zip(args[2::2], args[3::2]))
+        if len(args) % 2 or set(opts) - {"--snapshot", "--flow"}:
+            print(__doc__, file=sys.stderr)
+            return 2
+        return cmd_list(args[1], opts.get("--snapshot"), opts.get("--flow"))
     if len(args) == 2 and args[0] == "summary":
         return cmd_summary(args[1])
     if len(args) == 3 and args[0] == "claimed":

@@ -48,6 +48,11 @@ you are working before deciding what to do in it.
 
 ```
  Acme  ›  ✦ something new
+         ── start here ──
+         ◐ m7d1  P1  Reconcile the mill's July statement  resume · P1
+         ○ k7m2  P1  Supplier invoices arrive without a purchase order number  NOW · P1 · shape first
+         ○ q4n8w P1  Customer portal must show the promised delivery date …  NEXT · P1 · unblocks 2
+         last 30 days: +74 · 244 created, 170 closed
          ── NOW ──
          ○ k7m2  P1  Supplier invoices arrive without a purchase order number
          ── NEXT ──
@@ -87,6 +92,17 @@ you are working before deciding what to do in it.
 - **Idle claims** (added 2026-10-22): an in-progress bead not updated for more than 7 days ends its
   row with a dim `idle 23d`, and screen 1 says `claimed 14 (6 idle)`. These are likely forgotten
   sessions; nothing is changed for you.
+- **Start here** (added 2026-10-23): with more than three live beads outside the icebox, the screen
+  opens with up to three picks, so a long backlog says where to begin. Only ready beads are picked:
+  no icebox, no epics, nothing with status `blocked` or an open `blocks` dependency. Ranked by: a
+  claim touched in the last 7 days (finish what's in hand), then NOW, NEXT, the rest; priority; a
+  done line (acceptance criteria, or a line starting "Done when"); then how many beads it would
+  unblock. Each pick ends with why, dim; one without a done line says `shape first`. The picks are
+  listed again in their own sections, and aren't shown while searching. Fixed rules, so the same
+  backlog always gives the same picks.
+- **The 30-day flow** (added 2026-10-23): under the picks, one line counts beads created and closed
+  in the last 30 days and the difference. Closed beads need a second bd read, run alongside the
+  first (about 0.8s more on a 400-bead store); if it fails, the line is left out, never guessed.
 - **Deferred and closed beads are hidden.**
 
 ### Handoff
@@ -158,7 +174,7 @@ worktrees     = false
 |---|---|---|
 | `launch` (zsh function in `shell/workbench.zsh`) | Draws the two screens, runs the handoff, and `cd`s the shell. It holds no bead logic. It is a **function, not a `bin/` script**: a child process can't change the parent shell's folder, and landing in the session's folder after Claude exits depends on that. | `wb-spaces`, `wb-backlog`, fzf (numbered-menu fallback) |
 | `bin/wb-spaces` | Reads `spaces.toml`, expands globs, prints one line per space. | python3 ≥ 3.11 (stdlib `tomllib`; this Mac has 3.14, the second laptop is unchecked) |
-| `bin/wb-backlog <space>` | Prints the space's live beads as tab-separated `id, status, priority, wave, title, parent, worktree, parent's title, days idle`, and with `--summary`, one count line. | `bd` |
+| `bin/wb-backlog <space>` | Prints the space's live beads as tab-separated `id, status, priority, wave, title, parent, worktree, parent's title, days idle, start-here rank and why`; with `--flow FILE`, the 30-day line; with `--summary`, one count line. | `bd` |
 | `prompts/*.txt` | Opening prompts. | — |
 | `shell/workbench.zsh` | Sourced from `~/.zshrc`. Defines `launch` and registers a **run-once `precmd` hook** that decides whether to call it at the first prompt. Running at the first prompt, not partway through `.zshrc`, means everything `.zshrc` defines later (the `claude()` function, aliases, `PATH`) already exists. | — |
 | `install.sh` | Links `bin/*` into `~/.local/bin`, prints the one line to add to `~/.zshrc`. Idempotent. Never edits `~/.zshrc` itself. | — |

@@ -12,9 +12,9 @@ assert_eq "list ok exits 0" "$rc" "0"
 assert_eq "order: NOW by priority, NEXT, then the rest by priority; deferred+closed hidden" \
   "$(printf '%s\n' "$out" | cut -f1 | tr '\n' ' ')" "acme-a2 acme-a1 acme-b1 acme-c1 acme-e1 acme-c2 "
 assert_eq "row fields" "$(printf '%s\n' "$out" | head -1)" \
-  "acme-a2	a2	○	P1	NOW	High wave-1	acme-e1	-	Epic: tidy the shop	-"
+  "acme-a2	a2	○	P1	NOW	High wave-1	acme-e1	-	Epic: tidy the shop	-	1 NOW · P1 · shape first"
 assert_eq "in-progress is ◐ with its worktree from notes" "$(printf '%s\n' "$out" | tail -1)" \
-  "acme-c2	c2	◐	P3	-	Claimed elsewhere	-	/tmp/wb-fixture-wt/acme-x	-	-"
+  "acme-c2	c2	◐	P3	-	Claimed elsewhere	-	/tmp/wb-fixture-wt/acme-x	-	-	-"
 assert_eq "claimed: the bead whose current claim names the worktree" \
   "$("$WB" claimed "$T/store" /tmp/wb-fixture-wt/acme-x)" "acme-c2"
 "$WB" claimed "$T/store" /tmp/wb-fixture-wt/other >/dev/null; assert_eq "claimed: none exits 1" "$?" "1"
@@ -157,8 +157,68 @@ cat > "$FAKE_BD_DIR/stdout" <<EOF
 [{"id":"bee-9","title":"tab\there \$(touch $T/pwned) \"q\"\nnext","status":"open","priority":1,"description":"\$(touch $T/pwned)"}]
 EOF
 out="$("$WB" list "$T/store" --snapshot "$T/snap2.json")"
-assert_eq "hostile title is cleaned into one row of 10 fields" "$(printf '%s\n' "$out" | awk -F'\t' '{print NR":"NF}')" "1:10"
+assert_eq "hostile title is cleaned into one row of 11 fields" "$(printf '%s\n' "$out" | awk -F'\t' '{print NR":"NF}')" "1:11"
 prev="$("$WB" preview "$T/snap2.json" bee-9)"
 assert_contains "hostile description shown literally" "$prev" "\$(touch $T/pwned)"
 if [ ! -e "$T/pwned" ]; then ok "hostile title is cleaned and not executed"; else bad "something executed the title"; fi
+# start here: the top three ready beads, each with why (field 11: rank, then reasons)
+reset_bd; python3 - "$FAKE_BD_DIR/stdout" <<'EOF'
+import json, sys, datetime
+ago = lambda d: (datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(days=d, hours=1)).strftime("%Y-%m-%dT%H:%M:%SZ")
+blocks = lambda i: [{"issue_id": "x", "depends_on_id": i, "type": "blocks"}]
+json.dump([
+  {"id": "st-01", "title": "Plain", "status": "open", "priority": 2},
+  {"id": "st-02", "title": "Fresh claim", "status": "in_progress", "priority": 3, "updated_at": ago(1)},
+  {"id": "st-03", "title": "Idle claim", "status": "in_progress", "priority": 1, "updated_at": ago(20)},
+  {"id": "st-04", "title": "Iced", "status": "open", "priority": 0, "labels": ["icebox"]},
+  {"id": "st-05", "title": "An epic", "status": "open", "priority": 0, "issue_type": "epic"},
+  {"id": "st-06", "title": "Marked blocked", "status": "blocked", "priority": 0},
+  {"id": "st-07", "title": "Waits on st-01", "status": "open", "priority": 0, "dependencies": blocks("st-01")},
+  {"id": "st-08", "title": "Blocker closed", "status": "open", "priority": 0, "dependencies": blocks("st-gone"),
+   "description": "Why.\n\nDone when: the thing ships."},
+  {"id": "st-09", "title": "Child", "status": "open", "priority": 0,
+   "dependencies": [{"issue_id": "st-09", "depends_on_id": "st-05", "type": "parent-child"}],
+   "acceptance_criteria": "It works."},
+  {"id": "st-10", "title": "Now", "status": "open", "priority": 2, "labels": ["wave:1"]},
+  {"id": "st-11", "title": "No timestamp claim", "status": "in_progress", "priority": 4},
+], open(sys.argv[1], "w"))
+EOF
+out="$("$WB" list "$T/store")"
+assert_eq "start here: a fresh claim, then NOW, then priority; icebox, epics and blocked beads are never picked" \
+  "$(printf '%s\n' "$out" | awk -F'\t' '$11 != "-" {print $1 "=" $11}' | sort -t= -k2 | tr '\n' '|')" \
+  "st-02=1 resume · P3 · shape first|st-10=2 NOW · P2 · shape first|st-08=3 P0|"
+reset_bd; cat > "$FAKE_BD_DIR/stdout" <<'EOF'
+[{"id":"tb-1","title":"a","status":"open","priority":2},
+ {"id":"tb-2","title":"b","status":"open","priority":2,"description":"- **Done when** the tests pass"},
+ {"id":"tb-3","title":"c","status":"open","priority":2},
+ {"id":"tb-4","title":"d","status":"open","priority":2},
+ {"id":"tb-5","title":"e","status":"open","priority":3,"dependencies":[{"issue_id":"tb-5","depends_on_id":"tb-3","type":"blocks"}]}]
+EOF
+assert_eq "start here ties: a done line first, then what unblocks the most" \
+  "$("$WB" list "$T/store" | awk -F'\t' '$11 != "-" {print $1 "=" $11}' | sort -t= -k2 | tr '\n' '|')" \
+  "tb-2=1 P2|tb-3=2 P2 · unblocks 1 · shape first|tb-1=3 P2 · shape first|"
+reset_bd; cp "$FX/plain.json" "$FAKE_BD_DIR/stdout"
+assert_eq "start here: none in a backlog of three or fewer, it's all on screen" \
+  "$("$WB" list "$T/store" | cut -f11 | sort -u)" "-"
+
+# the 30-day flow: beads created vs closed, closed ones read apart (bd hides them)
+reset_bd; python3 - "$FAKE_BD_DIR" <<'EOF'
+import json, sys, datetime
+ago = lambda d: (datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(days=d)).strftime("%Y-%m-%dT%H:%M:%SZ")
+json.dump([{"id": f"fl-{i}", "title": "t", "status": "open", "priority": 2, "created_at": ago(d)}
+           for i, d in enumerate([1, 5, 29, 31, 90])], open(sys.argv[1] + "/stdout", "w"))
+json.dump([{"id": f"fc-{i}", "title": "t", "status": "closed", "created_at": ago(d), "closed_at": ago(1)}
+           for i, d in enumerate([2, 40])], open(sys.argv[1] + "/closed", "w"))
+EOF
+"$WB" list "$T/store" --flow "$T/flow" >/dev/null
+assert_eq "flow: created in 30 days (open or since closed) vs closed" "$(cat "$T/flow")" "last 30 days: +2 · 4 created, 2 closed"
+reset_bd; cp "$FX/plain.json" "$FAKE_BD_DIR/stdout"; rm -f "$T/flow"
+"$WB" list "$T/store" --flow "$T/flow" >/dev/null
+if [ ! -e "$T/flow" ]; then ok "flow: nothing created or closed, nothing to say"; else bad "flow: wrote $(cat "$T/flow")"; fi
+"$WB" list "$T/store" >/dev/null
+if [ ! -e "$T/flow" ]; then ok "flow: only read when asked for"; else bad "flow written unasked"; fi
+reset_bd; cp "$FX/plain.json" "$FAKE_BD_DIR/stdout"; echo 'junk' > "$FAKE_BD_DIR/closed"; rm -f "$T/flow"
+"$WB" list "$T/store" --flow "$T/flow" >/dev/null; rc=$?
+assert_eq "flow: an unreadable closed read leaves the list alone" "$rc" "0"
+assert_eq "flow: and writes nothing rather than a wrong count" "$(cat "$T/flow" 2>/dev/null)" ""
 finish

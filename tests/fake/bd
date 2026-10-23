@@ -6,8 +6,10 @@
 #   stderr            printed to stderr
 #   rc                exit code (default 0)
 #   sleep             seconds to sleep first, in a child process (timeout tests)
+#   closed            what a --closed-after read prints (the 30-day flow); not counted in calls
 # Without FAKE_BD_DIR, it prints $PWD/.beads/fake.json (screen tests: one store per space),
 # except:
+#   --closed-after  prints $PWD/.beads/fake-closed.json, or [] without one
 #   show ID   walks up to .beads/fake.json and prints [that bead], or exits 1;
 #             FAKE_BD_SLEEP sleeps first, FAKE_BD_WARN prints a Warning line first
 #             (FAKE_BD_WARN=bracket: a '[warn] …' line, which looks like JSON)
@@ -39,10 +41,16 @@ PY
     update) [ -z "${FAKE_BD_UPDATE_SLEEP:-}" ] || sleep "$FAKE_BD_UPDATE_SLEEP"
             exit "${FAKE_BD_UPDATE_RC:-0}" ;;
   esac
+  case " $* " in
+    *" --closed-after "*) if [ -f .beads/fake-closed.json ]; then cat .beads/fake-closed.json; else echo '[]'; fi; exit 0 ;;
+  esac
   [ -f .beads/fake.json ] && cat .beads/fake.json
   exit 0
 fi
 d="$FAKE_BD_DIR"
+case " $* " in
+  *" --closed-after "*) if [ -f "$d/closed" ]; then cat "$d/closed"; else echo '[]'; fi; exit 0 ;;
+esac
 n=$(( $(cat "$d/calls" 2>/dev/null || echo 0) + 1 )); echo "$n" > "$d/calls"
 [ -f "$d/sleep" ] && sleep "$(cat "$d/sleep")"
 [ -f "$d/stderr" ] && cat "$d/stderr" >&2
