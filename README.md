@@ -17,7 +17,8 @@ Needs macOS with zsh, `python3` 3.11 or later, `git`, and [bd](https://github.co
 [fzf](https://github.com/junegunn/fzf) is optional; without it the launcher shows a numbered menu.
 
 ```bash
-./install.sh                     # links bin/* into ~/.local/bin; prints the ~/.zshrc line
+./install.sh                     # links bin/* into ~/.local/bin, schedules weekly grooming; prints the ~/.zshrc line
+./install.sh --no-schedule       # the same, without the launch agent
 cp spaces.example.toml ~/.config/workbench/spaces.toml   # then edit it
 ```
 
@@ -93,6 +94,37 @@ After pulling a new workbench, rerun `./install.sh` so new commands like these a
 All of this comes from hooks passed with `claude --settings` at launch. A `claude` you start by
 hand is unchanged, and nothing is written into your repos or `~/.claude`. Those hooks, and the
 record of which session is on which bead, live in `~/.cache/workbench/`.
+
+## Planning rituals
+
+Three rituals keep a space's backlog pointed at what matters. A space takes part once it has a
+**plan directory**, `~/.config/workbench/plans/<space>/` (`$WB_PLANS_DIR`), which is private and never
+in this repo: `goals.md` (3-5 goals, a `date: YYYY-MM-DD` line, optional `sprint: now=5 next=8`),
+`protected.md` (a `labels:` line plus words for judgement), `calendar.md` (dated obligations) and
+`sources.md` (what else to read).
+
+| When | What | Who |
+|---|---|---|
+| Saturday 06:00 | **Grooming**: a read-only Claude judges the backlog against the plan. `wb-groom` applies what policy allows (sprint labels, icebox of unprotected beads, `attention` flags) and leaves the rest as proposals. | launchd, unattended (`wb-groom run --all`, log in `~/.local/state/workbench/groom/launchd.log`) |
+| Next time you open the launcher | **Review**: screen 1 shows `groomed Sat · review`; the work screen has `✦ review Saturday's grooming`. Claude walks the summary with you and applies what you accept. | you, with Claude |
+| Monthly, or when the plan is 30+ days old | **Strategy**: screen 1 shows `strategy due`; Claude prepares from the month's closes and what you reversed, and rewrites the plan with you. | you, with Claude |
+
+A plan whose `goals.md` has no date, or one over 45 days old, fails closed: grooming still runs, but
+applies nothing and its summary leads with "strategy session needed".
+
+Each run is a folder, `~/.local/state/workbench/groom/<space>/<YYYYMMDD-HHMM>/` (`$WB_GROOM_DIR`), holding
+`summary.md` (read this first), the judge's `decisions.json`, and a record of every change
+(`before.jsonl`, `applied.jsonl`). Finishing a review writes a `reviewed` file there.
+
+```bash
+wb-groom strategy <space>     # start a space: makes the plan dir from templates, prints its path
+wb-groom run <space>          # groom one space now (or --all)
+wb-groom undo <run dir> [id]  # put beads back exactly as they were; refuses one changed since
+wb-groom apply <run dir> <space root> --plan <plan dir> --proposal <n>   # one proposal (review does this)
+```
+
+Fresh template plans carry `date: YYYY-MM-DD` on purpose: until the first strategy session sets a
+real date, the plan counts as missing.
 
 ## Configuration
 

@@ -1,6 +1,6 @@
 # Planning rituals: monthly strategy, weekly grooming, review in the launcher
 
-**Status:** approved 2026-10-23, not yet planned · **Date:** 2026-10-23 · bead wb-7vd.6 (epic wb-7vd: workbench
+**Status:** built · **Date:** 2026-10-23 · bead wb-7vd.6 (epic wb-7vd: workbench
 through the whole life of the work, not just the start)
 
 ## Why
@@ -147,7 +147,8 @@ when that fails). bd writes pass `--sandbox`, which turns Dolt auto-push off.
 
 ### Schedule
 
-A launchd agent (`~/Library/LaunchAgents/…workbench.groom.plist`, installed by `install.sh`) runs
+A launchd agent (`~/Library/LaunchAgents/workbench.groom.plist`, label `workbench.groom`, written and
+loaded by `install.sh` unless it gets `--no-schedule`; a re-run replaces it; output goes to `<groom dir>/launchd.log`) runs
 `wb-groom run --all` weekly, Saturday 06:00 (*my call*). A Mac asleep then runs it at wake. One run
 per space per week; a run that times out (default 20 min, `WB_GROOM_TIMEOUT`) applies nothing, as does
 one whose judge fails or leaves no `decisions.json`; its summary says why. A run holds
