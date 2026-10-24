@@ -276,13 +276,14 @@ def epic_cell(ptitle, pats):
 
 
 def print_row(r, pats, layout, why=None):
-    bid, short, mark, prio, _sect, title, _parent, wt, ptitle, idle, _pick, _attn = r
+    bid, short, mark, prio, _sect, title, _parent, wt, ptitle, idle, _pick, _attn, until = r
     kind = "claimed" if mark == "◐" else "open"
     pad = " " * (layout["idw"] - len(short))  # padded outside the highlight, so columns stay aligned
     epic = f"{epic_cell(ptitle, pats)}  " if layout["epics"] else ""
     print(f"{kind}\t{bid}\t{wt}\t\t{mark} {wb_search.highlight(pats, short)}{pad} {prio}  "
           f"{epic}{wb_search.highlight(pats, title)}"
           + ("" if idle == "-" else f"  {DIM}idle {idle}d{wb_search.END}")
+          + ("" if until == "-" else f"  {DIM}deferred until {until}{wb_search.END}")
           + (f"  {DIM}{why}{wb_search.END}" if why else ""))
 
 

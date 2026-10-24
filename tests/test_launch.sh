@@ -42,6 +42,17 @@ assert_eq "epic column: a child shows its parent" "$(row "$out" acme-a1)" \
   $'○ a1     P2  \e[2mtidy the shop       \e[0m  Low wave-1'
 assert_eq "epic column: no parent, blank but aligned" "$(row "$out" acme-b1)" \
   "○ b1     P0                        Wave-2 urgent"
+# a past-due deferral ends its row with the date, dim
+mkstore "$T/dfr"; mkdir -p "$T/dfrs"
+cat > "$T/dfr/.beads/fake.json" <<'EOF'
+[{"id":"dfr-1","title":"Back again","status":"deferred","priority":2,"defer_until":"2020-01-01T00:00:00Z"},
+ {"id":"dfr-2","title":"Still later","status":"deferred","priority":2,"defer_until":"2099-01-01T00:00:00Z"}]
+EOF
+printf 'Dfr\t-\t%s\ttrue\t1\tx\tdfr\t-\t-\t0\n' "$T/dfr" > "$T/dfrs/spaces.tsv"
+dout="$("$REPO/bin/wb-ui" render-work "$T/dfrs" 1)"
+assert_eq "render-work: a past-due deferral is an open row tagged with its date, dim" "$(row "$dout" dfr-1)" \
+  $'○ 1      P2  Back again  \e[2mdeferred until 2020-01-01\e[0m'
+assert_not_contains "render-work: a future deferral is not listed" "$dout" "dfr-2"
 out="$("$REPO/bin/wb-ui" filter-work "$T/start" 1 'tidy')"
 assert_eq "search: the parent's title is searched" "$(printf '%s\n' "$out" | cut -f1,2 | tr '\t\n' ': ')" \
   "new:- msg: open:acme-e1 open:acme-a2 open:acme-a1 "

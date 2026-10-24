@@ -259,6 +259,6 @@ repo and of workbench's own beads (`scripts/check-leaks.sh`).
 
 ## Related
 
-- The launcher hides every deferred bead, including those past their defer date, so they show
-  nowhere; grooming lists them, and the launcher fix is its own bead.
+- The launcher hid every deferred bead, including those past their defer date, so they showed
+  nowhere; it now lists past-due deferrals in their sections, tagged with the date (launcher spec).
 - wb-7vd.5's start-here: changed by "Nothing critical out of sight" above.

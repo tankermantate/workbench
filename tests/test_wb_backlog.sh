@@ -12,9 +12,9 @@ assert_eq "list ok exits 0" "$rc" "0"
 assert_eq "order: NOW by priority, NEXT, then the rest by priority; deferred+closed hidden" \
   "$(printf '%s\n' "$out" | cut -f1 | tr '\n' ' ')" "acme-a2 acme-a1 acme-b1 acme-c1 acme-e1 acme-c2 "
 assert_eq "row fields" "$(printf '%s\n' "$out" | head -1)" \
-  "acme-a2	a2	○	P1	NOW	High wave-1	acme-e1	-	Epic: tidy the shop	-	1 NOW · P1 · shape first	-"
+  "acme-a2	a2	○	P1	NOW	High wave-1	acme-e1	-	Epic: tidy the shop	-	1 NOW · P1 · shape first	-	-"
 assert_eq "in-progress is ◐ with its worktree from notes" "$(printf '%s\n' "$out" | tail -1)" \
-  "acme-c2	c2	◐	P3	-	Claimed elsewhere	-	/tmp/wb-fixture-wt/acme-x	-	-	-	-"
+  "acme-c2	c2	◐	P3	-	Claimed elsewhere	-	/tmp/wb-fixture-wt/acme-x	-	-	-	-	-"
 assert_eq "claimed: the bead whose current claim names the worktree" \
   "$("$WB" claimed "$T/store" /tmp/wb-fixture-wt/acme-x)" "acme-c2"
 "$WB" claimed "$T/store" /tmp/wb-fixture-wt/other >/dev/null; assert_eq "claimed: none exits 1" "$?" "1"
@@ -157,7 +157,7 @@ cat > "$FAKE_BD_DIR/stdout" <<EOF
 [{"id":"bee-9","title":"tab\there \$(touch $T/pwned) \"q\"\nnext","status":"open","priority":1,"description":"\$(touch $T/pwned)"}]
 EOF
 out="$("$WB" list "$T/store" --snapshot "$T/snap2.json")"
-assert_eq "hostile title is cleaned into one row of 12 fields" "$(printf '%s\n' "$out" | awk -F'\t' '{print NR":"NF}')" "1:12"
+assert_eq "hostile title is cleaned into one row of 13 fields" "$(printf '%s\n' "$out" | awk -F'\t' '{print NR":"NF}')" "1:13"
 prev="$("$WB" preview "$T/snap2.json" bee-9)"
 assert_contains "hostile description shown literally" "$prev" "\$(touch $T/pwned)"
 if [ ! -e "$T/pwned" ]; then ok "hostile title is cleaned and not executed"; else bad "something executed the title"; fi
@@ -245,6 +245,31 @@ assert_eq "attention: a deferred bead is listed with its reason and ' · deferre
   "$(printf '%s\n' "$out" | cut -f1,12 | sort | tr '\t\n' ':|')" "dd-1:1 due Nov 2 · money · deferred|dd-4:2 attention|"
 assert_eq "attention: a deferred bead is never a pick" "$(printf '%s\n' "$out" | awk -F'\t' '$1=="dd-1" {print $11}')" "-"
 assert_eq "summary: a deferred attention bead counts" "$("$WB" summary "$T/store")" "! 2 need attention · open 1 · claimed 0"
+
+# a deferral whose date has passed is back: listed in its section, tagged, counted, pickable;
+# one dated in the future, or with no date (dd-3 above), stays hidden
+reset_bd; cat > "$FAKE_BD_DIR/stdout" <<'EOF2'
+[{"id":"df-1","title":"past due","status":"deferred","priority":1,"labels":["wave:1"],"defer_until":"2020-01-01T00:00:00Z"},
+ {"id":"df-2","title":"not yet","status":"deferred","priority":0,"labels":["wave:1"],"defer_until":"2099-01-01T00:00:00Z"},
+ {"id":"df-3","title":"date only","status":"deferred","priority":2,"defer_until":"2020-03-04"},
+ {"id":"df-4","title":"bad date","status":"deferred","priority":2,"defer_until":"soon"},
+ {"id":"df-5","title":"open","status":"open","priority":2}]
+EOF2
+out="$("$WB" list "$T/store")"; rc=$?
+assert_eq "deferred past due: list ok" "$rc" "0"
+assert_eq "deferred past due: in its section with the date in field 13; future and bad dates hidden" \
+  "$(printf '%s\n' "$out" | cut -f1,3,5,13 | tr '\t\n' ':|')" "df-1:○:NOW:2020-01-01|df-3:○:-:2020-03-04|df-5:○:-:-|"
+assert_eq "summary: past-due deferrals are counted, future ones are not" "$("$WB" summary "$T/store")" \
+  "NOW 1 · NEXT 0 · claimed 0"
+reset_bd; cat > "$FAKE_BD_DIR/stdout" <<'EOF2'
+[{"id":"df-6","title":"past due","status":"deferred","priority":1,"defer_until":"2020-01-01T00:00:00Z"},
+ {"id":"df-7","title":"not yet","status":"deferred","priority":1,"defer_until":"2099-01-01T00:00:00Z"},
+ {"id":"df-8","title":"a","status":"open","priority":3},{"id":"df-9","title":"b","status":"open","priority":3},
+ {"id":"df-10","title":"c","status":"open","priority":3}]
+EOF2
+assert_eq "summary without waves: only the past-due deferral counts" "$("$WB" summary "$T/store")" "open 4 · claimed 0"
+assert_eq "deferred past due: a pick like any open bead" \
+  "$("$WB" list "$T/store" | awk -F'\t' '$1=="df-6" {print $11}')" "1 P1 · shape first"
 
 # the 30-day flow: beads created vs closed, closed ones read apart (bd hides them)
 reset_bd; python3 - "$FAKE_BD_DIR" <<'EOF'
