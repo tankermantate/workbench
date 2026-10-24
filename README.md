@@ -109,7 +109,7 @@ in this repo: `goals.md` (3-5 goals, a `date: YYYY-MM-DD` line, optional `sprint
 | Next time you open the launcher | **Review**: screen 1 shows `groomed Sat · review`; the work screen has `✦ review Saturday's grooming`. Claude walks the summary with you and applies what you accept. | you, with Claude |
 | Monthly, or when the plan is 30+ days old | **Strategy**: screen 1 shows `strategy due`; Claude prepares from the month's closes and what you reversed, and rewrites the plan with you. | you, with Claude |
 
-A plan whose `goals.md` has no date, or one over 45 days old, fails closed: grooming still runs, but
+A plan whose `goals.md` has no date or is over 45 days old, or that has no `protected.md`, counts as missing or stale and fails closed: grooming still runs, but
 applies nothing and its summary leads with "strategy session needed".
 
 Each run is a folder, `~/.local/state/workbench/groom/<space>/<YYYYMMDD-HHMM>/` (`$WB_GROOM_DIR`), holding

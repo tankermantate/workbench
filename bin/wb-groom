@@ -443,15 +443,15 @@ def groom_in(space, base, run_dir):
     except OSError as e:
         return stop(EXIT_RUN_DIR, f"cannot take the judge's summary.md ({e}); nothing applied")
     if timed_out:
-        return stop(EXIT_JUDGE, f"the judge timed out after {timeout:g} s; nothing applied")
+        return stop(EXIT_JUDGE, f"the judge timed out after {timeout:g} s; nothing applied; see judge.json and judge.err in the run dir")
     if rc != 0:
-        return stop(EXIT_JUDGE, f"the judge failed (exit {rc}); nothing applied")
+        return stop(EXIT_JUDGE, f"the judge failed (exit {rc}); nothing applied; see judge.json and judge.err in the run dir")
     try:
         lift(judge_dir, run_dir, "decisions.json")  # only from a judge that finished
     except OSError as e:
         return stop(EXIT_RUN_DIR, f"cannot take the judge's decisions.json ({e}); nothing applied")
     if not os.path.isfile(os.path.join(run_dir, "decisions.json")):
-        return stop(EXIT_JUDGE, "the judge left no decisions.json; nothing applied")
+        return stop(EXIT_JUDGE, "the judge left no decisions.json; nothing applied; see judge.json and judge.err in the run dir")
     out, err = io.StringIO(), io.StringIO()
     with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
         code = cmd_apply(run_dir, root, plan_dir, None)

@@ -9,6 +9,6 @@ The plan is four markdown files: goals.md (3-5 goals in my words, a `date: YYYY-
    - the questions and process notes in the summaries of reviewed runs under the groom directory ($WB_GROOM_DIR, default ~/.local/state/workbench/groom, then this space's folder; a run is reviewed when it has a `reviewed` file);
    - what I reversed in review (each run's undone.jsonl): where grooming's judgement was off;
    - the calendar ahead.
-   If a plan file is missing or still a template (its date reads YYYY-MM-DD), draft it from the epics, docs and recent closes, and say it is a draft.
+   If a plan file is missing or still a template (its date reads YYYY-MM-DD), draft it from the goals grooming inferred (the `goals` entries with `"inferred": true` in the runs' decisions.json, newest first), supported by the epics, docs and recent closes, and say it is a draft.
 2. Then, with me, one file at a time: goals.md first, then protected.md, calendar.md and sources.md. Propose the rewrite, change what I change, and write it only when I agree.
 3. Last, set the `date:` line in goals.md to today's date (YYYY-MM-DD): that resets the "strategy due" clock. Do it only once the goals are settled.

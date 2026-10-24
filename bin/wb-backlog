@@ -132,6 +132,12 @@ def live(data):
     return [b for b in data if b.get("status") not in HIDDEN]
 
 
+def flaggable(data):
+    """Beads that can need attention: live ones, and deferred ones (a flag put on a deferred
+    bead would otherwise show nowhere). Closed ones never."""
+    return [b for b in data if b.get("status") != "closed"]
+
+
 def section(b):
     if ICEBOX in (b.get("labels") or []):
         return "ICEBOX"
@@ -225,7 +231,8 @@ def attention(beads):
     out = {}
     for n, b in enumerate(flagged, 1):
         why = ATTENTION_NOTE_RE.findall(b.get("notes") or "")
-        out[b.get("id")] = f"{n} {why[-1].strip() if why else ATTENTION}"
+        out[b.get("id")] = f"{n} {why[-1].strip() if why else ATTENTION}" + (
+            " · deferred" if b.get("status") == "deferred" else "")
     return out
 
 
@@ -281,8 +288,10 @@ def cmd_list(root, snapshot=None, flow=None):
         return STATES[state][0]
     titles = {b.get("id"): b.get("title") for b in data}  # all of them: a parent may be closed
     start = picks(live(data))
-    flagged = attention(live(data))
-    for b in ordered(live(data)):
+    flagged = attention(flaggable(data))
+    visible = {id(b) for b in live(data)}
+    shown = [b for b in data if id(b) in visible or b.get("id") in flagged]
+    for b in ordered(shown):
         bid = str(b.get("id", ""))
         mark = "◐" if b.get("status") == "in_progress" else "○"
         prio = f"P{b['priority']}" if isinstance(b.get("priority"), int) else "P-"
@@ -317,7 +326,7 @@ def cmd_summary(root):
     claims = f"claimed {claimed}" + (f" ({stale} idle)" if stale else "")
     now = sum(section(b) == "NOW" for b in beads)
     nxt = sum(section(b) == "NEXT" for b in beads)
-    flagged = len(attention(beads))
+    flagged = len(attention(flaggable(data)))
     lead = f"! {flagged} need attention · " if flagged else ""
     if now or nxt:
         print(lead + f"NOW {now} · NEXT {nxt} · {claims}" + (f" · icebox {ice}" if ice else ""))

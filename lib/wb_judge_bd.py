@@ -12,8 +12,8 @@ import os
 import re
 import sys
 
-ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")  # a bead id; never an option
-NUM_RE = re.compile(r"^[0-9]{1,6}$")
+ID_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,63}")  # a bead id; never an option
+NUM_RE = re.compile(r"[0-9]{1,6}")  # used with fullmatch: `$` would take a trailing newline
 MAX_IDS = 50
 
 
@@ -30,11 +30,11 @@ def _flags(args, allowed, numeric=()):
         if a in allowed:
             flags.append(a)
         elif a in numeric:
-            if i + 1 >= len(args) or not NUM_RE.match(args[i + 1]):
+            if i + 1 >= len(args) or not NUM_RE.fullmatch(args[i + 1]):
                 raise Refused(f"{a} needs a number")
             flags += [a, args[i + 1]]
             i += 1
-        elif ID_RE.match(a):
+        elif ID_RE.fullmatch(a):
             ids.append(a)
         else:
             raise Refused(f"{a!r} is not allowed")

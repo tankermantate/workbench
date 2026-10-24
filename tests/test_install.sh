@@ -47,6 +47,21 @@ assert_contains "schedule: --no-schedule still links" "$out" "linked $T/bin/wb-s
 out="$(WB_BIN_DIR="$T/bin" ZDOTDIR="$T/z" bash "$REPO/install.sh" --bogus 2>&1)"; rc=$?
 assert_eq "install: an unknown option is usage (exit 2)" "$rc" "2"
 
+# the agent runs with launchd's bare environment: what install saw of ours must reach it
+rm -f "$PL"; mkdir -p "$T/py"; ln -s "$(command -v python3)" "$T/py/python3"
+out="$(WB_BIN_DIR="$T/bin" ZDOTDIR="$T/z" PATH="$T/py:$PATH" bash "$REPO/install.sh" 2>&1)"; pl="$(cat "$PL")"
+assert_contains "schedule: the python3, bd and claude install found lead the agent's PATH" "$pl" \
+  "<string>$T/py:$REPO/tests/fake:$T/bin:"
+assert_not_contains "schedule: no WB_PLANS_DIR key when none was set" "$pl" "WB_PLANS_DIR"
+assert_not_contains "schedule: no WORKBENCH_CONFIG key when none was set" "$pl" "WORKBENCH_CONFIG"
+assert_contains "schedule: WB_GROOM_DIR (set) is passed on" "$pl" $'<key>WB_GROOM_DIR</key>\n\t\t<string>'"$T/groom</string>"
+rm -f "$PL"
+out="$(WB_BIN_DIR="$T/bin" ZDOTDIR="$T/z" WB_PLANS_DIR="$T/plans & more" WORKBENCH_CONFIG="$T/c.toml" bash "$REPO/install.sh" 2>&1)"; pl="$(cat "$PL")"
+assert_contains "schedule: WB_PLANS_DIR is passed on, xml-escaped" "$pl" $'<key>WB_PLANS_DIR</key>\n\t\t<string>'"$T/plans &amp; more</string>"
+assert_contains "schedule: WORKBENCH_CONFIG is passed on" "$pl" $'<key>WORKBENCH_CONFIG</key>\n\t\t<string>'"$T/c.toml</string>"
+if command -v plutil >/dev/null; then assert_eq "schedule: plist with env is valid" "$(plutil -lint "$PL" >/dev/null 2>&1; echo $?)" "0"; fi
+rm -f "$PL"
+
 assert_eq "example config parses" "$(WORKBENCH_CONFIG="$REPO/spaces.example.toml" "$REPO/bin/wb-spaces" >/dev/null 2>&1; echo $?)" "0"
 
 mkdir -p "$T/clean" && git -C "$T/clean" init -q && echo "plain" > "$T/clean/a.txt" && git -C "$T/clean" add a.txt

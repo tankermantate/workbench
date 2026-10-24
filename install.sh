@@ -36,9 +36,25 @@ install_schedule() {
     echo "note: launchd is macOS only; weekly grooming not scheduled (run: wb-groom run --all)." >&2; return 0
   fi
   mkdir -p "$agents" "$groom_dir"
-  # launchd's PATH is bare: give the run what wb-groom shells out to (bd, claude, python3, git)
-  path="$dest:$HOME/.local/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"
+  # launchd's PATH is bare: give the run what wb-groom shells out to (bd, claude, python3, git),
+  # starting with the ones found here, so it gets the python >= 3.11 checked below and not
+  # /usr/bin/python3
+  local found="" cmd d env=""
+  for cmd in python3 bd claude; do
+    d="$(command -v "$cmd" 2>/dev/null || true)"; d="${d%/*}"
+    if [ -n "$d" ] && [[ ":$found:" != *":$d:"* ]]; then found="$found${found:+:}$d"; fi
+  done
+  path="${found:+$found:}$dest:$HOME/.local/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"
+  # where this shell keeps its plans, run records and spaces, so the agent grooms the same ones
+  for cmd in WB_PLANS_DIR WB_GROOM_DIR WORKBENCH_CONFIG; do
+    if [ -n "${!cmd:-}" ]; then
+      env="$env		<key>$cmd</key>
+		<string>$(xml "${!cmd}")</string>
+"
+    fi
+  done
   tpl="$(cat "$here/lib/launchd/workbench.groom.plist.in")"
+  tpl=${tpl//@ENV@$'\n'/$env}
   tpl=${tpl//@LABEL@/$label}
   tpl=${tpl//@WB_GROOM@/$(xml "$dest/wb-groom")}
   tpl=${tpl//@PATH@/$(xml "$path")}

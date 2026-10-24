@@ -100,12 +100,9 @@ _wb_start_review() {
 # $1 is the plan dir the row names; wb-groom makes it from the templates when a
 # space has none yet, and says where it is.
 _wb_start_strategy() {
-  local plan ans
-  if ! plan=$($WORKBENCH_HOME/bin/wb-groom strategy $s[1]); then
-    print -nu2 "Press Enter to go back "   # fzf's redraw would hide the message otherwise
-    read -r ans
-    return 1
-  fi
+  local plan
+  # it said why on stderr; the launcher ends here like after any start, at a shell
+  plan=$($WORKBENCH_HOME/bin/wb-groom strategy $s[1]) || return 1
   cd -- $s[3] || return 0
   _wb_claude prompt "$(_wb_prompt strategy - - $plan)" -
 }
@@ -253,7 +250,7 @@ _wb_main() {
       open)    _wb_start_bead $p[2]; return 0 ;;
       claimed) _wb_start_claimed $p[2] $p[3] && return 0 ;;
       review)  _wb_start_review $p[3]; return 0 ;;
-      strategy) _wb_start_strategy && return 0 ;;
+      strategy) _wb_start_strategy; return 0 ;;
     esac                          # sep/msg rows, or a declined ◐: show screen 2 again
   done
 }

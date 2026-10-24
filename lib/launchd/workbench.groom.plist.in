@@ -23,6 +23,7 @@
 	<dict>
 		<key>PATH</key>
 		<string>@PATH@</string>
+@ENV@
 	</dict>
 	<key>StandardOutPath</key>
 	<string>@LOG@</string>

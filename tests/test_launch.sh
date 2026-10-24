@@ -146,6 +146,9 @@ assert_eq "render-work: attention first, five then a count" \
   "$(printf '%s\n' "$out" | sed -n 2,8p | cut -f1,2 | tr '\t\n' ': ')" "sep: open:att-3 open:att-6 open:att-1 open:att-4 open:att-7 msg: "
 assert_contains "render-work: the count line" "$(printf '%s\n' "$out" | sed -n 8p)" "+2 more need attention"
 assert_contains "render-work: attention reason dim with !" "$(printf '%s\n' "$out" | awk -F'\t' '$2=="att-1" {print $5; exit}')" $'\e[2m! due Nov 2 · money\e[0m'
+assert_eq "search: the word attention finds every flagged bead, even past the fifth" \
+  "$("$REPO/bin/wb-ui" filter-work "$T/attui" 1 'attention' | grep -c $'^open')" "7"
+assert_eq "search: the reason is searched too" "$("$REPO/bin/wb-ui" filter-work "$T/attui" 1 'money' | grep -c $'^open')" "1"
 assert_contains "render-work: attention shown in a tiny backlog" "$out" "── start here ──"
 assert_contains "render-work: every attention bead still sits in its section" "$(printf '%s\n' "$out" | sed -n '9,$p')" "att-2"
 

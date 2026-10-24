@@ -577,11 +577,13 @@ assert_eq "timeout: no before.jsonl" "$(ls "$R/before.jsonl" 2>/dev/null)" ""
 FAKE_CLAUDE_RC=3 groom acme >/dev/null 2>"$T/err"; rc=$?
 assert_eq "judge failed: exit 10" "$rc" "10"
 assert_contains "judge failed: summary says why" "$(cat "$(newest acme)/summary.md")" "the judge failed (exit 3); nothing applied"
+assert_contains "judge failed: summary names the files with the detail" "$(cat "$(newest acme)/summary.md")" "see judge.json and judge.err in the run dir"
 assert_eq "judge failed: no bd writes" "$(writes)" "0"
 # the judge leaves no decisions.json
 mkdir -p "$T/judge2"; printf 'I could not finish.\n' > "$T/judge2/summary.md"
 FAKE_CLAUDE_GROOM="$T/judge2" groom acme >/dev/null 2>"$T/err"; rc=$?
 assert_eq "no decisions.json: exit 10" "$rc" "10"
+assert_contains "no decisions.json: summary names the judge's output" "$(cat "$(newest acme)/summary.md")" "see judge.json and judge.err in the run dir"
 assert_contains "no decisions.json: summary says why" "$(cat "$(newest acme)/summary.md")" "the judge left no decisions.json; nothing applied"
 assert_contains "no decisions.json: ... and keeps the judge's words" "$(cat "$(newest acme)/summary.md")" "I could not finish."
 assert_eq "no decisions.json: no bd writes" "$(writes)" "0"
@@ -636,6 +638,8 @@ assert_eq "bd script: show several ids" "$(cx show acme-1 acme-2.3 --json)" "ok 
 assert_eq "bd script: ready" "$(cx ready -n 5 --json)" "ok ready -n 5 --json"
 assert_eq "bd script: dep tree" "$(cx dep tree acme-1)" "ok dep tree acme-1"
 assert_eq "bd script: children" "$(cx children acme-1 --json)" "ok children acme-1 --json"
+assert_eq "bd script: an id with a trailing newline is refused" "$(cx show $'acme-1\n')" "refused"
+assert_eq "bd script: a number with a trailing newline is refused" "$(cx list -n $'5\n')" "refused"
 for bad in "list --profile" "list --db /x" "list -C /x" "list --directory=/x" "list --global" "list --readonly=false" \
            "list --dolt-auto-commit=on" "list --sandbox=false" "--profile list" "update acme-1 -p 1" "close acme-1" \
            "show" "show --all" "show -x" "show ../x" "show /etc/passwd" "list acme-1" "list -n" "list -n x" \
@@ -741,6 +745,9 @@ assert_eq "strategy: exit 0 and prints the plan dir" "$rc $out" "0 $SP/acme"
 assert_eq "strategy: makes the four plan files from the templates" "$(ls "$SP/acme" | tr '\n' ' ')" "calendar.md goals.md protected.md sources.md "
 assert_eq "strategy: a fresh plan reads as missing (its date is a placeholder)" \
   "$(py "import datetime; p = g.read_plan('$SP/acme'); print(p.goals_date, g.plan_state(p, datetime.date(2026,10,23)))")" "None missing"
+assert_eq "strategy: the template's calendar dates are far in the future (never due soon)" \
+  "$(grep -Eo '[0-9]{4}-[0-9]{2}-[0-9]{2}' "$SP/acme/calendar.md" | cut -c1-2 | sort -u | tr -d '\n')" "20"
+assert_not_contains "strategy: ... 2099, not a near year" "$(grep -Eo '[0-9]{4}-' "$SP/acme/calendar.md")" "2026"
 assert_contains "strategy: the template carries a labels line" "$(cat "$SP/acme/protected.md")" "labels:"
 assert_contains "strategy: the template carries the sprint line" "$(cat "$SP/acme/goals.md")" "sprint:"
 printf 'my goals\ndate: 2026-10-20\n' > "$SP/acme/goals.md"

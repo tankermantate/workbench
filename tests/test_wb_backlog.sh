@@ -233,6 +233,19 @@ assert_eq "attention: the others are still picked" \
   "$(printf '%s\n' "$out" | awk -F'\t' '$11 != "-" {print $1}' | sort | tr '\n' ' ')" "at-4 at-5 at-6 "
 assert_eq "summary: attention first" "$("$WB" summary "$T/store")" "! 3 need attention · open 5 · icebox 1 · claimed 0"
 
+# attention on a deferred bead still shows (the launcher hides deferred beads otherwise); closed never
+reset_bd; cat > "$FAKE_BD_DIR/stdout" <<'EOF2'
+[{"id":"dd-1","title":"later","status":"deferred","priority":1,"labels":["attention"],"notes":"attention: due Nov 2 · money"},
+ {"id":"dd-2","title":"done","status":"closed","priority":1,"labels":["attention"]},
+ {"id":"dd-3","title":"quiet deferral","status":"deferred","priority":1},
+ {"id":"dd-4","title":"open","status":"open","priority":2,"labels":["attention"]}]
+EOF2
+out="$("$WB" list "$T/store")"
+assert_eq "attention: a deferred bead is listed with its reason and ' · deferred'; closed and quiet deferrals are not" \
+  "$(printf '%s\n' "$out" | cut -f1,12 | sort | tr '\t\n' ':|')" "dd-1:1 due Nov 2 · money · deferred|dd-4:2 attention|"
+assert_eq "attention: a deferred bead is never a pick" "$(printf '%s\n' "$out" | awk -F'\t' '$1=="dd-1" {print $11}')" "-"
+assert_eq "summary: a deferred attention bead counts" "$("$WB" summary "$T/store")" "! 2 need attention · open 1 · claimed 0"
+
 # the 30-day flow: beads created vs closed, closed ones read apart (bd hides them)
 reset_bd; python3 - "$FAKE_BD_DIR" <<'EOF'
 import json, sys, datetime

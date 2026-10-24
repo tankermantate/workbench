@@ -239,7 +239,8 @@ def print_matches(tmp, rows, pats, layout):
     every, some = [], []
     for r in rows:
         # the short id, not the full one: every id shares the space's prefix ("acme-")
-        n = wb_search.hits(pats, f"{r[1]}\n{r[5]}\n{r[8]}\n{(beads.get(r[0]) or {}).get('description') or ''}")
+        flag = f"attention {r[11].split(' ', 1)[1]}" if r[11] != "-" else ""  # the spec's "in the search (attention)"
+        n = wb_search.hits(pats, f"{r[1]}\n{r[5]}\n{r[8]}\n{(beads.get(r[0]) or {}).get('description') or ''}\n{flag}")
         if n:
             (every if n == len(pats) else some).append(r)
     if not every and not some:
