@@ -11,7 +11,9 @@ import json
 import os
 import re
 import shlex
+import shutil
 import signal
+import sys
 import subprocess
 import uuid
 
@@ -591,26 +593,63 @@ def _undo_one(run_dir, root, bd, was, ran, timeout):
 #                            the judge's own, <run dir>/judge: it may write there (nested too),
 #                            but not <run dir>/reviewed, before.jsonl or inputs.json, nor read them.
 #   `--` before the prompt   --add-dir and --allowedTools are variadic and would take the prompt.
-# Refused in the probes: git log, git status, `bd ... && git log`, bd without --readonly, cat or ls
-# outside the working dirs, touch, `bd ... > file`, Write to the space root, the plan dir, a path
-# outside, and <dir>/../x. Allowed: the bd reads, Read in the root and plan dir, Write in the dir.
-JUDGE_BD = ("list", "show", "ready", "dep tree", "children")
-JUDGE_DENY = ["Bash(git:*)", "NotebookEdit", "WebFetch", "WebSearch"]
+#   Bash(<run dir>/bd-readonly:*)  the one Bash rule (write_judge_bd). `Bash(bd --readonly list:*)`
+#                            was not enough: bd's global flags may follow the subcommand
+#                            (`--profile` wrote files into the cwd, `--db`/`-C`/`--global` read
+#                            other stores, `--readonly=false`), so the script whitelists the args.
+# Refused in the probes: git log, git status, `bd ... && git log`, bd itself (with or without
+# --readonly), cat or ls outside the working dirs, touch, `... > file`, Write to the space root, the
+# plan dir, a path outside, and <dir>/../x; and, with the minimal env (judge_env), every network
+# command tried: curl, wget, gh api, gh issue list, ssh, nc, dig, nslookup, host, ping, whois,
+# traceroute, plus env, printenv, python3 -c, and around the script: `cd / && <script>`,
+# `BEADS_DIR=x <script>`, `<script> show "$(curl …)"`, `<script> …; curl …`. The script itself
+# refused --profile, --db, -C, --global and --readonly=false. Allowed: the script's list and show,
+# Read in the root and plan dir, Write in the judge's dir; the judge still authenticated.
+# dontAsk already refused every one of these in the probe (only git got through, by Claude Code's
+# read-only auto-allow); named anyway so a wider auto-allow in a later Claude Code can't let one in.
+JUDGE_NET = ("curl", "wget", "gh", "ssh", "scp", "sftp", "rsync", "nc", "ncat", "telnet", "ftp",
+             "dig", "nslookup", "host", "ping", "whois", "traceroute", "env", "printenv")
+JUDGE_DENY = (["Bash(git:*)"] + [f"Bash({c}:*)" for c in JUDGE_NET]
+              + ["NotebookEdit", "WebFetch", "WebSearch"])
+JUDGE_BD = "bd-readonly"  # the per-run script in the run dir; lib/wb_judge_bd.py says why
+JUDGE_ENV = ("HOME", "USER", "LOGNAME", "LANG", "TMPDIR")  # what bd needs; nothing secret
 
 
-def judge_rules(root, plan_dir, out_dir):
-    """The allow rules: read-only bd, Read in ROOT, PLAN_DIR (or None) and OUT_DIR, Write in OUT_DIR
-    (the judge's own dir). Paths are absolute rules (`//path`), resolved, since the rule is
-    matched against real paths."""
+def write_judge_bd(run_dir, root, bd):
+    """Write RUN_DIR/bd-readonly, the judge's only bd, and return its path. Raises OSError."""
+    exe = shutil.which(bd)
+    if not exe:
+        raise OSError(f"{bd} not found on PATH")
+    exe = os.path.realpath(exe)
+    env = {k: os.environ[k] for k in JUDGE_ENV if k in os.environ}
+    env.update({k: v for k, v in os.environ.items() if k.startswith("LC_")})
+    env["PATH"] = os.pathsep.join([os.path.dirname(exe), "/usr/bin", "/bin", "/usr/sbin", "/sbin"])
+    lib = os.path.dirname(os.path.realpath(__file__))
+    path = os.path.join(run_dir, JUDGE_BD)
+    # -I: no PYTHONPATH, no user site, not the script's dir, whatever the judge's shell has set.
+    with open(path, "w", encoding="utf-8") as f:
+        f.write(f"#!{os.path.realpath(sys.executable)} -I\n"
+                "import sys\n"
+                f"sys.path.insert(0, {lib!r})\n"
+                "import wb_judge_bd\n"
+                f"sys.exit(wb_judge_bd.main(sys.argv[1:], {os.path.realpath(root)!r}, {exe!r}, {env!r}))\n")
+    os.chmod(path, 0o555)
+    return path
+
+
+def judge_rules(judge_bd, root, plan_dir, out_dir):
+    """The allow rules: the one bd script JUDGE_BD, Read in ROOT, PLAN_DIR (or None) and OUT_DIR,
+    Write in OUT_DIR (the judge's own dir). Paths are absolute rules (`//path`), resolved, since
+    the rule is matched against real paths."""
     dirs = [d for d in (root, plan_dir, out_dir) if d]
-    return ([f"Bash(bd --readonly {c}:*)" for c in JUDGE_BD]
+    return ([f"Bash({os.path.realpath(judge_bd)}:*)"]
             + [f"Read(/{os.path.realpath(d)}/**)" for d in dirs]
             + [f"Edit(/{os.path.realpath(out_dir)}/**)"])
 
 
-def judge_argv(claude, root, plan_dir, out_dir, prompt):
+def judge_argv(claude, judge_bd, root, plan_dir, out_dir, prompt):
     """The judge's argv. Never --dangerously-skip-permissions or a mode that skips prompts."""
-    allow = judge_rules(root, plan_dir, out_dir)
+    allow = judge_rules(judge_bd, root, plan_dir, out_dir)
     settings = json.dumps({"permissions": {"allow": allow, "deny": JUDGE_DENY}})
     dirs = [os.path.realpath(d) for d in (out_dir, plan_dir) if d]
     return [claude, "-p", "--setting-sources", "", "--strict-mcp-config", "--permission-mode", "dontAsk",

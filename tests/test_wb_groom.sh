@@ -490,7 +490,7 @@ sfield() { python3 -c "import json; print([b for b in json.load(open('$T/$1/.bea
 jl() { python3 -c "import json; c = json.loads(open('$T/claude.log').read().splitlines()[-1]); a = c['argv']; print($1)"; }
 
 reset_stores; : > "$T/bd.log"; : > "$T/claude.log"
-CLAUDE_CONFIG_DIR="$T/elsewhere" groom acme >"$T/out" 2>"$T/err"; rc=$?
+CLAUDE_CONFIG_DIR="$T/elsewhere" GITHUB_TOKEN=secret AWS_SECRET_ACCESS_KEY=secret groom acme >"$T/out" 2>"$T/err"; rc=$?
 R="$(newest acme)"
 assert_eq "run: exit 0" "$rc" "0"
 assert_eq "run: the run dir is <space>/YYYYMMDD-HHMM" "$(basename "$R" | grep -cE '^[0-9]{8}-[0-9]{4}$')" "1"
@@ -509,10 +509,18 @@ assert_eq "judge: dontAsk, strict MCP, only Bash, Read and Write" \
   "$(jl "a[a.index('--permission-mode') + 1], '--strict-mcp-config' in a, a[a.index('--tools') + 1]")" "dontAsk True Bash,Read,Write"
 assert_not_contains "judge: never skips permissions" "$(cat "$T/claude.log")" "dangerously"
 assert_not_contains "judge: never bypassPermissions" "$(cat "$T/claude.log")" "bypassPermissions"
-assert_eq "judge: read-only bd in the allowlist" "$(jl "'Bash(bd --readonly list:*)' in a and 'Bash(bd --readonly show:*)' in a")" "True"
+assert_eq "judge: the rules admit the run's bd script and scoped Read/Edit, nothing else" \
+  "$(jl "sorted(json.loads(a[a.index('--settings') + 1])['permissions']['allow']) == sorted(['Bash($R/bd-readonly:*)', 'Read(/$(cd "$T/ra" && pwd -P)/**)', 'Read(/$P/acme/**)', 'Read(/$R/judge/**)', 'Edit(/$R/judge/**)'])")" "True"
+assert_eq "judge: --allowedTools is the same list" \
+  "$(jl "a[a.index('--allowedTools') + 1:a.index('--add-dir')] == json.loads(a[a.index('--settings') + 1])['permissions']['allow']")" "True"
+assert_eq "judge: no rule names bd itself" "$(jl "[x for x in a if x.startswith('Bash(bd')]")" "[]"
+assert_eq "judge: the bd script is not writable" "$(ls -l "$R/bd-readonly" | cut -c1-10)" "-r-xr-xr-x"
+assert_eq "judge: its environment is the allowlist only (PWD, SHLVL, _ are the fake shell's own)" "$(jl "[k for k in c['env'] if k not in ('PATH','HOME','USER','LOGNAME','SHELL','LANG','TMPDIR','CLAUDE_CONFIG_DIR','PWD','SHLVL','_') and not k.startswith(('LC_','FAKE_CLAUDE_','__CF'))]")" "[]"
 assert_eq "judge: writes only to its own dir in the run dir" "$(jl "[x for x in a if x.startswith('Edit(')] == ['Edit(/' + '$R' + '/judge/**)']")" "True"
 assert_eq "judge: reads no run record" "$(jl "[x for x in a if x.startswith('Read(/$R')] == ['Read(/$R/judge/**)']")" "True"
 assert_eq "judge: no unscoped Read or Write" "$(jl "'Read' in a or 'Write' in a")" "False"
+assert_eq "judge: settings deny the network commands" \
+  "$(jl "(lambda d: all('Bash(%s:*)' % c in d for c in ('gh','ssh','curl','wget','nc','printenv','env')))(json.loads(a[a.index('--settings') + 1])['permissions']['deny'])")" "True"
 assert_eq "judge: settings deny git and the web, and not Edit (that would block Write too)" \
   "$(jl "(lambda d: ('Bash(git:*)' in d, 'WebFetch' in d, 'Edit' in d))(json.loads(a[a.index('--settings') + 1])['permissions']['deny'])")" "(True, True, False)"
 assert_eq "judge: add-dir is its own dir, then the plan dir" "$(jl "a[a.index('--add-dir') + 1:a.index('--add-dir') + 3] == ['$R/judge', '$P/acme']")" "True"
@@ -596,7 +604,7 @@ reset_stores; : > "$T/bd.log"; rm -rf "$G"; rm "$T/rb/.beads/fake.json"
 groom --all >"$T/out" 2>"$T/err"; rc=$?
 assert_eq "--all: exit 1 when a space failed" "$rc" "1"
 assert_eq "--all: the good space is applied" "$(sfield ra acme-10 labels)" "['icebox']"
-assert_contains "--all: names the failed space" "$(cat "$T/err")" "beta"
+assert_contains "--all: names the failed space" "$(cat "$T/err")" "failed: beta (exit 4)"
 assert_eq "--all: a space with no plan dir is not run" "$(ls "$G" | tr '\n' ' ')" "acme beta "
 assert_contains "--all: the broken space's summary says why" "$(cat "$(newest beta)/summary.md")" "bd could not be read"
 cp "$FX/beads.json" "$T/rb/.beads/fake.json"
@@ -611,10 +619,85 @@ assert_contains "... and says so" "$(cat "$T/err")" "WB_GROOM_TIMEOUT is not a n
 # the prompt teaches the decisions.json shape and the plan inputs
 GP="$(cat "$REPO/prompts/groom.txt" 2>/dev/null)"
 for w in '"leaving"' '"attention"' '"protected"' goals.md protected.md calendar.md sources.md \
-         'bd --readonly list -n 0 --json' 'when unsure' 'within 14 days'; do
+         '{bd} list -n 0 --json' '{bd} show <id> --json' 'when unsure' 'within 14 days'; do
   assert_contains "prompt: mentions $w" "$GP" "$w"
 done
 assert_not_contains "prompt: no unqualified bd call" "$GP" '`bd list'
+assert_not_contains "prompt: no bd --readonly call (bd itself is refused)" "$GP" '`bd --readonly'
+
+# --- the judge's bd script ---
+# cx ARGS…: check() on ARGS, "ok <argv>" or "refused"
+cx() { PYTHONPATH="$PL" python3 -c 'import sys, wb_judge_bd as w
+try: print("ok", " ".join(w.check(sys.argv[1:])))
+except w.Refused: print("refused")' "$@"; }
+assert_eq "bd script: list -n 0 --json" "$(cx list -n 0 --json)" "ok list -n 0 --json"
+assert_eq "bd script: list --all" "$(cx list --all -n 0 --json)" "ok list --all -n 0 --json"
+assert_eq "bd script: show several ids" "$(cx show acme-1 acme-2.3 --json)" "ok show acme-1 acme-2.3 --json"
+assert_eq "bd script: ready" "$(cx ready -n 5 --json)" "ok ready -n 5 --json"
+assert_eq "bd script: dep tree" "$(cx dep tree acme-1)" "ok dep tree acme-1"
+assert_eq "bd script: children" "$(cx children acme-1 --json)" "ok children acme-1 --json"
+for bad in "list --profile" "list --db /x" "list -C /x" "list --directory=/x" "list --global" "list --readonly=false" \
+           "list --dolt-auto-commit=on" "list --sandbox=false" "--profile list" "update acme-1 -p 1" "close acme-1" \
+           "show" "show --all" "show -x" "show ../x" "show /etc/passwd" "list acme-1" "list -n" "list -n x" \
+           "dep add acme-1 acme-2" "dep tree" "children" "children a b" "sql select" "list --json=x"; do
+  assert_eq "bd script refuses: $bad" "$(cx $bad)" "refused"
+done
+# the script itself: a recording bd, called from elsewhere with hostile env; it runs in the root
+cat > "$T/recbd" <<EOF
+#!/bin/sh
+printf '%s|%s|%s\n' "\$PWD" "\$*" "\$(env | cut -d= -f1 | sort | tr '\n' ' ')" >> "$T/recbd.log"
+EOF
+chmod +x "$T/recbd"; mkdir -p "$T/wrun"; : > "$T/recbd.log"
+WS="$(PYTHONPATH="$PL" python3 -c "import wb_groom; print(wb_groom.write_judge_bd('$T/wrun', '$T/ra', '$T/recbd'))")"
+(cd / && GITHUB_TOKEN=x BEADS_DIR=/tmp PYTHONPATH=/tmp "$WS" list -n 0 --json)
+assert_eq "bd script: execs bd --readonly --sandbox in the space root" "$(cut -d'|' -f1-2 "$T/recbd.log")" "$(cd "$T/ra" && pwd -P)|--readonly --sandbox list -n 0 --json"
+assert_not_contains "bd script: none of the caller's env reaches bd" "$(cut -d'|' -f3 "$T/recbd.log")" "GITHUB_TOKEN"
+assert_not_contains "bd script: ... not BEADS_DIR" "$(cut -d'|' -f3 "$T/recbd.log")" "BEADS_DIR"
+"$WS" list --profile 2>"$T/err"; rc=$?
+assert_eq "bd script: a refused call exits 2 and runs no bd" "$rc $(wc -l < "$T/recbd.log" | tr -d ' ')" "2 1"
+assert_contains "... and says what is allowed" "$(cat "$T/err")" "refused: '--profile' is not allowed"
+
+# --- --all goes on past a space that crashes ---
+cat > "$T/crash.py" <<'PYX'
+import importlib.machinery, importlib.util, sys
+spec = importlib.util.spec_from_loader("wg", importlib.machinery.SourceFileLoader("wg", sys.argv[1]))
+wg = importlib.util.module_from_spec(spec); spec.loader.exec_module(wg)
+real = wg.groom_space
+def groom_space(space):
+    if space["label"] == "acme":
+        raise RuntimeError("boom")
+    return real(space)
+wg.groom_space = groom_space
+sys.exit(wg.cmd_run("--all"))
+PYX
+export FAKE_BD_STATEFUL=1 FAKE_BD_LOG="$T/bd.log" FAKE_CLAUDE_GROOM="$T/judge" WORKBENCH_CONFIG="$T/spaces.toml" WB_GROOM_DIR="$G" WB_PLANS_DIR="$P"
+reset_stores; rm -rf "$G"
+python3 "$T/crash.py" "$WG" >/dev/null 2>"$T/err"; rc=$?
+assert_eq "--all: a crashing space exits 1" "$rc" "1"
+assert_contains "--all: names the crash" "$(cat "$T/err")" "acme: crashed: RuntimeError: boom"
+assert_contains "--all: counts it failed" "$(cat "$T/err")" "failed: acme (crashed)"
+assert_eq "--all: the next space still ran" "$(ls "$G" | tr '\n' ' ')" "beta "
+
+# --- shared remote: a remote that can't be reached is said, not skipped ---
+git -C "$T/rb" init -q 2>/dev/null; git -C "$T/rb" remote add origin "$T/no-such-remote.git"
+groom beta >/dev/null 2>&1
+assert_contains "remote: an unreachable remote says it couldn't check" "$(cat "$(newest beta)/summary.md")" "Could not check whether this store syncs to a shared remote"
+assert_eq "remote: a repo's core.sshCommand is left to git" \
+  "$(git -C "$T/rb" config core.sshCommand 'ssh -i k'; python3 - "$WG" "$T/rb" <<'PYX'
+import importlib.machinery, importlib.util, os, subprocess, sys
+spec = importlib.util.spec_from_loader("wg", importlib.machinery.SourceFileLoader("wg", sys.argv[1]))
+wg = importlib.util.module_from_spec(spec); spec.loader.exec_module(wg)
+seen = []
+real = subprocess.run
+def run(*a, **k):
+    seen.append(k.get("env", {}).get("GIT_SSH_COMMAND"))
+    return real(*a, **k)
+wg.subprocess.run = run
+os.environ.pop("GIT_SSH_COMMAND", None)
+wg.shared_remote(sys.argv[2])
+print(seen[-1])
+PYX
+)" "None"
 
 # --- status, reviewed, strategy (what the launcher shows and starts) ---
 SG="$T/sg"; SP="$T/sp"; export WB_GROOM_DIR="$SG" WB_PLANS_DIR="$SP"

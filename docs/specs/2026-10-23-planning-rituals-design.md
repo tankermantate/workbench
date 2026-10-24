@@ -84,13 +84,23 @@ Claude never writes to the bead store. Each run has two halves:
    space root with `CLAUDE_CONFIG_DIR` set to the space's `claude_config` or unset. `""` is
    accepted, and a project `.claude/settings.json` hook that runs under `--setting-sources project`
    did not run. The
-   rules allow `Bash(bd --readonly list|show|ready|dep tree|children:*)`, `Read(//<root>/**)`,
+   rules allow one Bash command, `<run dir>/bd-readonly` (written by `wb-groom` where the judge
+   can't write; `lib/wb_judge_bd.py`): it takes only `list [-n N] [--all] [--json]`, `show ID…`,
+   `ready`, `dep tree ID`, `children ID`, refuses every other flag (bd's global flags would let
+   `--profile` write into the space's tree, or `--db`/`-C`/`--global` read another store), and
+   execs `bd --readonly --sandbox …` in the space root with a fixed environment, so nothing the
+   judge puts in front of the call reaches bd. Then `Read(//<root>/**)`,
    `Read(//<plan>/**)`, and Read and `Edit(…/**)` (that is the rule that lets Write in; a
    `Write(...)` rule grants nothing) only on `<run dir>/judge/`, so the judge can't touch the run
    record (`inputs.json`, `before.jsonl`, `reviewed`). Once it has exited, `wb-groom` moves its
    `summary.md`, and its `decisions.json` if it finished, up into the run dir. The settings deny
    `Bash(git:*)` (Claude Code auto-allows read-only commands like `git log` even under dontAsk),
-   NotebookEdit, WebFetch and WebSearch, but not Edit, which would block Write too.
+   NotebookEdit, WebFetch and WebSearch, but not Edit, which would block Write too; and, though
+   dontAsk already refused each of them in a probe, `curl`, `wget`, `gh`, `ssh`, `scp`, `sftp`,
+   `rsync`, `nc`, `ncat`, `telnet`, `ftp`, `dig`, `nslookup`, `host`, `ping`, `whois`,
+   `traceroute`, `env` and `printenv`. The judge's environment is an allowlist (PATH, HOME, USER,
+   LOGNAME, SHELL, LANG, LC_*, TMPDIR, the Anthropic auth variables, the space's
+   CLAUDE_CONFIG_DIR): no caller token reaches it.
 2. **Apply** — `wb-groom apply` (python, in this repo) validates `decisions.json` and applies only
    what policy allows, through bd. **A bead is protected if any of these hold**: it carries a
    protected label from `protected.md` (checked by `apply` itself); the judge says it is protected;
@@ -142,8 +152,9 @@ line, i.e. someone changed it since the run.
 A space's bead store may sync to a shared remote, so applied changes reach anyone else who reads
 it. Grooming doesn't sync or push; the change goes out with the user's next sync. The summary says
 so when the space has a remote: `This store syncs to a shared remote: changes go out with your next
-sync`, when one of the root's git remotes has `refs/dolt/data` (`git ls-remote`, 5 s in all; no line
-when that fails). bd writes pass `--sandbox`, which turns Dolt auto-push off.
+sync`, when one of the root's git remotes has `refs/dolt/data` (`git ls-remote`, 5 s in all; ssh
+in batch mode unless the repo sets `core.sshCommand`). When a remote can't be checked it says
+`Could not check whether this store syncs to a shared remote`. bd writes pass `--sandbox`, which turns Dolt auto-push off.
 
 ### Schedule
 

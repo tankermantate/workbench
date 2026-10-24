@@ -24,10 +24,11 @@ docs and recent closes, mark each one inferred, and say so first in the summary:
 for the monthly strategy conversation, not settled.
 
 ## Hard limits (enforced; a refused tool call is not an error to work around)
-- bd only in these exact forms, one command per call, no pipes or redirection:
-  `bd --readonly list -n 0 --json` (add `--all` for closed beads, e.g. what shipped recently),
-  `bd --readonly show <id> --json`, `bd --readonly ready --json`, `bd --readonly dep tree <id>`,
-  `bd --readonly children <id> --json`.
+- Read beads only through BD = {bd} (a read-only bd for this run; bd itself is refused), in
+  these forms, one command per call, run as is (no cd, no VAR=, no pipes or redirection):
+  `{bd} list -n 0 --json` (add `--all` for closed beads, e.g. what shipped recently),
+  `{bd} show <id> --json` (several ids at once is fine), `{bd} ready --json`,
+  `{bd} dep tree <id>`, `{bd} children <id> --json`. Any other flag is refused.
 - Read files under ROOT and PLAN. Write only {run_dir}/decisions.json and
   {run_dir}/summary.md.
 - No git, no network, no other commands, no other files.

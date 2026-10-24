@@ -4,9 +4,10 @@
 # (the judge's own dir; a planted file tests what wb-groom keeps from it), then sleeps
 # FAKE_CLAUDE_SLEEP seconds (a judge that wrote its answer and then hung) and exits FAKE_CLAUDE_RC
 # (default 0).
-# FAKE_CLAUDE_LOG: one JSON line per call: argv, cwd, and CLAUDE_CONFIG_DIR (null when unset).
+# FAKE_CLAUDE_LOG: one JSON line per call: argv, cwd, CLAUDE_CONFIG_DIR (null when unset) and
+# the names of the environment's variables.
 if [ -n "${FAKE_CLAUDE_LOG:-}" ]; then
-  python3 -c 'import json, os, sys; print(json.dumps({"argv": sys.argv[1:], "cwd": os.getcwd(), "config": os.environ.get("CLAUDE_CONFIG_DIR")}))' "$@" >> "$FAKE_CLAUDE_LOG"
+  python3 -c 'import json, os, sys; print(json.dumps({"argv": sys.argv[1:], "cwd": os.getcwd(), "config": os.environ.get("CLAUDE_CONFIG_DIR"), "env": sorted(os.environ)}))' "$@" >> "$FAKE_CLAUDE_LOG"
 fi
 if [ -z "${FAKE_CLAUDE_GROOM:-}" ]; then
   echo "FAKE-CLAUDE $*"

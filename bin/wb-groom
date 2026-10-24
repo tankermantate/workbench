@@ -264,25 +264,35 @@ def earlier_unreviewed(base, run_dir):
 
 
 def shared_remote(root):
-    """True when one of ROOT's git remotes has refs/dolt/data. Five seconds in all; a failure
-    (no repo, no network, a remote asking for credentials) is no answer, so no line."""
+    """True when one of ROOT's git remotes has refs/dolt/data, False when none has, None when
+    that can't be told (a remote that failed or ran out of the five seconds, git missing). Not a
+    git repo, or no remotes, is False."""
     env = {**os.environ, "GIT_TERMINAL_PROMPT": "0"}
-    env.setdefault("GIT_SSH_COMMAND", "ssh -o BatchMode=yes")
+    git = ["git", "-C", root]
+
+    def run(args, timeout):
+        return subprocess.run(git + args, text=True, capture_output=True, stdin=subprocess.DEVNULL,
+                              env=env, timeout=timeout)
+
     deadline = datetime.datetime.now() + datetime.timedelta(seconds=5)
     try:
-        remotes = subprocess.run(["git", "-C", root, "remote"], text=True, capture_output=True,
-                                 stdin=subprocess.DEVNULL, env=env, timeout=5).stdout.split()
-        for r in remotes:
+        if run(["rev-parse", "--git-dir"], 5).returncode != 0:
+            return False
+        # Never prompt for a passphrase; but a repo's own core.sshCommand wins, as it would for git.
+        if run(["config", "core.sshCommand"], 5).returncode != 0:
+            env.setdefault("GIT_SSH_COMMAND", "ssh -o BatchMode=yes")
+        unsure = False
+        for r in run(["remote"], 5).stdout.split():
             left = (deadline - datetime.datetime.now()).total_seconds()
             if left <= 0:
-                return False
-            p = subprocess.run(["git", "-C", root, "ls-remote", r, "refs/dolt/data"], text=True,
-                               capture_output=True, stdin=subprocess.DEVNULL, env=env, timeout=left)
+                return None
+            p = run(["ls-remote", r, "refs/dolt/data"], left)
             if p.returncode == 0 and p.stdout.strip():
                 return True
+            unsure = unsure or p.returncode != 0
+        return None if unsure else False
     except (OSError, subprocess.TimeoutExpired):
-        pass
-    return False
+        return None
 
 
 def fill_prompt(fields):
@@ -293,12 +303,17 @@ def fill_prompt(fields):
     return text
 
 
+# What the judge's environment may hold: the basics a process needs, the variables Claude Code
+# authenticates with, and the test fake's knobs. Nothing else from the caller (GITHUB_TOKEN, cloud
+# keys …) reaches a process that reads untrusted bead text. Only the space's account is used:
+# never a CLAUDE_CONFIG_DIR inherited from whoever started wb-groom, nor a Claude session's markers.
+JUDGE_ENV = ("PATH", "HOME", "USER", "LOGNAME", "SHELL", "LANG", "TMPDIR",
+             "ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN", "ANTHROPIC_BASE_URL", "CLAUDE_CODE_OAUTH_TOKEN")
+
+
 def judge_env(claude_config):
-    env = dict(os.environ)
-    # Only the space's account: never one inherited from whoever started wb-groom, nor the
-    # markers of a Claude session that did.
-    for k in ("CLAUDE_CONFIG_DIR", "CLAUDECODE", "CLAUDE_CODE_ENTRYPOINT"):
-        env.pop(k, None)
+    env = {k: v for k, v in os.environ.items()
+           if k in JUDGE_ENV or k.startswith("LC_") or k.startswith("FAKE_CLAUDE_")}
     if claude_config:
         env["CLAUDE_CONFIG_DIR"] = claude_config
     return env
@@ -319,8 +334,11 @@ def finish_summary(run_dir, base, root, lead, applied):
     n = earlier_unreviewed(base, run_dir)
     if n:
         tail.append(f"{n} earlier runs not yet reviewed")
-    if root and shared_remote(root):
+    remote = shared_remote(root) if root else False
+    if remote:
         tail.append("This store syncs to a shared remote: changes go out with your next sync")
+    elif remote is None:
+        tail.append("Could not check whether this store syncs to a shared remote")
     if tail:
         parts.append("\n".join(tail) + "\n")
     with open(path + ".tmp", "w", encoding="utf-8") as f:
@@ -387,14 +405,17 @@ def groom_in(space, base, run_dir):
         return code
 
     protocol = space["protocol"]
-    fields = {"space": label, "root": root, "today": day.isoformat(), "run_dir": judge_dir,
+    judge_bd = os.path.join(run_dir, wb_groom.JUDGE_BD)
+    fields = {"space": label, "root": root, "today": day.isoformat(), "run_dir": judge_dir, "bd": judge_bd,
               "plan_dir": plan_dir or f"{os.path.join(plans_dir(), label)} (missing)", "plan_state": state,
               "protocol": os.path.join(root, protocol) if protocol else "none named",
               "now_size": plan.now_size if plan else wb_groom.DEFAULT_SIZES["now"],
               "next_size": plan.next_size if plan else wb_groom.DEFAULT_SIZES["next"]}
     try:
         os.mkdir(judge_dir)
-        argv = wb_groom.judge_argv(os.environ.get("WB_CLAUDE", "claude"), root, plan_dir, judge_dir, fill_prompt(fields))
+        wb_groom.write_judge_bd(run_dir, root, BD)
+        argv = wb_groom.judge_argv(os.environ.get("WB_CLAUDE", "claude"), judge_bd, root, plan_dir, judge_dir,
+                                   fill_prompt(fields))
         write_json(os.path.join(run_dir, "inputs.json"), {
             "space": label, "root": root, "plan_dir": plan_dir, "plan_state": state,
             "goals_date": plan.goals_date.isoformat() if plan and plan.goals_date else None,
@@ -462,7 +483,12 @@ def cmd_run(target):
     failed = []
     for space in spaces:
         if os.path.isdir(os.path.join(plans_dir(), space["label"])):
-            code = groom_space(space)
+            try:
+                code = groom_space(space)
+            except Exception as e:  # one space's bug must not cost the others their run
+                print(f"wb-groom: {space['label']}: crashed: {type(e).__name__}: {e}", file=sys.stderr)
+                failed.append(f"{space['label']} (crashed)")
+                continue
             if code != 0:
                 failed.append(f"{space['label']} (exit {code})")
     if failed:
