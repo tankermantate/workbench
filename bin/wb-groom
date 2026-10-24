@@ -42,7 +42,22 @@
       undo. A bead whose state no longer matches its applied.jsonl line is refused:
       "ID changed since the run; not undone".
 
-Exit codes: 0 ok; 2 usage (or an unknown space, or no spaces); 3 decisions.json unreadable; 4 bd
+  wb-groom status LABEL
+      What the launcher offers for the space LABEL, as TSV lines (none when there is nothing):
+        review, <run dir>, <weekday>[, "<k> waiting"]   the newest run without a `reviewed` file
+                                                        (k more are waiting, when any are)
+        strategy, due                                   the plan is due, stale or missing, and the
+                                                        space has runs (a space with neither plan
+                                                        nor runs shows nothing)
+      Always exits 0: the launcher calls it on every screen.
+  wb-groom reviewed RUN_DIR
+      Marks the run reviewed (a `reviewed` file holding the date; the judge cannot write it).
+  wb-groom strategy LABEL
+      Makes the plan directory from lib/plan-templates/ when it is absent, and prints its path.
+      A fresh template carries `date: YYYY-MM-DD`, so the plan still counts as missing (fail
+      closed) until the strategy session sets a real date. An existing directory is left alone.
+
+Exit codes: 0 ok; 2 usage (or an unknown space, or no spaces, or no such run directory); 3 decisions.json unreadable; 4 bd
 could not be read; 5 a bd write failed (the run stops; what was applied is in applied.jsonl); 6 the
 run dir is not writable (nothing applied); 7 apply refused (already applied, no such proposal,
 applied by hand); 8 undo refused or skipped a named bead; 9 a grooming run is in progress for the
@@ -56,6 +71,8 @@ import hashlib
 import io
 import json
 import os
+import re
+import shutil
 import subprocess
 import sys
 
@@ -453,6 +470,87 @@ def cmd_run(target):
     return 1 if failed else 0
 
 
+# --- status, reviewed, strategy: the launcher's side ---
+
+RUN_ID_RE = re.compile(r"^(\d{8})-\d{4}(-\d{2})?$")
+WEEKDAYS = ("Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun")  # not strftime: it follows the locale
+
+
+def unreviewed_runs(label):
+    """The space's run dirs without a `reviewed` file, oldest first. Anything else in the groom
+    dir (.lock, stray files, other folders) is not a run."""
+    base = os.path.join(groom_dir(), label)
+    try:
+        names = sorted(os.listdir(base))
+    except OSError:
+        return [], False
+    runs = [n for n in names if RUN_ID_RE.match(n) and os.path.isdir(os.path.join(base, n))]
+    return [os.path.join(base, n) for n in runs if not os.path.exists(os.path.join(base, n, "reviewed"))], bool(runs)
+
+
+def weekday(run_dir):
+    try:
+        day = datetime.datetime.strptime(RUN_ID_RE.match(os.path.basename(run_dir)).group(1), "%Y%m%d")
+        return WEEKDAYS[day.weekday()]
+    except (AttributeError, ValueError):
+        return "?"
+
+
+def cmd_status(label):
+    if "/" in label or label.startswith("."):
+        return 0  # not a space label (the launcher never makes one)
+    try:
+        waiting, any_runs = unreviewed_runs(label)
+        if waiting:
+            line = ["review", waiting[-1], weekday(waiting[-1])]
+            if len(waiting) > 1:
+                line.append(f"{len(waiting) - 1} waiting")
+            print(tsv(*line))
+        state = wb_groom.plan_state(wb_groom.read_plan(os.path.join(plans_dir(), label)), today())
+        # A missing plan is only worth a line once the space has been groomed: one that never
+        # took part (no plan, no runs) or was just started from a template shows nothing.
+        if state in ("due", "stale") or state == "missing" and any_runs:
+            print("strategy\tdue")
+    except Exception:  # noqa: BLE001  (the launcher calls this on every screen: never fail it)
+        pass
+    return 0
+
+
+def cmd_reviewed(run_dir):
+    if not os.path.isdir(run_dir):
+        print(f"wb-groom: no run directory {run_dir}", file=sys.stderr)
+        return 2
+    try:
+        with open(os.path.join(run_dir, "reviewed"), "w", encoding="utf-8") as f:
+            f.write(datetime.date.today().isoformat() + "\n")
+    except OSError as e:
+        print(f"wb-groom: cannot mark {run_dir} reviewed: {e}", file=sys.stderr)
+        return EXIT_RUN_DIR
+    return 0
+
+
+def cmd_strategy(label):
+    spaces = read_spaces()
+    if spaces is None:
+        return 2
+    if not any(s["label"] == label for s in spaces):
+        print(f"wb-groom: no space named {label}", file=sys.stderr)
+        return 2
+    if "/" in label or label.startswith("."):
+        print(f"wb-groom: {label}: a space label used as a folder name can't hold / or start with .", file=sys.stderr)
+        return 2
+    path = os.path.join(plans_dir(), label)
+    if not os.path.isdir(path):
+        try:
+            os.makedirs(os.path.dirname(path), exist_ok=True)
+            shutil.copytree(os.path.join(HERE, "..", "lib", "plan-templates"), path)
+        except OSError as e:
+            print(f"wb-groom: cannot make {path}: {e}", file=sys.stderr)
+            return EXIT_RUN_DIR
+    print(path)
+    return 0
+
+
 def options(rest, names):
     """(positionals, {name: value}) from REST, or None for a missing value or unknown option."""
     found, pos, i = {}, [], 0
@@ -484,6 +582,12 @@ def main(argv):
     elif cmd == "run":
         if len(rest) == 1 and (rest[0] == "--all" or not rest[0].startswith("-")):
             return cmd_run(rest[0])
+    elif cmd == "status" and len(rest) == 1:
+        return cmd_status(rest[0])
+    elif cmd == "reviewed" and len(rest) == 1:
+        return cmd_reviewed(rest[0])
+    elif cmd == "strategy" and len(rest) == 1:
+        return cmd_strategy(rest[0])
     elif cmd == "undo":
         got = options(rest, ())
         if got and len(got[0]) in (1, 2):

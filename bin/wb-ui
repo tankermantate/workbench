@@ -5,12 +5,14 @@ spaces.tsv (wb-spaces output).
 
   wb-ui render-spaces TMP      screen 1 lines: index, label, summary
   wb-ui fill-counts TMP        every space's summary, read in parallel, into
-                               TMP/counts/<index>; with $FZF_PORT set, tells
-                               fzf to reload as each one lands
+                               TMP/counts/<index> (ending, dim, with what `wb-groom status`
+                               says: groomed Sat · review, strategy due); with $FZF_PORT set,
+                               tells fzf to reload as each one lands
   wb-ui render-work TMP INDEX [QUERY]
                                screen 2 lines: kind, id, worktree, header, text
                                (sep and msg rows have an empty id, so the
-                               preview shows nothing for them); start here
+                               preview shows nothing for them); review and strategy
+                               rows (wb-groom status) follow ✦ something new; start here
                                (flagged beads, wb-backlog's picks, then the 30-day flow) comes
                                first; reads bd and keeps what it read in
                                TMP/work.<INDEX>.json
@@ -25,6 +27,7 @@ import json
 import os
 import re
 import shlex
+import signal
 import subprocess
 import sys
 import threading
@@ -32,6 +35,10 @@ import urllib.request
 
 ME = os.path.realpath(__file__)
 BACKLOG = os.path.join(os.path.dirname(ME), "wb-backlog")
+GROOM = os.path.join(os.path.dirname(ME), "wb-groom")
+STATUS_TIMEOUT = 3  # seconds; the screens never wait longer than this for grooming's news
+DAYS = {"Mon": "Monday", "Tue": "Tuesday", "Wed": "Wednesday", "Thu": "Thursday", "Fri": "Friday",
+        "Sat": "Saturday", "Sun": "Sunday"}
 sys.path.insert(0, os.path.join(os.path.dirname(ME), "..", "lib"))
 import wb_search  # noqa: E402  (lives in lib/, found through ME)
 FIELDS = ("label", "group", "root", "beads", "worktrees", "session_cmd",
@@ -66,6 +73,51 @@ def render_spaces(tmp):
     print("q\t[q] just give me a shell\t")
 
 
+def ritual_status(label):
+    """wb-groom status's lines for the space, as field lists: review (run dir, weekday) and
+    strategy. Any failure or a slow answer is "nothing to add": it must never fail a screen."""
+    try:
+        # its own process group: a hung child's children would keep the pipe open past the kill
+        p = subprocess.Popen([GROOM, "status", label], stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
+                             text=True, start_new_session=True)
+    except OSError:
+        return []
+    try:
+        out, _ = p.communicate(timeout=STATUS_TIMEOUT)
+    except subprocess.TimeoutExpired:
+        try:
+            os.killpg(p.pid, signal.SIGKILL)
+        except OSError:
+            pass
+        return []
+    if p.returncode != 0:
+        return []
+    return [l.split("\t") for l in out.splitlines() if l.strip()]
+
+
+def groomed_note(label):
+    """The dim ` · groomed Sat · review · strategy due` that ends a space's summary, or ''."""
+    parts = []
+    for f in ritual_status(label):
+        if f[0] == "review" and len(f) >= 3:
+            parts.append(f"groomed {f[2]} · review")
+        elif f[0] == "strategy":
+            parts.append("strategy due")
+    return f"\033[2m · {' · '.join(parts)}\033[0m" if parts else ""
+
+
+def ritual_rows(label):
+    """Screen 2's rows for the review and strategy sessions, when grooming has news."""
+    plan = os.path.join(os.environ.get("WB_PLANS_DIR") or os.path.expanduser("~/.config/workbench/plans"), label)
+    rows = []
+    for f in ritual_status(label):
+        if f[0] == "review" and len(f) >= 3:
+            rows.append(f"review\t-\t{f[1]}\t\t✦ review {DAYS.get(f[2], f[2])}'s grooming")
+        elif f[0] == "strategy":
+            rows.append(f"strategy\t-\t{plan}\t\t✦ strategy session")
+    return sorted(rows, key=lambda r: not r.startswith("review"))
+
+
 def fill_counts(tmp):
     counts = os.path.join(tmp, "counts")
     os.makedirs(counts, exist_ok=True)
@@ -76,7 +128,7 @@ def fill_counts(tmp):
         p = subprocess.run([BACKLOG, "summary", s["root"]], capture_output=True, text=True)
         path = os.path.join(counts, str(i))
         with open(path + ".part", "w") as f:
-            f.write(p.stdout.strip() or "(bd unavailable)")
+            f.write((p.stdout.strip() or "(bd unavailable)") + groomed_note(s["label"]))
         os.replace(path + ".part", path)
         if port:
             try:
@@ -96,7 +148,8 @@ def fill_counts(tmp):
 def render_work(tmp, index, query=""):
     s = spaces(tmp)[int(index) - 1]
     print("new\t-\t-\t\t✦ something new", flush=True)
-    work = {"rows": [], "msg": None, "flow": None}
+    work = {"rows": [], "msg": None, "flow": None, "rituals": ritual_rows(s["label"])}
+    print_rituals(work, query)
     if s["beads"] != "false":
         flow = os.path.join(tmp, f"flow.{index}")
         try:
@@ -128,7 +181,14 @@ def filter_work(tmp, index, query):
             work = json.load(f)
     except (OSError, ValueError):
         work = {"rows": [], "msg": MESSAGES[23]}
+    print_rituals(work, query)
     print_work(tmp, work, query)
+
+
+def print_rituals(work, query):
+    if not query.strip():  # a search is for beads; these rows are not
+        for r in work.get("rituals", []):
+            print(r)
 
 
 def print_work(tmp, work, query):

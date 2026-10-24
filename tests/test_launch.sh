@@ -4,6 +4,7 @@ T="$(newtmp)"; trap 'rm -rf "$T"' EXIT
 unset FAKE_BD_DIR   # fake bd reads each store's .beads/fake.json
 export WORKBENCH_DRY_RUN=1 FAKE_NS_LOG="$T/ns.log" FAKE_NS_DIR="$T/wt/proj" XDG_STATE_HOME="$T/state"
 export WORKBENCH_CONFIG="$T/spaces.toml" WB_STATE_DIR="$T/wbstate"
+export WB_GROOM_DIR="$T/groom" WB_PLANS_DIR="$T/plans"   # never the real ones
 mkstore "$T/acme" "$T/side/beta"; mkdir -p "$T/side/gamma" "$T/start"
 cp "$REPO/tests/fixtures/waves.json" "$T/acme/.beads/fake.json"
 cp "$REPO/tests/fixtures/plain.json" "$T/side/beta/.beads/fake.json"
@@ -165,6 +166,60 @@ assert_contains "menu: r on screen 1 re-reads then still picks" "$out" "DRY-RUN"
 out="$(printf '7\n1\nx\n1\n' | WB_NO_FZF=1 L)"
 assert_contains "menu: a mistyped answer asks again" "$out" "DRY-RUN"
 assert_contains "menu: says what it wants" "$out" "type a number from the list"
+
+# planning rituals: an unreviewed run and a due plan add to both screens
+printf 'Acme\t-\t%s\ttrue\t1\tx\tacme\t-\t-\t0\n' "$T/acme" > "$T/start/spaces.tsv"
+out="$("$REPO/bin/wb-ui" render-work "$T/start" 1)"
+assert_not_contains "render-work: no review row without a run" "$out" "✦ review"
+assert_not_contains "render-work: no strategy row without a plan" "$out" "✦ strategy"
+"$REPO/bin/wb-ui" fill-counts "$T/start"; "$REPO/bin/wb-ui" render-spaces "$T/start" > "$T/screen1"
+assert_not_contains "screen 1: nothing about grooming without a run" "$(cat "$T/screen1")" "groomed"
+mkdir -p "$T/groom/Acme/20261017-0600" "$T/plans/Acme"
+printf 'date: %s\n' "$(date +%Y-%m-%d)" > "$T/plans/Acme/goals.md"; printf 'labels: ws:money\n' > "$T/plans/Acme/protected.md"
+out="$("$REPO/bin/wb-ui" render-work "$T/start" 1)"
+assert_eq "render-work: the review row follows something new" "$(printf '%s\n' "$out" | sed -n 2p)" \
+  "review	-	$T/groom/Acme/20261017-0600		✦ review Saturday's grooming"
+assert_not_contains "render-work: a fresh plan has no strategy row" "$out" "✦ strategy"
+assert_eq "filter-work keeps the ritual rows with no query" "$("$REPO/bin/wb-ui" filter-work "$T/start" 1 '' | sed -n 2p | cut -f1)" "review"
+assert_not_contains "filter-work: a search shows only matches" "$("$REPO/bin/wb-ui" filter-work "$T/start" 1 'wave')" "✦ review"
+"$REPO/bin/wb-ui" fill-counts "$T/start"; "$REPO/bin/wb-ui" render-spaces "$T/start" > "$T/screen1"
+assert_contains "screen 1: groomed Sat · review, dim, after the counts" "$(cat "$T/screen1")" $'NOW 2 · NEXT 1 · claimed 1\e[2m · groomed Sat · review\e[0m'
+printf 'date: 2020-01-01\n' > "$T/plans/Acme/goals.md"
+out="$("$REPO/bin/wb-ui" render-work "$T/start" 1)"
+assert_eq "render-work: a due plan adds the strategy row after review" "$(printf '%s\n' "$out" | sed -n 3p | cut -f1,2,5)" "strategy	-	✦ strategy session"
+"$REPO/bin/wb-ui" fill-counts "$T/start"; "$REPO/bin/wb-ui" render-spaces "$T/start" > "$T/screen1"
+assert_contains "screen 1: both, in order" "$(cat "$T/screen1")" $'\e[2m · groomed Sat · review · strategy due\e[0m'
+# a status that fails or hangs never fails the screen
+mkdir -p "$T/ui2/bin" "$T/ui2/lib"; cp "$REPO/bin/wb-ui" "$REPO/bin/wb-backlog" "$T/ui2/bin/"; cp "$REPO/lib/"*.py "$T/ui2/lib/"
+printf '#!/bin/sh\nsleep 30\n' > "$T/ui2/bin/wb-groom"; chmod +x "$T/ui2/bin/wb-groom"
+rm -rf "$T/start/counts"; s0=$SECONDS; "$T/ui2/bin/wb-ui" fill-counts "$T/start"
+assert_contains "a hung wb-groom status adds nothing and the counts still land" "$(cat "$T/start/counts/1")" "NOW 2 · NEXT 1 · claimed 1"
+assert_not_contains "... and says nothing about grooming" "$(cat "$T/start/counts/1")" "groomed"
+if (( SECONDS - s0 < 20 )); then ok "... within a short timeout"; else bad "hung status was waited for"; fi
+printf '#!/bin/sh\nexit 3\n' > "$T/ui2/bin/wb-groom"
+rm -rf "$T/start/counts"; "$T/ui2/bin/wb-ui" fill-counts "$T/start"
+assert_not_contains "a failing wb-groom status adds nothing" "$(cat "$T/start/counts/1")" "groomed"
+
+# choosing them in the menu: Claude starts in the space with the prompt, run and plan filled in
+FIRST_REVIEW="$(head -1 "$REPO/prompts/review.txt" | sed 's/{space}/Acme/; s/{run}.*//')"
+out="$(printf '1\n2\n' | WB_NO_FZF=1 L)"
+assert_contains "menu: review starts Claude in the space root" "$out" "DRY-RUN: cd $T/acme && env CLAUDE_CONFIG_DIR=$T/cfg WB_SPACE_ROOT="
+assert_contains "menu: the review prompt opens as review.txt does" "$out" "$FIRST_REVIEW"
+assert_contains "menu: ... with the run dir" "$out" "$T/groom/Acme/20261017-0600"
+assert_contains "menu: ... and wb-groom apply with the plan dir" "$out" "$REPO/bin/wb-groom apply $T/groom/Acme/20261017-0600 $T/acme --plan $T/plans/Acme --proposal"
+assert_not_contains "menu: no placeholder left in the prompt" "$out" "{run}"
+assert_not_contains "menu: review is not a bead: WB_BEAD unset" "$out" "WB_BEAD="
+assert_not_contains "menu: review makes no worktree" "$out" "--no-launch"
+out="$(printf '1\n3\n' | WB_NO_FZF=1 L)"
+FIRST_STRAT="$(head -1 "$REPO/prompts/strategy.txt" | sed 's/{space}/Acme/; s/{plan}.*//')"
+assert_contains "menu: strategy opens as strategy.txt does" "$out" "$FIRST_STRAT"
+assert_contains "menu: ... with the plan dir" "$out" "$T/plans/Acme"
+assert_contains "menu: ... in the space root" "$out" "DRY-RUN: cd $T/acme && "
+rm -rf "$T/plans/Acme"; mkdir -p "$T/groom/Acme/20261018-0600"
+out="$(printf '1\n3\n' | WB_NO_FZF=1 L)"
+assert_contains "menu: a strategy session on a space with no plan makes it from the templates" "$out" "$T/plans/Acme"
+assert_eq "... the four files" "$(ls "$T/plans/Acme" | tr '\n' ' ')" "calendar.md goals.md protected.md sources.md "
+rm -rf "$T/groom" "$T/plans"
 
 # test-pick path (stands in for fzf)
 out="$(WB_TEST_PICK_SPACE='Side › beta' WB_TEST_PICK_WORK='First by priority' L)"

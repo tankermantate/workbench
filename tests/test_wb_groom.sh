@@ -615,6 +615,61 @@ for w in '"leaving"' '"attention"' '"protected"' goals.md protected.md calendar.
   assert_contains "prompt: mentions $w" "$GP" "$w"
 done
 assert_not_contains "prompt: no unqualified bd call" "$GP" '`bd list'
+
+# --- status, reviewed, strategy (what the launcher shows and starts) ---
+SG="$T/sg"; SP="$T/sp"; export WB_GROOM_DIR="$SG" WB_PLANS_DIR="$SP"
+st() { "$WG" status "$@" 2>"$T/err"; }
+assert_eq "status: no plan and no runs shows nothing, exit 0" "$(st acme; echo "rc=$?")" "rc=0"
+mkdir -p "$SG/acme/20261010-0600" "$SG/acme/20261017-0600"; : > "$SG/acme/.lock"; mkdir -p "$SG/acme/notes"; : > "$SG/acme/20261024-0600"
+assert_eq "status: no plan, runs: strategy is due (missing plan); the newest unreviewed run, one more waiting" "$(st acme)" \
+  "review	$SG/acme/20261017-0600	Sat	1 waiting
+strategy	due"
+mkdir -p "$SP/acme"; cp "$FX/plan/"* "$SP/acme/"
+assert_eq "status: an ok plan adds no strategy line; .lock, files and non-run dirs are ignored" "$(st acme)" \
+  "review	$SG/acme/20261017-0600	Sat	1 waiting"
+: > "$SG/acme/20261017-0600/reviewed"
+assert_eq "status: reviewed runs are skipped, no waiting count for one" "$(st acme)" "review	$SG/acme/20261010-0600	Sat"
+: > "$SG/acme/20261010-0600/reviewed"
+assert_eq "status: all reviewed shows nothing" "$(st acme)" ""
+mkdir -p "$SG/acme/20261020-0600-02" "$SG/acme/20261020-0600"
+assert_eq "status: -02 sorts after its minute; weekday from the run id" "$(st acme)" "review	$SG/acme/20261020-0600-02	Tue	1 waiting"
+rm -rf "$SG/acme/20261020-0600-02" "$SG/acme/20261020-0600"
+assert_eq "status: plan 31 days old is due" "$(WB_TODAY=2026-11-10 st acme)" "strategy	due"
+assert_eq "status: plan 60 days old is stale: due" "$(WB_TODAY=2026-12-09 st acme)" "strategy	due"
+rm -rf "$SG/acme"; mkdir -p "$SG/acme"
+assert_eq "status: a due plan with no runs is still due (the date is the clock)" "$(WB_TODAY=2026-11-10 st acme)" "strategy	due"
+rm -rf "$SP/acme"; mkdir -p "$SP/acme"; printf '# Goals\ndate: YYYY-MM-DD\n' > "$SP/acme/goals.md"
+assert_eq "status: an unedited template plan with no runs shows nothing" "$(st acme)" ""
+mkdir -p "$SG/acme/20261017-0600"
+assert_contains "status: an unedited template plan with runs is due" "$(st acme)" "strategy	due"
+assert_eq "status: always exit 0, even for an unknown label" "$(st nope/../x; echo $?)" "0"
+
+"$WG" reviewed "$SG/acme/20261017-0600" >"$T/out" 2>"$T/err"; assert_eq "reviewed: exit 0" "$?" "0"
+assert_eq "reviewed: writes the date" "$(cat "$SG/acme/20261017-0600/reviewed")" "$(date +%Y-%m-%d)"
+assert_eq "reviewed: the run is no longer offered" "$(st acme | grep -c '^review')" "0"
+"$WG" reviewed "$SG/acme/20261017-0600" >/dev/null 2>&1; assert_eq "reviewed: twice is fine" "$?" "0"
+"$WG" reviewed "$SG/acme/nope" >/dev/null 2>"$T/err"; assert_eq "reviewed: a missing run dir exits 2" "$?" "2"
+assert_contains "reviewed: ... and says so" "$(cat "$T/err")" "no run directory"
+"$WG" reviewed >/dev/null 2>&1; assert_eq "reviewed: no argument is usage" "$?" "2"
+
+rm -rf "$SP"
+out="$("$WG" strategy acme 2>"$T/err")"; rc=$?
+assert_eq "strategy: exit 0 and prints the plan dir" "$rc $out" "0 $SP/acme"
+assert_eq "strategy: makes the four plan files from the templates" "$(ls "$SP/acme" | tr '\n' ' ')" "calendar.md goals.md protected.md sources.md "
+assert_eq "strategy: a fresh plan reads as missing (its date is a placeholder)" \
+  "$(py "import datetime; p = g.read_plan('$SP/acme'); print(p.goals_date, g.plan_state(p, datetime.date(2026,10,23)))")" "None missing"
+assert_contains "strategy: the template carries a labels line" "$(cat "$SP/acme/protected.md")" "labels:"
+assert_contains "strategy: the template carries the sprint line" "$(cat "$SP/acme/goals.md")" "sprint:"
+printf 'my goals\ndate: 2026-10-20\n' > "$SP/acme/goals.md"
+out="$("$WG" strategy acme)"
+assert_eq "strategy: idempotent; prints the same path and keeps edits" "$out $(head -1 "$SP/acme/goals.md")" "$SP/acme my goals"
+rm "$SP/acme/calendar.md"; "$WG" strategy acme >/dev/null
+assert_eq "strategy: a deleted file is not brought back over the user's plan" "$(ls "$SP/acme" | tr '\n' ' ')" "goals.md protected.md sources.md "
+"$WG" strategy nope >/dev/null 2>"$T/err"; assert_eq "strategy: an unknown space exits 2" "$?" "2"
+assert_contains "strategy: ... and says so" "$(cat "$T/err")" "no space named nope"
+assert_eq "strategy: nothing made for an unknown space" "$(ls "$SP" | tr '\n' ' ')" "acme "
+export WB_GROOM_DIR="$G" WB_PLANS_DIR="$P"
+
 unset FAKE_BD_STATEFUL FAKE_BD_LOG FAKE_CLAUDE_GROOM FAKE_CLAUDE_LOG WORKBENCH_CONFIG WB_GROOM_DIR WB_PLANS_DIR
 
 finish

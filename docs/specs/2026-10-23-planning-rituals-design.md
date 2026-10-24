@@ -188,7 +188,12 @@ Cost seen in the dry run: ~6 min / ~160k tokens for a 400-bead space, ~2 min for
   protected beads, other proposals, release?, candidates, questions. The user accepts, reverses or
   edits each; Claude applies through `wb-groom` (`undo`, `apply --proposal <n>`) so every change
   still goes through the policy and the run record. Candidates the user accepts become beads.
-- Finishing the review marks the run reviewed. An unreviewed run doesn't block the next one; the
+- The launcher asks `wb-groom status <space>` for all of this (a few seconds at most; a failure or a
+  slow answer adds nothing to the screens). `review` names the newest run without a `reviewed` file and,
+  when more are waiting, how many; `strategy due` appears when the plan is due or stale, or missing in a
+  space that has runs. A space with neither plan nor runs, or one just started from the templates and
+  never groomed, shows nothing.
+- Finishing the review marks the run reviewed (`wb-groom reviewed <run>`, a `reviewed` file with the date). An unreviewed run doesn't block the next one; the
   next summary says how many runs are waiting.
 
 ## Nothing critical out of sight
@@ -216,7 +221,8 @@ work screen gets a place for critical work that isn't bounded by the three picks
 
 Offered by the launcher when due (above), or any time with `wb-groom strategy <space>`, which
 also **starts a space**: it creates the plan directory the first time (*my call*; spaces without one
-show nothing new on screen 1). Claude
+show nothing new on screen 1). It copies `lib/plan-templates/` (made-up Acme examples), whose
+`date: YYYY-MM-DD` is no date, so the plan counts as missing, and grooming applies nothing, until the session sets one. Claude
 starts prepared: the last month's closes by area, the 30-day flow, the reviewed runs' questions and
 process notes, what's been reversed in review (where grooming's judgement was off), and the
 calendar ahead. With the user it rewrites `goals.md`, `protected.md` and `calendar.md` (drafting

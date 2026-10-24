@@ -9,7 +9,8 @@ typeset -g WORKBENCH_HOME=${${(%):-%x}:A:h:h}
 
 # ---- handoff ----
 
-# $1 prompt file name, $2 bead id (or -). Prints the opening prompt.
+# $1 prompt file name, $2 bead id (or -), $3 run dir and $4 plan dir for the
+# planning rituals. Prints the opening prompt.
 _wb_prompt() {
   local text proto=""
   text=$(<$WORKBENCH_HOME/prompts/$1.txt) || return 1
@@ -17,6 +18,10 @@ _wb_prompt() {
   [[ -z $proto ]] && text=${text//$'\n{protocol}'/}   # no blank line where it would be
   text=${text//'{id}'/$2}
   text=${text//'{space}'/$s[1]}
+  text=${text//'{root}'/$s[3]}
+  text=${text//'{run}'/${3-}}
+  text=${text//'{plan}'/${4-}}
+  text=${text//'{groom}'/$WORKBENCH_HOME/bin/wb-groom}   # not on PATH unless install.sh ran
   text=${text//'{protocol}'/$proto}
   print -r -- $text
 }
@@ -83,6 +88,26 @@ _wb_start_new() {
   if [[ $s[5] == 1 ]]; then _wb_session_cd $s[7] || return 0
   else cd -- $s[3] || return 0; fi
   _wb_claude prompt "$(_wb_prompt something-new -)" -
+}
+
+# The planning rituals (wb-groom): Claude starts in the space root, not on a bead.
+# $1 the run dir from the work screen's review row.
+_wb_start_review() {
+  cd -- $s[3] || return 0
+  _wb_claude prompt "$(_wb_prompt review - $1 ${WB_PLANS_DIR:-$HOME/.config/workbench/plans}/$s[1])" -
+}
+
+# $1 is the plan dir the row names; wb-groom makes it from the templates when a
+# space has none yet, and says where it is.
+_wb_start_strategy() {
+  local plan ans
+  if ! plan=$($WORKBENCH_HOME/bin/wb-groom strategy $s[1]); then
+    print -nu2 "Press Enter to go back "   # fzf's redraw would hide the message otherwise
+    read -r ans
+    return 1
+  fi
+  cd -- $s[3] || return 0
+  _wb_claude prompt "$(_wb_prompt strategy - - $plan)" -
 }
 
 # ◐ beads are probably another session's. $1 id, $2 worktree from the claim
@@ -167,7 +192,7 @@ _wb_screen_spaces() {
   if [[ -n ${WB_TEST_PICK_SPACE-} ]] || _wb_use_fzf; then
     line=$("$ui" render-spaces $tmp | _wb_fzf "${WB_TEST_PICK_SPACE-}" \
       --listen=0 --delimiter=$'\t' --with-nth=2,3 --nth=1 --exact --ignore-case --no-sort --track \
-      --layout=reverse --prompt='Space? › ' --header='enter: choose · esc: plain shell' \
+      --layout=reverse --ansi --prompt='Space? › ' --header='enter: choose · esc: plain shell' \
       --bind "start:execute-silent(${(q)ui} fill-counts ${(q)tmp} >/dev/null 2>&1 &)") || return 1
   else
     while true; do
@@ -227,6 +252,8 @@ _wb_main() {
       new)     _wb_start_new; return 0 ;;
       open)    _wb_start_bead $p[2]; return 0 ;;
       claimed) _wb_start_claimed $p[2] $p[3] && return 0 ;;
+      review)  _wb_start_review $p[3]; return 0 ;;
+      strategy) _wb_start_strategy && return 0 ;;
     esac                          # sep/msg rows, or a declined ◐: show screen 2 again
   done
 }
