@@ -63,7 +63,7 @@ This protocol applies when ending a Beads implementation workflow. It is subordi
 ```bash
 tests/run.sh               # all tests (plain bash; fakes for bd/new-session/claude)
 ./install.sh               # link bin/* into ~/.local/bin, schedule weekly grooming (--no-schedule skips), print the ~/.zshrc line
-scripts/check-leaks.sh     # before any push: no private names in tracked files
+scripts/check-leaks.sh     # before any push: no private names in tracked files, history or the bead db
 new-session <bead-id>|<space-key> [topic]   # worktree session for a worktrees = true space
 end-session [<worktree>]                    # remove it once the work is merged/pushed/verified
 ```

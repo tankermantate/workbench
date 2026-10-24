@@ -22,8 +22,31 @@ if [ -n "$revs" ]; then
     found=1
   fi
 fi
+# The bead store syncs to the remote too. With no remote nothing carries it yet,
+# so a finding only warns; once a remote is set, it (or a store we can't scan) fails.
+beads_note=""
+if [ "${WB_LEAK_SKIP_BEADS:-}" = 1 ]; then
+  beads_note=", bead db skipped (WB_LEAK_SKIP_BEADS=1)"
+else
+  brc=0; beads="$(python3 "$here/scripts/check-leaks-beads.py" "$terms" "$repo")" || brc=$?
+  remote="$(printf '%s\n' "$beads" | sed -n 's/^remote: //p')"
+  if [ "$brc" -ne 0 ]; then
+    printf '%s\n' "$beads" | grep -v '^remote: ' >&2 || true
+    if [ -n "$remote" ]; then
+      found=1
+      echo "check-leaks: a remote is set ($remote), and bd sync would publish the bead db. Scrub those beads and flatten their history (bd flatten), or remove the remote. To skip the bead db: WB_LEAK_SKIP_BEADS=1." >&2
+    else
+      beads_note=1
+    fi
+  fi
+fi
 if [ "$found" -eq 1 ]; then
   echo "check-leaks: the lines above name something from your private config. Fix them (history needs a rewrite) before pushing." >&2
   exit 1
 fi
-echo "check-leaks: clean ($(wc -l < "$terms" | tr -d ' ') terms checked, files + history + commit messages)"
+n="$(wc -l < "$terms" | tr -d ' ')"
+if [ "$beads_note" = 1 ]; then
+  echo "check-leaks: files + history + commit messages clean ($n terms checked), but the bead db is NOT (lines above). No remote is set, so nothing carries it yet: scrub it before adding one."
+else
+  echo "check-leaks: clean ($n terms checked, files + history + commit messages$beads_note)"
+fi

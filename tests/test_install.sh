@@ -106,4 +106,54 @@ git -C "$T/acmebench" -c user.email=t@example.com -c user.name=t commit -qm "acm
 printf '[[space]]\nname = "acmebench"\nroot = "%s"\n' "$T/acmebench" > "$T/self.toml"
 WORKBENCH_CONFIG="$T/self.toml" WB_LEAK_REPO="$T/acmebench" bash "$REPO/scripts/check-leaks.sh" >/dev/null 2>&1; rc=$?
 assert_eq "the repo's own name is not a leak" "$rc" "0"
+
+# The bead store is a Dolt database that bd syncs to the git remote (refs/dolt/data), so its
+# rows and its history are published too, outside anything git grep sees.
+leaks() { WORKBENCH_CONFIG="$T/leak.toml" WB_LEAK_REPO="$T/beady" bash "$REPO/scripts/check-leaks.sh" 2>&1; }
+if command -v dolt >/dev/null; then
+  export DOLT_ROOT_PATH="$T/doltroot"   # dolt's global config: never the real one
+  mkdir -p "$T/beady/.beads/embeddeddolt/wb" && git -C "$T/beady" init -q
+  echo "plain" > "$T/beady/a.txt"; git -C "$T/beady" add a.txt
+  git -C "$T/beady" -c user.email=t@example.com -c user.name=t commit -qm "first"
+  db="$T/beady/.beads/embeddeddolt/wb"
+  dq() { (cd "$db" && dolt sql -q "$1" >/dev/null && dolt add -A && dolt commit -m "$2" >/dev/null); }
+  (cd "$db" && dolt init --name t --email t@example.com >/dev/null)
+  dq "create table issues (id varchar(20) primary key, title text)" "schema"
+  dq "insert into issues values ('wb-1', 'tidy the launcher')" "clean bead"
+  out="$(leaks)"; rc=$?
+  assert_eq "bead db: clean store passes" "$rc" "0"
+  assert_not_contains "bead db: clean store has no warning" "$out" "bead db"
+
+  dq "insert into issues values ('wb-2', 'invoice Zanzibar')" "leaky bead"
+  out="$(leaks)"; rc=$?
+  assert_eq "bead db: leak with no remote only warns" "$rc" "0"
+  assert_contains "bead db: the warning names the table" "$out" "bead db: issues"
+  assert_contains "bead db: the warning names the bead" "$out" "wb-2"
+  assert_not_contains "bead db: the warning does not repeat the private name" "$out" "Zanzibar"
+
+  git -C "$T/beady" remote add origin "$T/nowhere.git"
+  out="$(leaks)"; rc=$?
+  assert_eq "bead db: leak with a git remote fails" "$rc" "1"
+  dq "update issues set title = 'invoice the client' where id = 'wb-2'" "scrub"
+  out="$(leaks)"; rc=$?
+  assert_eq "bead db: leak left in dolt history fails" "$rc" "1"
+  assert_contains "bead db: history is reported" "$out" "bead db: issues history"
+
+  git -C "$T/beady" remote remove origin
+  (cd "$db" && dolt remote add backup "file://$T/doltremote")
+  out="$(leaks)"; rc=$?
+  assert_eq "bead db: a dolt remote counts as a remote" "$rc" "1"
+
+  out="$(WB_DOLT="$T/no-dolt" leaks)"; rc=$?
+  assert_eq "bead db: can't scan with a remote fails closed" "$rc" "1"
+  assert_contains "bead db: says how to override" "$out" "WB_LEAK_SKIP_BEADS=1"
+  printf '#!/bin/sh\necho "[1]"\n' > "$T/odd-dolt"; chmod +x "$T/odd-dolt"
+  out="$(WB_DOLT="$T/odd-dolt" leaks)"; rc=$?
+  assert_eq "bead db: output it can't read fails closed" "$rc" "1"
+  assert_contains "bead db: and says so" "$out" "can't scan"
+  out="$(WB_DOLT="$T/no-dolt" WB_LEAK_SKIP_BEADS=1 leaks)"; rc=$?
+  assert_eq "bead db: the override skips the store" "$rc" "0"
+else
+  echo "  skip bead db leak tests: no dolt"
+fi
 finish

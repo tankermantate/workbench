@@ -146,7 +146,7 @@ never in this repo. `spaces.example.toml` documents every key. In short:
 
 ```bash
 tests/run.sh             # every test; plain bash, with fake bd, gh and claude
-scripts/check-leaks.sh   # before any push: no private names in files or history
+scripts/check-leaks.sh   # before any push: no private names in files, history or the bead db
 ```
 
 Designs and plans are in `docs/specs/` and `docs/plans/`.
