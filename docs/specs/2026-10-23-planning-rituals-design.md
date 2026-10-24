@@ -128,7 +128,9 @@ Claude never writes to the bead store. Each run has two halves:
 
 ### What it never touches
 
-Claimed (in-progress) beads — it lists claims untouched 14+ days under **Release?**. Closed beads.
+Claimed (in-progress) beads — it lists claims untouched 14+ days under **Release?** — except for
+the `attention` flag, which it adds and removes on a claimed bead like any other (changed
+2026-10-24: a stale claim on money or legal work would otherwise never reach start-here). Closed beads.
 Anything outside the space's bead store. Code and git.
 
 ### The run record and undo
@@ -216,9 +218,9 @@ work screen gets a place for critical work that isn't bounded by the three picks
 
 - **Grooming flags what demands attention** with a `attention` label and a note saying why:
   something due within 14 days on the calendar or in a bead, a protected bead that has been
-  neglected, a blocker in front of either. Adding the label is applied unattended (it only ever
-  raises), and removing it is too, once the reason is gone (closed, date passed, done). The user
-  can add or remove it by hand.
+  neglected, a blocker in front of either; claimed beads included. Adding the label is applied
+  unattended (it only ever raises), and removing it is too, once the reason is gone (closed, date
+  passed, done). The user can add or remove it by hand.
 - **Start-here shows those first, uncapped**: under `── start here ──`, every `attention` bead,
   most urgent first, each with its reason dim (`due Nov 2 · money`). Past five, the fifth row is
   followed by `+N more need attention` and the rest are in the search (`attention`). Then the three

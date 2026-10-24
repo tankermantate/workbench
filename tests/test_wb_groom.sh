@@ -107,6 +107,13 @@ assert_contains "attention add is an op" "$out" $'acme-9\tattention\tattention\t
 assert_contains "attention remove is an op" "$out" $'acme-13\tunattention\tattention\tdone'
 assert_not_contains "attention add on a flagged bead: no op" "$out" $'acme-13\tattention'
 assert_not_contains "attention remove on an unflagged bead: no op" "$out" "acme-1"$'\t'
+# a stale claim on something due must still reach start-here: attention is the one thing
+# grooming may change on a claimed bead
+out="$(ops '{"attention":{"add":[{"id":"acme-3","why":"stale claim · due Nov 2"}]},"changes":[{"id":"acme-3","kind":"icebox","why":"x","protected":false}]}')"
+assert_contains "attention add on a claimed bead is an op" "$out" $'acme-3\tattention\tattention\tstale claim · due Nov 2'
+assert_contains "... but any other change to it is still dropped" "$out" $'dropped\tacme-3: claimed'
+out="$(ops '{"attention":{"add":[{"id":"acme-3","why":"due"}]}}' "$T/none")"
+assert_contains "attention on a claimed bead, plan missing: a proposal" "$out" $'proposal\tacme-3\tattention\tattention\tdue\tplan missing'
 
 # --- plan state ---
 D='{"sprint":{"now":[{"id":"acme-1","why":"g"}]},"changes":[{"id":"acme-10","kind":"icebox","why":"i","protected":false}],"attention":{"add":[{"id":"acme-9","why":"d"}]}}'
@@ -617,6 +624,18 @@ assert_contains "... and says so" "$(cat "$T/err")" "no space named nope"
 groom >/dev/null 2>&1; assert_eq "run: no space is usage" "$?" "2"
 WB_GROOM_TIMEOUT=soon groom acme >/dev/null 2>"$T/err"; assert_eq "run: a bad WB_GROOM_TIMEOUT exits 2" "$?" "2"
 assert_contains "... and says so" "$(cat "$T/err")" "WB_GROOM_TIMEOUT is not a number"
+
+# attention applied to claimed beads: the label and note change, the claim does not
+fresh
+addbead '{"id":"acme-15","title":"Claimed, flagged","status":"in_progress","priority":1,"labels":["attention"],"notes":"attention: old reason","updated_at":"2026-10-01T00:00:00Z"}'
+addbead '{"id":"acme-16","title":"Done","status":"closed","priority":2,"labels":[],"updated_at":"2026-10-01T00:00:00Z"}'
+printf '%s' '{"attention":{"add":[{"id":"acme-3","why":"stale claim · due Nov 2"},{"id":"acme-16","why":"x"}],"remove":[{"id":"acme-15","why":"paid"}]}}' > "$T/r/decisions.json"
+apply >"$T/out" 2>"$T/err"; rc=$?
+assert_eq "claimed attention: apply exits 0" "$rc" "0"
+assert_eq "claimed attention: flagged, still claimed" "$(field acme-3 labels) $(field acme-3 status)" "['wave:1', 'attention'] in_progress"
+assert_contains "claimed attention: the reason is in the notes" "$(field acme-3 notes)" "attention: stale claim · due Nov 2"
+assert_eq "claimed attention: unflagged, still claimed" "$(field acme-15 labels) $(field acme-15 status)" "[] in_progress"
+assert_eq "claimed attention: a closed bead is never flagged" "$(field acme-16 labels)" "[]"
 
 # the prompt teaches the decisions.json shape and the plan inputs
 GP="$(cat "$REPO/prompts/groom.txt" 2>/dev/null)"

@@ -42,8 +42,9 @@ for the monthly strategy conversation, not settled.
    judgement, or when unsure. When unsure, it is protected. Say `"protected": false` only when you
    are sure it touches no protected area; that is the only thing that lets workbench change it
    unattended. Otherwise say true, or leave the field out (the same as unsure).
-4. Claimed (in_progress) and closed beads: never change them. List claims untouched 14+ days
-   under release.
+4. Claimed (in_progress) and closed beads: never change them, with one exception: a claimed
+   bead may get or lose the attention flag (rule 5), since a stale claim on something due is
+   what the flag is for. List claims untouched 14+ days under release.
 5. Attention: flag a bead (attention.add) when something is due within 14 days (on the calendar or
    in a bead), when a protected bead has been neglected, or when a bead blocks either of those.
    Remove the flag (attention.remove) once its reason is gone: done, closed, or the date passed.

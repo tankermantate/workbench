@@ -174,12 +174,12 @@ def plan_ops(decisions, beads, plan, today):
         else:
             ops.append(op)
 
-    def usable(id):
+    def usable(id, claimed_ok=False):
         """The bead for ID, or None after recording why not."""
         b = beads.get(id)
         if b is None:
             dropped.append(f"{id}: unknown id")
-        elif b.get("status") == CLAIMED:
+        elif b.get("status") == CLAIMED and not claimed_ok:
             dropped.append(f"{id}: claimed")  # work in hand; the judge lists stale claims for review
         elif b.get("status") == "closed":
             dropped.append(f"{id}: closed")
@@ -306,7 +306,9 @@ def plan_ops(decisions, beads, plan, today):
             dropped.append(f"attention.{key}: bad field {key}")
             continue
         for id, why, _ in entries:
-            b = usable(id)
+            # a claim is work in hand, but a stale one on something due is exactly what the
+            # flag is for; a label and an appended note leave the claim itself alone
+            b = usable(id, claimed_ok=True)
             if b is None:
                 continue
             if (ATTENTION in (b.get("labels") or [])) == (kind == "attention"):
