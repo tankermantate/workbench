@@ -1,6 +1,6 @@
 # Planning rituals: monthly strategy, weekly grooming, review in the launcher
 
-**Status:** built · **Date:** 2026-10-23 · bead wb-7vd.6 (epic wb-7vd: workbench
+**Status:** shipped (main 06b449d); the launchd install and claude auth under launchd not yet checked live · **Date:** 2026-10-23 · bead wb-7vd.6 (epic wb-7vd: workbench
 through the whole life of the work, not just the start)
 
 ## Why

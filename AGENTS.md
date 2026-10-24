@@ -130,7 +130,7 @@ bd prime                # Refresh Beads context
 
 ```bash
 tests/run.sh               # all tests (plain bash; fakes for bd/new-session/claude)
-./install.sh               # link bin/* into ~/.local/bin, print the ~/.zshrc line
+./install.sh               # link bin/* into ~/.local/bin, schedule weekly grooming (--no-schedule skips), print the ~/.zshrc line
 scripts/check-leaks.sh     # before any push: no private names in tracked files
 new-session <bead-id>|<space-key> [topic]   # worktree session for a worktrees = true space
 end-session [<worktree>]                    # remove it once the work is merged/pushed/verified
@@ -138,19 +138,20 @@ end-session [<worktree>]                    # remove it once the work is merged/
 
 ## Architecture Overview
 
-User guide: `README.md`. Designs: `docs/specs/` (launcher, session scripts, session's bead); plans: `docs/plans/`.
+User guide: `README.md`. Designs: `docs/specs/` (launcher, session scripts, session's bead, planning rituals); plans: `docs/plans/`.
 
 - `shell/workbench.zsh` — the launcher (zsh, sourced at the end of `~/.zshrc`). Auto-starts once, at the first prompt, via a self-removing precmd hook; `launch` runs it by hand. Two fzf screens (space, then work), a numbered menu without fzf, then the handoff to Claude.
 - `bin/wb-spaces` (python) — reads `~/.config/workbench/spaces.toml` and prints one 13-field TSV row per space; every other piece reads spaces through it.
 - `bin/wb-backlog`, `bin/wb-ui` (python) — a space's beads through `bd`, and the fzf screen helpers.
 - `bin/wb-session-hook`, `bin/wb-focus`, `bin/wb-statusline-bead` (python) with `lib/wb_session.py` — keep a launched Claude session on its bead: hooks passed with `claude --settings`, the session→bead record in `~/.cache/workbench/sessions/`, and the status line segment.
 - `bin/new-session`, `bin/end-session` (bash) with `lib/session.sh` — worktree sessions for `worktrees = true` spaces; the space's private setup runs as `on_create` / `before_end` hooks from `spaces.toml`.
-- `prompts/*.txt` — the opening prompts handed to Claude.
+- `bin/wb-groom` (python) with `lib/wb_groom.py` and `lib/wb_judge_bd.py` — planning rituals: weekly grooming (a read-only `claude -p` judge, then policy-checked apply through `bd` with an exact undo record), and the review and strategy sessions the launcher offers. Each space's plan is private, in `~/.config/workbench/plans/<space>/` (templates in `lib/plan-templates/`); runs are kept in `~/.local/state/workbench/groom/`. `lib/launchd/workbench.groom.plist.in` is the Saturday 06:00 agent `install.sh` writes.
+- `prompts/*.txt` — the opening prompts handed to Claude (`groom.txt`, `review.txt` and `strategy.txt` for the rituals).
 
 ## Conventions & Patterns
 
 - Nothing private in the repo: real spaces, paths, accounts and hook scripts live in `~/.config/workbench/`. Examples use made-up names (Acme). Run `scripts/check-leaks.sh` before any push.
 - Shell scripts target macOS's bash 3.2; python needs 3.11+ (`tomllib`).
-- Every behaviour change starts with a failing test. Tests are plain bash (`tests/test_*.sh`, asserts in `tests/lib.sh`), with fakes for `bd`, `gh`, `claude` and `new-session` in `tests/fake/`, steered by env seams (`WORKBENCH_CONFIG`, `WB_BD`, `WB_GH`, `WB_WORKTREES_DIR`, `WORKBENCH_DRY_RUN`, `FAKE_*`).
+- Every behaviour change starts with a failing test. Tests are plain bash (`tests/test_*.sh`, asserts in `tests/lib.sh`), with fakes for `bd`, `gh`, `claude` and `new-session` in `tests/fake/`, steered by env seams (`WORKBENCH_CONFIG`, `WB_BD`, `WB_GH`, `WB_WORKTREES_DIR`, `WB_PLANS_DIR`, `WB_GROOM_DIR`, `WB_TODAY`, `WORKBENCH_DRY_RUN`, `FAKE_*`).
 - Fail closed: a step that can't tell whether work is safe refuses and says how to override.
 - Comments say why, not what. Keep a spec's text in step when its behaviour changes.
