@@ -1,3 +1,24 @@
 #!/usr/bin/env bash
 # Safety net: if a test ever reaches a real launch, it prints instead of starting Claude.
-echo "FAKE-CLAUDE $*"
+# As wb-groom's judge (FAKE_CLAUDE_GROOM=DIR): copies every file in DIR into the first --add-dir
+# (the judge's own dir; a planted file tests what wb-groom keeps from it), then sleeps
+# FAKE_CLAUDE_SLEEP seconds (a judge that wrote its answer and then hung) and exits FAKE_CLAUDE_RC
+# (default 0).
+# FAKE_CLAUDE_LOG: one JSON line per call: argv, cwd, and CLAUDE_CONFIG_DIR (null when unset).
+if [ -n "${FAKE_CLAUDE_LOG:-}" ]; then
+  python3 -c 'import json, os, sys; print(json.dumps({"argv": sys.argv[1:], "cwd": os.getcwd(), "config": os.environ.get("CLAUDE_CONFIG_DIR")}))' "$@" >> "$FAKE_CLAUDE_LOG"
+fi
+if [ -z "${FAKE_CLAUDE_GROOM:-}" ]; then
+  echo "FAKE-CLAUDE $*"
+  exit 0
+fi
+run=""
+while [ $# -gt 0 ]; do
+  if [ "$1" = --add-dir ]; then run=$2; break; fi
+  shift
+done
+for f in "$FAKE_CLAUDE_GROOM"/*; do
+  [ -f "$f" ] && cp "$f" "$run/"
+done
+[ -z "${FAKE_CLAUDE_SLEEP:-}" ] || sleep "$FAKE_CLAUDE_SLEEP"
+exit "${FAKE_CLAUDE_RC:-0}"

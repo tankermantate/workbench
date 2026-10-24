@@ -3,6 +3,7 @@
 The judge (Claude) writes decisions.json; plan_ops() turns it into what workbench may apply
 by itself (ops), what waits for review (proposals) and what it refused (dropped). Nothing
 here writes to bd; bin/wb-groom does the reading, and apply_ops/undo_run below the writing.
+judge_argv/run_judge (at the end) start the judge with its read-only allowlist.
 """
 import dataclasses
 import datetime
@@ -10,6 +11,7 @@ import json
 import os
 import re
 import shlex
+import signal
 import subprocess
 import uuid
 
@@ -570,3 +572,74 @@ def _undo_one(run_dir, root, bd, was, ran, timeout):
         # bd could not put it back exactly: never say "restored" for that.
         return False, f"{id}: restored, but {', '.join(off)} differ from before; fix by hand"
     return True, f"{id}: restored"
+
+
+# --- the judge ---
+# The judge's allowlist is enforced by Claude Code, not by the prompt (a prompt alone did not keep
+# the dry run read-only). Checked by hand with claude 2.1.309 on a throwaway bd store, reading
+# permission_denials from --output-format json (task-5-report.md has the probes):
+#   --setting-sources ""     is accepted and drops user, project and local settings: a project
+#                            .claude/settings.json allowing Bash, Write and Edit and holding a
+#                            SessionStart hook had no effect (the hook never ran); auth still works.
+#   --permission-mode dontAsk  refuses whatever no rule allows, with no prompt.
+#   --tools Bash,Read,Write  the only tools loaded: no Edit, NotebookEdit, WebFetch, WebSearch, Agent.
+#   Bash(git:*) in deny      needed: Claude Code auto-allows read-only commands such as `git log`
+#                            even under dontAsk (it ran in the first probe); denied, git is refused
+#                            alone and inside `bd ... && git log`.
+#   Edit(//<dir>/**)         is what lets Write into a dir; a Write(...) rule grants nothing, and
+#                            a bare Edit deny blocks Write too, so Edit is not in deny. The dir is
+#                            the judge's own, <run dir>/judge: it may write there (nested too),
+#                            but not <run dir>/reviewed, before.jsonl or inputs.json, nor read them.
+#   `--` before the prompt   --add-dir and --allowedTools are variadic and would take the prompt.
+# Refused in the probes: git log, git status, `bd ... && git log`, bd without --readonly, cat or ls
+# outside the working dirs, touch, `bd ... > file`, Write to the space root, the plan dir, a path
+# outside, and <dir>/../x. Allowed: the bd reads, Read in the root and plan dir, Write in the dir.
+JUDGE_BD = ("list", "show", "ready", "dep tree", "children")
+JUDGE_DENY = ["Bash(git:*)", "NotebookEdit", "WebFetch", "WebSearch"]
+
+
+def judge_rules(root, plan_dir, out_dir):
+    """The allow rules: read-only bd, Read in ROOT, PLAN_DIR (or None) and OUT_DIR, Write in OUT_DIR
+    (the judge's own dir). Paths are absolute rules (`//path`), resolved, since the rule is
+    matched against real paths."""
+    dirs = [d for d in (root, plan_dir, out_dir) if d]
+    return ([f"Bash(bd --readonly {c}:*)" for c in JUDGE_BD]
+            + [f"Read(/{os.path.realpath(d)}/**)" for d in dirs]
+            + [f"Edit(/{os.path.realpath(out_dir)}/**)"])
+
+
+def judge_argv(claude, root, plan_dir, out_dir, prompt):
+    """The judge's argv. Never --dangerously-skip-permissions or a mode that skips prompts."""
+    allow = judge_rules(root, plan_dir, out_dir)
+    settings = json.dumps({"permissions": {"allow": allow, "deny": JUDGE_DENY}})
+    dirs = [os.path.realpath(d) for d in (out_dir, plan_dir) if d]
+    return [claude, "-p", "--setting-sources", "", "--strict-mcp-config", "--permission-mode", "dontAsk",
+            "--tools", "Bash,Read,Write", "--no-session-persistence", "--output-format", "json",
+            "--settings", settings, "--allowedTools", *allow, "--add-dir", *dirs, "--", prompt]
+
+
+def run_judge(argv, cwd, env, timeout, out_path, err_path):
+    """(exit code, timed_out). The judge gets its own process group, so a timeout stops it and
+    anything it started; its output goes to files, so a leftover child can't hold a pipe open.
+    Raises OSError when it can't be started."""
+    with open(out_path, "wb") as out, open(err_path, "wb") as err:
+        p = subprocess.Popen(argv, cwd=cwd, env=env, stdin=subprocess.DEVNULL, stdout=out, stderr=err,
+                             start_new_session=True)
+        try:
+            return p.wait(timeout=timeout), False
+        except subprocess.TimeoutExpired:
+            _killpg(p.pid, signal.SIGTERM)
+            try:
+                p.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                pass
+            _killpg(p.pid, signal.SIGKILL)  # whatever in the group ignored SIGTERM
+            p.wait()
+            return None, True
+
+
+def _killpg(pgid, sig):
+    try:
+        os.killpg(pgid, sig)
+    except (ProcessLookupError, PermissionError):
+        pass  # the group is gone

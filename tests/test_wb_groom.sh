@@ -452,4 +452,169 @@ assert_eq "hostile close reason: one --reason= element, no newline" "$(chk close
 
 unset FAKE_BD_STATEFUL FAKE_BD_LOG FAKE_BD_ARGV_LOG
 
+# --- run: the judge, then apply ---
+# Three spaces: acme and beta have plans, gamma has none. The fake judge copies decisions.json and
+# summary.md from $T/judge into the run dir; wb-groom applies them with the stateful fake bd.
+TR="$(cd "$T" && pwd -P)"   # the judge is given resolved paths (macOS: /var is /private/var)
+G="$TR/groom"; P="$TR/plans"; rm -rf "$G" "$P"; mkdir -p "$P" "$T/cfg-acme"
+cp -R "$FX/plan" "$P/acme"; cp -R "$FX/plan" "$P/beta"; printf 'date: 2026-10-10\nAcme only.\n' > "$P/acme/calendar.md"
+setup_repo "$T/ra" >/dev/null 2>&1
+git -C "$T/ra" push -q origin HEAD:refs/dolt/data 2>/dev/null   # a store that syncs to a shared remote
+for d in ra rb rc; do mkstore "$T/$d"; done
+reset_stores() { for d in ra rb rc; do cp "$FX/beads.json" "$T/$d/.beads/fake.json"; rm -f "$T/$d/.beads/fake-clock"; done; }
+cat > "$T/spaces.toml" <<EOF
+[[space]]
+name = "acme"
+root = "$T/ra"
+claude_config = "$T/cfg-acme"
+protocol = "docs/PROTOCOL.md"
+[[space]]
+name = "beta"
+root = "$T/rb"
+[[space]]
+name = "gamma"
+root = "$T/rc"
+EOF
+mkdir -p "$T/judge"
+printf '%s' '{"goals":[{"text":"Invoices match the books.","inferred":false}],"changes":[{"id":"acme-10","kind":"icebox","why":"no goal","protected":false},{"id":"acme-9","kind":"priority","to":"1","why":"due soon"}],"attention":{"add":[{"id":"acme-9","why":"due Nov 2"}]}}' > "$T/judge/decisions.json"
+printf '# Grooming\nThe judge wrote this.\n' > "$T/judge/summary.md"
+# files a hostile bead could talk the judge into writing: wb-groom must not take them
+printf 'x\n' > "$T/judge/reviewed"; printf '{"id":"acme-10"}\n' > "$T/judge/before.jsonl"
+export WORKBENCH_CONFIG="$T/spaces.toml" WB_GROOM_DIR="$G" WB_PLANS_DIR="$P" FAKE_CLAUDE_GROOM="$T/judge" FAKE_CLAUDE_LOG="$T/claude.log"
+export FAKE_BD_STATEFUL=1 FAKE_BD_LOG="$T/bd.log"
+groom() { "$WG" run "$@"; }
+newest() { ls -d "$G/$1"/2* 2>/dev/null | tail -1; }
+writes() { grep -cE '(^| )(update|close|undefer) ' "$T/bd.log"; }
+sfield() { python3 -c "import json; print([b for b in json.load(open('$T/$1/.beads/fake.json')) if b['id']=='$2'][0].get('$3', ''))"; }
+# jl EXPR: EXPR over the last fake-claude call (a = argv, c = the whole record)
+jl() { python3 -c "import json; c = json.loads(open('$T/claude.log').read().splitlines()[-1]); a = c['argv']; print($1)"; }
+
+reset_stores; : > "$T/bd.log"; : > "$T/claude.log"
+CLAUDE_CONFIG_DIR="$T/elsewhere" groom acme >"$T/out" 2>"$T/err"; rc=$?
+R="$(newest acme)"
+assert_eq "run: exit 0" "$rc" "0"
+assert_eq "run: the run dir is <space>/YYYYMMDD-HHMM" "$(basename "$R" | grep -cE '^[0-9]{8}-[0-9]{4}$')" "1"
+assert_contains "run: the judge's decisions are applied (bd log)" "$(cat "$T/bd.log")" "--sandbox update acme-10 --add-label icebox"
+assert_eq "run: ... and in the store" "$(sfield ra acme-10 labels)" "['icebox']"
+assert_eq "run: a priority change is only proposed" "$(sfield ra acme-9 priority)" "2"
+assert_eq "run: attention is applied" "$(sfield ra acme-9 labels)" "['attention']"
+assert_eq "run: proposals.json is in the run dir (no sprint named, so no wave moves)" "$(python3 -c "import json; print([p['kind'] for p in json.load(open('$R/proposals.json'))])")" "['priority']"
+assert_eq "run: inputs.json hashes the plan files" \
+  "$(python3 -c "import json, hashlib; i = json.load(open('$R/inputs.json')); f = i['plan_files']; print(f['goals.md'] == hashlib.sha256(open('$P/acme/goals.md','rb').read()).hexdigest(), f['calendar.md'] is not None, f['sources.md'], i['plan_state'])")" \
+  "True True None ok"
+assert_eq "judge: runs in the space root" "$(jl "c['cwd']")" "$(cd "$T/ra" && pwd -P)"
+assert_eq "judge: with the space's claude_config" "$(jl "c['config']")" "$T/cfg-acme"
+assert_eq "judge: print mode, settings sources off" "$(jl "a[0], a[a.index('--setting-sources') + 1] == ''")" "-p True"
+assert_eq "judge: dontAsk, strict MCP, only Bash, Read and Write" \
+  "$(jl "a[a.index('--permission-mode') + 1], '--strict-mcp-config' in a, a[a.index('--tools') + 1]")" "dontAsk True Bash,Read,Write"
+assert_not_contains "judge: never skips permissions" "$(cat "$T/claude.log")" "dangerously"
+assert_not_contains "judge: never bypassPermissions" "$(cat "$T/claude.log")" "bypassPermissions"
+assert_eq "judge: read-only bd in the allowlist" "$(jl "'Bash(bd --readonly list:*)' in a and 'Bash(bd --readonly show:*)' in a")" "True"
+assert_eq "judge: writes only to its own dir in the run dir" "$(jl "[x for x in a if x.startswith('Edit(')] == ['Edit(/' + '$R' + '/judge/**)']")" "True"
+assert_eq "judge: reads no run record" "$(jl "[x for x in a if x.startswith('Read(/$R')] == ['Read(/$R/judge/**)']")" "True"
+assert_eq "judge: no unscoped Read or Write" "$(jl "'Read' in a or 'Write' in a")" "False"
+assert_eq "judge: settings deny git and the web, and not Edit (that would block Write too)" \
+  "$(jl "(lambda d: ('Bash(git:*)' in d, 'WebFetch' in d, 'Edit' in d))(json.loads(a[a.index('--settings') + 1])['permissions']['deny'])")" "(True, True, False)"
+assert_eq "judge: add-dir is its own dir, then the plan dir" "$(jl "a[a.index('--add-dir') + 1:a.index('--add-dir') + 3] == ['$R/judge', '$P/acme']")" "True"
+assert_eq "judge: the prompt is one argv element, after --" "$(jl "a[-2] == '--' and '$R/judge/decisions.json' in a[-1] and 'acme' in a[-1]")" "True"
+assert_eq "run: decisions.json and summary.md are taken from the judge's dir" "$(ls "$R/decisions.json" "$R/summary.md" | wc -l | tr -d ' ')" "2"
+assert_eq "run: nothing else the judge wrote reaches the run dir" "$(ls "$R/reviewed" "$R/judge/../reviewed" 2>/dev/null; python3 -c "import json; print([r['step'] is not None for r in map(json.loads, open('$R/before.jsonl'))])")" "[True, True]"
+assert_eq "judge: no placeholder left in the prompt" "$(jl "__import__('re').findall(r'\{[a-z_]+\}', a[-1])")" "[]"
+assert_contains "summary: keeps the judge's text" "$(cat "$R/summary.md")" "The judge wrote this."
+assert_contains "summary: says what workbench applied" "$(cat "$R/summary.md")" "applied 2 bead(s)"
+assert_contains "summary: a store on a shared remote says so" "$(cat "$R/summary.md")" "This store syncs to a shared remote: changes go out with your next sync"
+assert_not_contains "summary: a fresh plan does not ask for strategy" "$(cat "$R/summary.md")" "strategy session needed"
+assert_not_contains "summary: no earlier runs, no count" "$(cat "$R/summary.md")" "earlier run"
+
+# beta: no claude_config, so the judge gets none, even with one in the environment
+: > "$T/claude.log"
+CLAUDE_CONFIG_DIR="$T/elsewhere" groom beta >/dev/null 2>&1
+assert_eq "judge: no claude_config, CLAUDE_CONFIG_DIR unset" "$(jl "c['config']")" "None"
+assert_not_contains "summary: no remote, no remote line" "$(cat "$(newest beta)/summary.md")" "shared remote"
+
+# a second run in the same minute gets its own dir, and counts the first as unreviewed
+groom acme >/dev/null 2>&1
+R2="$(newest acme)"
+assert_eq "run: a second run in the same minute has its own dir" "$(ls -d "$G/acme"/2* | wc -l | tr -d ' ')" "2"
+assert_contains "summary: earlier runs not yet reviewed" "$(cat "$R2/summary.md")" "1 earlier runs not yet reviewed"
+touch "$R/reviewed"; groom acme >/dev/null 2>&1
+assert_contains "summary: a reviewed run is not counted" "$(cat "$(newest acme)/summary.md")" "1 earlier runs not yet reviewed"
+
+# missing plan: the judge runs, nothing is written, and the summary leads with strategy
+reset_stores; : > "$T/bd.log"
+groom gamma >/dev/null 2>"$T/err"; rc=$?
+R="$(newest gamma)"
+assert_eq "missing plan: exit 0" "$rc" "0"
+assert_eq "missing plan: no bd writes" "$(writes)" "0"
+assert_eq "missing plan: summary leads 'strategy session needed'" "$(head -1 "$R/summary.md" | cut -c1-25)" "strategy session needed ("
+assert_eq "missing plan: the ops are left as proposals" "$(python3 -c "import json; print(len(json.load(open('$R/proposals.json'))) > 0)")" "True"
+assert_eq "missing plan: inputs.json says so" "$(python3 -c "import json; print(json.load(open('$R/inputs.json'))['plan_state'])")" "missing"
+# a stale plan: the same, and the summary says which
+cp "$P/acme/goals.md" "$T/goals.keep"; printf 'date: 2026-08-01\n' > "$P/acme/goals.md"; : > "$T/bd.log"
+groom acme >/dev/null 2>&1; rc=$?
+assert_eq "stale plan: exit 0, no bd writes" "$rc $(writes)" "0 0"
+assert_eq "stale plan: summary leads with it" "$(head -1 "$(newest acme)/summary.md" | cut -c1-36)" "strategy session needed (plan stale)"
+cp "$T/goals.keep" "$P/acme/goals.md"
+
+# the judge times out: nothing applied, even though it wrote decisions.json first
+reset_stores; : > "$T/bd.log"; s=$SECONDS
+WB_GROOM_TIMEOUT=1 FAKE_CLAUDE_SLEEP=30 groom acme >/dev/null 2>"$T/err"; rc=$?
+R="$(newest acme)"
+assert_eq "timeout: exit 10" "$rc" "10"
+assert_eq "timeout: no bd writes" "$(writes)" "0"
+assert_eq "timeout: the judge is stopped, not waited for" "$(( SECONDS - s < 20 ))" "1"
+assert_contains "timeout: summary says why" "$(cat "$R/summary.md")" "timed out after 1 s; nothing applied"
+assert_eq "timeout: no before.jsonl" "$(ls "$R/before.jsonl" 2>/dev/null)" ""
+# the judge fails
+FAKE_CLAUDE_RC=3 groom acme >/dev/null 2>"$T/err"; rc=$?
+assert_eq "judge failed: exit 10" "$rc" "10"
+assert_contains "judge failed: summary says why" "$(cat "$(newest acme)/summary.md")" "the judge failed (exit 3); nothing applied"
+assert_eq "judge failed: no bd writes" "$(writes)" "0"
+# the judge leaves no decisions.json
+mkdir -p "$T/judge2"; printf 'I could not finish.\n' > "$T/judge2/summary.md"
+FAKE_CLAUDE_GROOM="$T/judge2" groom acme >/dev/null 2>"$T/err"; rc=$?
+assert_eq "no decisions.json: exit 10" "$rc" "10"
+assert_contains "no decisions.json: summary says why" "$(cat "$(newest acme)/summary.md")" "the judge left no decisions.json; nothing applied"
+assert_contains "no decisions.json: ... and keeps the judge's words" "$(cat "$(newest acme)/summary.md")" "I could not finish."
+assert_eq "no decisions.json: no bd writes" "$(writes)" "0"
+
+# a held lock: a second run refuses and starts nothing
+n=$(ls -d "$G/acme"/2* 2>/dev/null | wc -l); mkdir -p "$G/acme"; rm -f "$T/locked"
+python3 -c "import fcntl, os, sys, time; f = open('$G/acme/.lock', 'a'); fcntl.flock(f, fcntl.LOCK_EX); open('$T/locked', 'w').close(); time.sleep(10)" &
+lp=$!
+i=0; while [ ! -f "$T/locked" ] && [ $i -lt 50 ]; do sleep 0.1; i=$((i+1)); done
+: > "$T/claude.log"
+groom acme >/dev/null 2>"$T/err"; rc=$?
+kill $lp 2>/dev/null; wait $lp 2>/dev/null
+assert_eq "lock: a second run exits 9" "$rc" "9"
+assert_contains "lock: and says why" "$(cat "$T/err")" "a grooming run is in progress"
+assert_eq "lock: no judge, no new run dir" "$(wc -c < "$T/claude.log" | tr -d ' ') $(ls -d "$G/acme"/2* | wc -l)" "0 $n"
+groom acme >/dev/null 2>&1; assert_eq "lock: released when its holder ends" "$?" "0"
+
+# --all: spaces with a plan; one broken store does not stop the others
+reset_stores; : > "$T/bd.log"; rm -rf "$G"; rm "$T/rb/.beads/fake.json"
+groom --all >"$T/out" 2>"$T/err"; rc=$?
+assert_eq "--all: exit 1 when a space failed" "$rc" "1"
+assert_eq "--all: the good space is applied" "$(sfield ra acme-10 labels)" "['icebox']"
+assert_contains "--all: names the failed space" "$(cat "$T/err")" "beta"
+assert_eq "--all: a space with no plan dir is not run" "$(ls "$G" | tr '\n' ' ')" "acme beta "
+assert_contains "--all: the broken space's summary says why" "$(cat "$(newest beta)/summary.md")" "bd could not be read"
+cp "$FX/beads.json" "$T/rb/.beads/fake.json"
+groom --all >/dev/null 2>&1; assert_eq "--all: exit 0 when all ran" "$?" "0"
+
+groom nope >/dev/null 2>"$T/err"; assert_eq "run: an unknown space exits 2" "$?" "2"
+assert_contains "... and says so" "$(cat "$T/err")" "no space named nope"
+groom >/dev/null 2>&1; assert_eq "run: no space is usage" "$?" "2"
+WB_GROOM_TIMEOUT=soon groom acme >/dev/null 2>"$T/err"; assert_eq "run: a bad WB_GROOM_TIMEOUT exits 2" "$?" "2"
+assert_contains "... and says so" "$(cat "$T/err")" "WB_GROOM_TIMEOUT is not a number"
+
+# the prompt teaches the decisions.json shape and the plan inputs
+GP="$(cat "$REPO/prompts/groom.txt" 2>/dev/null)"
+for w in '"leaving"' '"attention"' '"protected"' goals.md protected.md calendar.md sources.md \
+         'bd --readonly list -n 0 --json' 'when unsure' 'within 14 days'; do
+  assert_contains "prompt: mentions $w" "$GP" "$w"
+done
+assert_not_contains "prompt: no unqualified bd call" "$GP" '`bd list'
+unset FAKE_BD_STATEFUL FAKE_BD_LOG FAKE_CLAUDE_GROOM FAKE_CLAUDE_LOG WORKBENCH_CONFIG WB_GROOM_DIR WB_PLANS_DIR
+
 finish

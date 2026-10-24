@@ -1,5 +1,21 @@
 #!/usr/bin/env python3
-"""wb-groom — the apply half of weekly grooming (the judge writes decisions.json).
+"""wb-groom — weekly grooming: a read-only judge (Claude) writes decisions.json, then apply.
+
+  wb-groom run SPACE | --all
+      Grooms SPACE (a label from wb-spaces), or with --all every space whose plan directory
+      ($WB_PLANS_DIR/<label>, default ~/.config/workbench/plans) exists, going on past a failed
+      space. Per space, holding $WB_GROOM_DIR/<label>/.lock (default ~/.local/state/workbench/groom):
+      makes the run dir <label>/YYYYMMDD-HHMM (-02, -03 … within one minute), writes inputs.json
+      (plan file hashes, plan state, the judge's argv), runs the judge (claude -p, read-only, in the
+      space root, with the space's claude_config or none; see judge_argv in lib/wb_groom.py) for at
+      most WB_GROOM_TIMEOUT seconds (default 1200), then applies (below) unless the judge failed,
+      timed out or left no decisions.json. Either way summary.md is the judge's summary with what
+      workbench did: a lead line when nothing was applied or the plan is missing or stale
+      ("strategy session needed"), what apply printed, "N earlier runs not yet reviewed" (runs with
+      no `reviewed` file) and whether the store syncs to a shared remote. The judge can write
+      only in <run dir>/judge/; wb-groom takes its summary.md, and its decisions.json when it
+      finished, from there. Also in the run dir: judge.json and judge.err (the judge's output)
+      and apply.log. WB_CLAUDE names claude.
 
   wb-groom ops RUN_DIR SPACE_ROOT [--plan PLAN_DIR]
       What RUN_DIR/decisions.json comes to against the live beads in SPACE_ROOT, as TSV:
@@ -26,21 +42,31 @@
       undo. A bead whose state no longer matches its applied.jsonl line is refused:
       "ID changed since the run; not undone".
 
-Exit codes: 0 ok; 2 usage; 3 decisions.json unreadable; 4 bd could not be read; 5 a bd write
-failed (the run stops; what was applied is in applied.jsonl); 6 RUN_DIR not writable (nothing
-applied); 7 apply refused (already applied, no such proposal, applied by hand); 8 undo refused
-or skipped a named bead.
+Exit codes: 0 ok; 2 usage (or an unknown space, or no spaces); 3 decisions.json unreadable; 4 bd
+could not be read; 5 a bd write failed (the run stops; what was applied is in applied.jsonl); 6 the
+run dir is not writable (nothing applied); 7 apply refused (already applied, no such proposal,
+applied by hand); 8 undo refused or skipped a named bead; 9 a grooming run is in progress for the
+space (another holds its lock); 10 the judge failed, timed out or left no decisions.json (nothing
+applied). run --all exits 1 when any space did not exit 0.
 """
+import contextlib
 import datetime
+import fcntl
+import hashlib
+import io
 import json
 import os
+import subprocess
 import sys
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.realpath(__file__)), "..", "lib"))
 import wb_groom  # noqa: E402  (lives in lib/; realpath, since install.sh links bin/ elsewhere)
 
 BD = os.environ.get("WB_BD", "bd")
+HERE = os.path.dirname(os.path.realpath(__file__))
 EXIT_DECISIONS, EXIT_BD, EXIT_WRITE, EXIT_RUN_DIR, EXIT_REFUSED, EXIT_UNDO = 3, 4, 5, 6, 7, 8
+EXIT_LOCKED, EXIT_JUDGE = 9, 10  # 5 is a failed bd write, so a held lock gets its own code
+PLAN_FILES = ("goals.md", "protected.md", "calendar.md", "sources.md")
 
 
 def tsv(*fields):
@@ -165,6 +191,268 @@ def cmd_undo(run_dir, only):
     return EXIT_UNDO if refused else 0
 
 
+# --- run: the judge, then apply ---
+
+def read_spaces():
+    """wb-spaces' rows as dicts (label, root, claude_config, protocol; None for '-'), or None."""
+    p = subprocess.run([os.path.join(HERE, "wb-spaces")], text=True, capture_output=True)
+    if p.returncode != 0:
+        print(p.stderr.strip(), file=sys.stderr)
+        return None
+    rows = []
+    for line in p.stdout.splitlines():
+        f = [None if v == "-" else v for v in line.split("\t")]
+        if len(f) == 13:
+            rows.append({"label": f[0], "root": f[2], "claude_config": f[7], "protocol": f[8]})
+    return rows
+
+
+def plans_dir():
+    return os.environ.get("WB_PLANS_DIR") or os.path.expanduser("~/.config/workbench/plans")
+
+
+def groom_dir():
+    return os.environ.get("WB_GROOM_DIR") or os.path.expanduser("~/.local/state/workbench/groom")
+
+
+def new_run_dir(base):
+    stamp = datetime.datetime.now().strftime("%Y%m%d-%H%M")
+    for n in range(1, 100):
+        path = os.path.join(base, stamp if n == 1 else f"{stamp}-{n:02d}")  # -02 sorts after the first
+        try:
+            os.mkdir(path)
+            return path
+        except FileExistsError:
+            continue
+    raise OSError(f"too many runs in {base} this minute")
+
+
+def sha256(path):
+    try:
+        with open(path, "rb") as f:
+            return hashlib.sha256(f.read()).hexdigest()
+    except OSError:
+        return None
+
+
+def write_json(path, data):
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump(data, f, indent=1, sort_keys=True)
+        f.write("\n")
+
+
+def earlier_unreviewed(base, run_dir):
+    return sum(1 for d in os.listdir(base) if d[:1].isdigit() and os.path.join(base, d) != run_dir
+               and os.path.isdir(os.path.join(base, d)) and not os.path.exists(os.path.join(base, d, "reviewed")))
+
+
+def shared_remote(root):
+    """True when one of ROOT's git remotes has refs/dolt/data. Five seconds in all; a failure
+    (no repo, no network, a remote asking for credentials) is no answer, so no line."""
+    env = {**os.environ, "GIT_TERMINAL_PROMPT": "0"}
+    env.setdefault("GIT_SSH_COMMAND", "ssh -o BatchMode=yes")
+    deadline = datetime.datetime.now() + datetime.timedelta(seconds=5)
+    try:
+        remotes = subprocess.run(["git", "-C", root, "remote"], text=True, capture_output=True,
+                                 stdin=subprocess.DEVNULL, env=env, timeout=5).stdout.split()
+        for r in remotes:
+            left = (deadline - datetime.datetime.now()).total_seconds()
+            if left <= 0:
+                return False
+            p = subprocess.run(["git", "-C", root, "ls-remote", r, "refs/dolt/data"], text=True,
+                               capture_output=True, stdin=subprocess.DEVNULL, env=env, timeout=left)
+            if p.returncode == 0 and p.stdout.strip():
+                return True
+    except (OSError, subprocess.TimeoutExpired):
+        pass
+    return False
+
+
+def fill_prompt(fields):
+    with open(os.path.join(HERE, "..", "prompts", "groom.txt"), encoding="utf-8") as f:
+        text = f.read()
+    for k, v in fields.items():
+        text = text.replace("{" + k + "}", str(v))  # not format(): the JSON example has braces
+    return text
+
+
+def judge_env(claude_config):
+    env = dict(os.environ)
+    # Only the space's account: never one inherited from whoever started wb-groom, nor the
+    # markers of a Claude session that did.
+    for k in ("CLAUDE_CONFIG_DIR", "CLAUDECODE", "CLAUDE_CODE_ENTRYPOINT"):
+        env.pop(k, None)
+    if claude_config:
+        env["CLAUDE_CONFIG_DIR"] = claude_config
+    return env
+
+
+def finish_summary(run_dir, base, root, lead, applied):
+    """Rewrite summary.md as LEAD lines, the judge's summary, APPLIED (what apply printed) and
+    the lines wb-groom owns."""
+    path = os.path.join(run_dir, "summary.md")
+    judge = wb_groom._read(path)
+    parts = []
+    if lead:
+        parts.append("\n".join(lead) + "\n")
+    parts.append(judge.rstrip() + "\n" if judge and judge.strip() else "(the judge wrote no summary.md)\n")
+    if applied:
+        parts.append("## What workbench did\n" + "\n".join(applied) + "\n")
+    tail = []
+    n = earlier_unreviewed(base, run_dir)
+    if n:
+        tail.append(f"{n} earlier runs not yet reviewed")
+    if root and shared_remote(root):
+        tail.append("This store syncs to a shared remote: changes go out with your next sync")
+    if tail:
+        parts.append("\n".join(tail) + "\n")
+    with open(path + ".tmp", "w", encoding="utf-8") as f:
+        f.write("\n".join(parts))
+    os.replace(path + ".tmp", path)
+
+
+def groom_space(space):
+    """One space's run, under its lock. Returns an exit code."""
+    label = space["label"]
+    if "/" in label or label.startswith("."):
+        # the label names the plan and run dirs; one like ../x would leave them
+        print(f"wb-groom: {label}: a space label used as a folder name can't hold / or start with .", file=sys.stderr)
+        return 2
+    base = os.path.join(groom_dir(), label)
+    try:
+        os.makedirs(base, exist_ok=True)
+        lock = open(os.path.join(base, ".lock"), "a")
+    except OSError as e:
+        print(f"wb-groom: {label}: cannot use {base}: {e}", file=sys.stderr)
+        return EXIT_RUN_DIR
+    with lock:
+        try:
+            fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)  # the kernel drops it if we die
+        except BlockingIOError:
+            print(f"wb-groom: {label}: a grooming run is in progress", file=sys.stderr)
+            return EXIT_LOCKED
+        try:
+            run_dir = new_run_dir(base)
+        except OSError as e:
+            print(f"wb-groom: {label}: cannot make a run dir: {e}", file=sys.stderr)
+            return EXIT_RUN_DIR
+        print(f"{label}: {run_dir}")
+        return groom_in(space, base, os.path.realpath(run_dir))
+
+
+def lift(judge_dir, run_dir, name):
+    """Move the judge's NAME up into the run dir, if it wrote one as a plain file. The judge can
+    write only in judge_dir, so it can't touch the run record (inputs.json, before.jsonl,
+    reviewed …); these two files are all wb-groom takes from it."""
+    src = os.path.join(judge_dir, name)
+    if os.path.isfile(src) and not os.path.islink(src):
+        os.replace(src, os.path.join(run_dir, name))
+
+
+def groom_in(space, base, run_dir):
+    label, root = space["label"], space["root"]
+    judge_dir = os.path.join(run_dir, "judge")
+    plan_dir = os.path.join(plans_dir(), label)
+    plan = wb_groom.read_plan(plan_dir)
+    day = today()
+    state = wb_groom.plan_state(plan, day)
+    plan_dir = os.path.realpath(plan_dir) if plan else None
+    lead = [f"strategy session needed (plan {state}): nothing was applied unattended; every change "
+            "waits for review"] if state in ("missing", "stale") else []
+
+    def stop(code, why, err=None):
+        print(f"wb-groom: {label}: {err or why}", file=sys.stderr)
+        try:
+            finish_summary(run_dir, base, root, [why] + lead, [])
+        except OSError as e:
+            print(f"wb-groom: {label}: cannot write summary.md: {e}", file=sys.stderr)
+            return code if code != 0 else EXIT_RUN_DIR
+        return code
+
+    protocol = space["protocol"]
+    fields = {"space": label, "root": root, "today": day.isoformat(), "run_dir": judge_dir,
+              "plan_dir": plan_dir or f"{os.path.join(plans_dir(), label)} (missing)", "plan_state": state,
+              "protocol": os.path.join(root, protocol) if protocol else "none named",
+              "now_size": plan.now_size if plan else wb_groom.DEFAULT_SIZES["now"],
+              "next_size": plan.next_size if plan else wb_groom.DEFAULT_SIZES["next"]}
+    try:
+        os.mkdir(judge_dir)
+        argv = wb_groom.judge_argv(os.environ.get("WB_CLAUDE", "claude"), root, plan_dir, judge_dir, fill_prompt(fields))
+        write_json(os.path.join(run_dir, "inputs.json"), {
+            "space": label, "root": root, "plan_dir": plan_dir, "plan_state": state,
+            "goals_date": plan.goals_date.isoformat() if plan and plan.goals_date else None,
+            "plan_files": {f: sha256(os.path.join(plan_dir, f)) if plan_dir else None for f in PLAN_FILES},
+            "claude_config": space["claude_config"], "started_at": datetime.datetime.now().isoformat(timespec="seconds"),
+            "judge_argv": argv})
+    except OSError as e:
+        return stop(EXIT_RUN_DIR, "the run could not be set up; nothing applied", f"{e}")
+    # A store that can't be read now would fail apply after a long judge run: stop first.
+    try:
+        wb_groom.read_beads(root, BD)
+    except wb_groom.BdReadError as e:
+        return stop(EXIT_BD, f"bd could not be read ({e}); the judge did not run; nothing applied")
+    try:
+        timeout = float(os.environ.get("WB_GROOM_TIMEOUT") or 1200)
+    except ValueError:
+        return stop(2, "WB_GROOM_TIMEOUT is not a number of seconds; the judge did not run")
+    try:
+        rc, timed_out = wb_groom.run_judge(argv, root, judge_env(space["claude_config"]), timeout,
+                                           os.path.join(run_dir, "judge.json"), os.path.join(run_dir, "judge.err"))
+    except OSError as e:
+        return stop(EXIT_JUDGE, f"the judge could not start ({e}); nothing applied")
+    try:
+        lift(judge_dir, run_dir, "summary.md")  # its words are kept whatever happened
+    except OSError as e:
+        return stop(EXIT_RUN_DIR, f"cannot take the judge's summary.md ({e}); nothing applied")
+    if timed_out:
+        return stop(EXIT_JUDGE, f"the judge timed out after {timeout:g} s; nothing applied")
+    if rc != 0:
+        return stop(EXIT_JUDGE, f"the judge failed (exit {rc}); nothing applied")
+    try:
+        lift(judge_dir, run_dir, "decisions.json")  # only from a judge that finished
+    except OSError as e:
+        return stop(EXIT_RUN_DIR, f"cannot take the judge's decisions.json ({e}); nothing applied")
+    if not os.path.isfile(os.path.join(run_dir, "decisions.json")):
+        return stop(EXIT_JUDGE, "the judge left no decisions.json; nothing applied")
+    out, err = io.StringIO(), io.StringIO()
+    with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+        code = cmd_apply(run_dir, root, plan_dir, None)
+    said = out.getvalue().splitlines() + err.getvalue().splitlines()
+    with open(os.path.join(run_dir, "apply.log"), "w", encoding="utf-8") as f:
+        f.write("\n".join(said + [f"exit {code}"]) + "\n")
+    sys.stdout.write(out.getvalue())
+    sys.stderr.write(err.getvalue())
+    if code != 0:
+        lead = [f"apply stopped (exit {code}); see apply.log"] + lead
+    try:
+        finish_summary(run_dir, base, root, lead, said)
+    except OSError as e:
+        print(f"wb-groom: {label}: cannot write summary.md: {e}", file=sys.stderr)
+        return code if code != 0 else EXIT_RUN_DIR
+    return code
+
+
+def cmd_run(target):
+    spaces = read_spaces()
+    if spaces is None:
+        return 2
+    if target != "--all":
+        space = next((s for s in spaces if s["label"] == target), None)
+        if space is None:
+            print(f"wb-groom: no space named {target}", file=sys.stderr)
+            return 2
+        return groom_space(space)
+    failed = []
+    for space in spaces:
+        if os.path.isdir(os.path.join(plans_dir(), space["label"])):
+            code = groom_space(space)
+            if code != 0:
+                failed.append(f"{space['label']} (exit {code})")
+    if failed:
+        print(f"wb-groom: failed: {', '.join(failed)}", file=sys.stderr)
+    return 1 if failed else 0
+
+
 def options(rest, names):
     """(positionals, {name: value}) from REST, or None for a missing value or unknown option."""
     found, pos, i = {}, [], 0
@@ -193,6 +481,9 @@ def main(argv):
             number = opt.get("--proposal")
             if number is None or number.isdigit():
                 return cmd_apply(run_dir, root, opt.get("--plan"), int(number) if number else None)
+    elif cmd == "run":
+        if len(rest) == 1 and (rest[0] == "--all" or not rest[0].startswith("-")):
+            return cmd_run(rest[0])
     elif cmd == "undo":
         got = options(rest, ())
         if got and len(got[0]) in (1, 2):

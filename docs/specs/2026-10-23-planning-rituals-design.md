@@ -77,6 +77,20 @@ Claude never writes to the bead store. Each run has two halves:
    settings and permission rules** (they could widen the allowlist). If the run can't be started
    that narrowly, it doesn't start (*my call*).
    It writes `decisions.json` (structured, below) and `summary.md` (for the human).
+   As built (checked by hand with claude 2.1.309 on a throwaway store; comment in
+   `lib/wb_groom.py`): `claude -p --setting-sources "" --strict-mcp-config --permission-mode
+   dontAsk --tools Bash,Read,Write --no-session-persistence --output-format json --settings
+   <inline JSON> --allowedTools <rules> --add-dir <run dir>/judge <plan dir> -- "<prompt>"`, run in the
+   space root with `CLAUDE_CONFIG_DIR` set to the space's `claude_config` or unset. `""` is
+   accepted, and a project `.claude/settings.json` hook that runs under `--setting-sources project`
+   did not run. The
+   rules allow `Bash(bd --readonly list|show|ready|dep tree|children:*)`, `Read(//<root>/**)`,
+   `Read(//<plan>/**)`, and Read and `Edit(…/**)` (that is the rule that lets Write in; a
+   `Write(...)` rule grants nothing) only on `<run dir>/judge/`, so the judge can't touch the run
+   record (`inputs.json`, `before.jsonl`, `reviewed`). Once it has exited, `wb-groom` moves its
+   `summary.md`, and its `decisions.json` if it finished, up into the run dir. The settings deny
+   `Bash(git:*)` (Claude Code auto-allows read-only commands like `git log` even under dontAsk),
+   NotebookEdit, WebFetch and WebSearch, but not Edit, which would block Write too.
 2. **Apply** — `wb-groom apply` (python, in this repo) validates `decisions.json` and applies only
    what policy allows, through bd. **A bead is protected if any of these hold**: it carries a
    protected label from `protected.md` (checked by `apply` itself); the judge says it is protected;
@@ -112,8 +126,10 @@ Anything outside the space's bead store. Code and git.
 `apply` runs bd with auto-push off (bd's `--sandbox` flag disables Dolt auto-push; builder to
 confirm it has no other effect), so applied changes stay local until the user syncs.
 
-Each run lives in `~/.local/state/workbench/groom/<space>/<run-id>/`: inputs' hashes, `decisions.json`,
-`summary.md`, and `before.jsonl` — each touched bead's labels, priority, status and notes **before**
+Each run lives in `~/.local/state/workbench/groom/<space>/<run-id>/` (`-02`, `-03` … for a second run
+in the same minute): `inputs.json` (plan file hashes, plan state, the judge's argv), `judge.json` and
+`judge.err` (the judge's output), `decisions.json`, `summary.md`, `apply.log`, `proposals.json`, and
+`before.jsonl` — each touched bead's labels, priority, status and notes **before**
 the change, written and synced to disk before the first bd write. If `before.jsonl` can't be
 written, the run applies nothing. After its writes `apply` reads each bead back and records it in
 `applied.jsonl` (with that `updated_at`). `wb-groom undo <run> [<bead>]` restores labels, priority,
@@ -125,26 +141,40 @@ line, i.e. someone changed it since the run.
 
 A space's bead store may sync to a shared remote, so applied changes reach anyone else who reads
 it. Grooming doesn't sync or push; the change goes out with the user's next sync. The summary says
-so when the space has a remote. (*Builder:* confirm bd doesn't auto-push on write.)
+so when the space has a remote: `This store syncs to a shared remote: changes go out with your next
+sync`, when one of the root's git remotes has `refs/dolt/data` (`git ls-remote`, 5 s in all; no line
+when that fails). bd writes pass `--sandbox`, which turns Dolt auto-push off.
 
 ### Schedule
 
 A launchd agent (`~/Library/LaunchAgents/…workbench.groom.plist`, installed by `install.sh`) runs
 `wb-groom run --all` weekly, Saturday 06:00 (*my call*). A Mac asleep then runs it at wake. One run
-per space per week; a run that times out (default 20 min) applies nothing. Cost seen in the dry
-run: ~6 min / ~160k tokens for a 400-bead space, ~2 min for a 50-bead one.
+per space per week; a run that times out (default 20 min, `WB_GROOM_TIMEOUT`) applies nothing, as does
+one whose judge fails or leaves no `decisions.json`; its summary says why. A run holds
+`<groom dir>/<space>/.lock`; a second run for that space exits 9 (`a grooming run is in progress`).
+`--all` grooms every space with a plan directory and goes on past a failed one. A missing or stale
+plan still runs the judge, and its summary leads with `strategy session needed`. The summary ends
+with `N earlier runs not yet reviewed` when any run dir lacks a `reviewed` file (review writes it).
+Cost seen in the dry run: ~6 min / ~160k tokens for a 400-bead space, ~2 min for a 50-bead one.
 
-### `decisions.json` (shape; builder may refine)
+### `decisions.json` (shape, as `prompts/groom.txt` teaches it and `wb-groom` reads it)
 
 ```json
 {"goals": [{"text": "...", "inferred": true}],
- "sprint": {"now": [{"id": "acme-12", "why": "..."}], "next": [...]},
+ "sprint": {"now": [{"id": "acme-12", "why": "...", "protected": false}], "next": [...],
+            "leaving": [{"id": "acme-4", "why": "...", "protected": false}]},
  "changes": [{"id": "acme-40", "kind": "icebox|priority|merge|close|undefer|dep|date",
               "to": "...", "why": "...", "protected": false}],
+ "attention": {"add": [{"id": "acme-7", "why": "due Nov 2 · money"}],
+               "remove": [{"id": "acme-3", "why": "..."}]},
  "release": [{"id": "...", "idle_days": 30}],
  "candidates": [{"title": "...", "why": "...", "from": ["acme-7"]}],
  "questions": ["..."], "process_notes": ["..."]}
 ```
+
+`protected` is optional everywhere; left out it means unsure, which counts as protected. Only
+`false` lets a bead leave the sprint, move from NOW to NEXT, or be iceboxed unattended.
+`sprint.leaving` names beads that have a wave label now and are in neither list.
 
 ## Review (in the launcher)
 
