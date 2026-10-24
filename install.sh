@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
-# Link bin/* into ~/.local/bin, install the weekly grooming launch agent, and print the
-# line to add to ~/.zshrc. Idempotent. Never edits ~/.zshrc and never replaces a file it
-# didn't create (the launch agent is ours: re-running rewrites it).
+# Link bin/*'s commands into ~/.local/bin (dropping our links to ones that are gone), install
+# the weekly grooming launch agent, and print the line to add to ~/.zshrc. Idempotent. Never
+# edits ~/.zshrc and never replaces a file it didn't create (the launch agent is ours:
+# re-running rewrites it).
 #   --no-schedule   skip the launch agent
 # WORKBENCH_DRY_RUN=1 prints the launchctl commands instead of running them;
 # WB_LAUNCH_AGENTS_DIR moves ~/Library/LaunchAgents (the tests use both).
@@ -16,7 +17,19 @@ done
 here="$(cd "$(dirname "$0")" && pwd)"
 dest="${WB_BIN_DIR:-$HOME/.local/bin}"
 mkdir -p "$dest"
+# A link into our bin/ whose target is no longer a command (bin/__pycache__, linked by an
+# earlier install; a command since removed) is ours and stale. Links anywhere else are left alone.
+for link in "$dest"/* "$dest"/.[!.]*; do
+  [ -L "$link" ] || continue
+  target="$(readlink "$link")"
+  case "$target" in "$here"/bin/*) ;; *) continue ;; esac
+  if [ ! -f "$target" ] || [ ! -x "$target" ]; then
+    rm -f "$link"
+    echo "removed $link (no longer a command in $here/bin)"
+  fi
+done
 for src in "$here"/bin/*; do
+  [ -f "$src" ] && [ -x "$src" ] || continue  # commands only: python leaves bin/__pycache__ behind
   link="$dest/$(basename "$src")"
   if [ -L "$link" ] && [ "$(readlink "$link")" != "$src" ] && [[ "$(readlink "$link")" != "$here"/* ]]; then
     echo "skip: $link points somewhere else ($(readlink "$link")); left alone" >&2; continue

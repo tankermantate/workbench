@@ -5,7 +5,17 @@ mkdir -p "$T/bin" "$T/z"
 # install.sh also installs a launch agent: never the real one, never a real launchctl.
 export WORKBENCH_DRY_RUN=1 WB_LAUNCH_AGENTS_DIR="$T/agents" WB_GROOM_DIR="$T/groom"
 echo "not ours" > "$T/bin/wb-ui"
+# python leaves bin/__pycache__ (gitignored) behind; an earlier install linked it, and a command
+# since removed from bin/ left a dangling link
+mkdir -p "$REPO/bin/__pycache__"
+ln -s "$REPO/bin/__pycache__" "$T/bin/__pycache__"; ln -s "$REPO/bin/wb-gone" "$T/bin/wb-gone"
+ln -s "$REPO/README.md" "$T/bin/readme"   # into the repo but not bin/: not install's to judge
 out="$(WB_BIN_DIR="$T/bin" ZDOTDIR="$T/z" bash "$REPO/install.sh" 2>&1)"
+if [ ! -e "$T/bin/__pycache__" ] && [ ! -L "$T/bin/__pycache__" ]; then ok "a directory in bin/ is not linked, and an old link to it goes"; else bad "bin/__pycache__ still linked"; fi
+assert_not_contains "says nothing about linking it" "$out" "linked $T/bin/__pycache__"
+if [ ! -L "$T/bin/wb-gone" ]; then ok "a link to a command no longer in bin/ goes"; else bad "dangling wb-gone link kept"; fi
+assert_contains "says it removed them" "$out" "removed $T/bin/wb-gone"
+assert_eq "a link elsewhere into the repo is left alone" "$(readlink "$T/bin/readme")" "$REPO/README.md"
 assert_eq "links wb-spaces" "$(readlink "$T/bin/wb-spaces")" "$REPO/bin/wb-spaces"
 assert_eq "existing non-symlink left alone" "$(cat "$T/bin/wb-ui")" "not ours"
 assert_contains "says it skipped it" "$out" "skip: $T/bin/wb-ui"
