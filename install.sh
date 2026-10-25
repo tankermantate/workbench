@@ -40,7 +40,14 @@ for src in "$here"/bin/*; do
   echo "linked $link -> $src"
 done
 # Saturday 06:00, wb-groom run --all (spec: docs/specs/2026-10-23-planning-rituals-design.md).
-xml() { local v=$1; v=${v//&/&amp;}; v=${v//</&lt;}; printf '%s' "${v//>/&gt;}"; }
+# subst TEXT NEEDLE REPLACEMENT: every NEEDLE replaced. Not bash's // expansion: bash >= 5.2 reads an &
+# in rep as the match (patsub_replacement), so &lt; would come out <lt;.
+subst() {
+  local s=$1 out=
+  while [[ "$s" == *"$2"* ]]; do out="$out${s%%"$2"*}$3"; s=${s#*"$2"}; done
+  printf '%s' "$out$s"
+}
+xml() { subst "$(subst "$(subst "$1" '&' '&amp;')" '<' '&lt;')" '>' '&gt;'; }
 install_schedule() {
   local label=workbench.groom agents="${WB_LAUNCH_AGENTS_DIR:-$HOME/Library/LaunchAgents}"
   local groom_dir="${WB_GROOM_DIR:-$HOME/.local/state/workbench/groom}"
@@ -67,11 +74,11 @@ install_schedule() {
     fi
   done
   tpl="$(cat "$here/lib/launchd/workbench.groom.plist.in")"
-  tpl=${tpl//@ENV@$'\n'/$env}
-  tpl=${tpl//@LABEL@/$label}
-  tpl=${tpl//@WB_GROOM@/$(xml "$dest/wb-groom")}
-  tpl=${tpl//@PATH@/$(xml "$path")}
-  tpl=${tpl//@LOG@/$(xml "$groom_dir/launchd.log")}
+  tpl="$(subst "$tpl" "@ENV@"$'\n' "$env")"
+  tpl="$(subst "$tpl" @LABEL@ "$label")"
+  tpl="$(subst "$tpl" @WB_GROOM@ "$(xml "$dest/wb-groom")")"
+  tpl="$(subst "$tpl" @PATH@ "$(xml "$path")")"
+  tpl="$(subst "$tpl" @LOG@ "$(xml "$groom_dir/launchd.log")")"
   printf '%s\n' "$tpl" > "$plist.tmp" && mv "$plist.tmp" "$plist"
   echo "wrote $plist (Saturdays 06:00: wb-groom run --all)"
   local domain="gui/$(id -u)"

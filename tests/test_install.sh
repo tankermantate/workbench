@@ -66,9 +66,13 @@ assert_not_contains "schedule: no WB_PLANS_DIR key when none was set" "$pl" "WB_
 assert_not_contains "schedule: no WORKBENCH_CONFIG key when none was set" "$pl" "WORKBENCH_CONFIG"
 assert_contains "schedule: WB_GROOM_DIR (set) is passed on" "$pl" $'<key>WB_GROOM_DIR</key>\n\t\t<string>'"$T/groom</string>"
 rm -f "$PL"
-out="$(WB_BIN_DIR="$T/bin" ZDOTDIR="$T/z" WB_PLANS_DIR="$T/plans & more" WORKBENCH_CONFIG="$T/c.toml" bash "$REPO/install.sh" 2>&1)"; pl="$(cat "$PL")"
-assert_contains "schedule: WB_PLANS_DIR is passed on, xml-escaped" "$pl" $'<key>WB_PLANS_DIR</key>\n\t\t<string>'"$T/plans &amp; more</string>"
+out="$(WB_BIN_DIR="$T/bin" ZDOTDIR="$T/z" WB_PLANS_DIR="$T/plans & <more>" WORKBENCH_CONFIG="$T/c.toml" bash "$REPO/install.sh" 2>&1)"; pl="$(cat "$PL")"
+assert_contains "schedule: WB_PLANS_DIR is passed on, xml-escaped" "$pl" $'<key>WB_PLANS_DIR</key>\n\t\t<string>'"$T/plans &amp; &lt;more&gt;</string>"
 assert_contains "schedule: WORKBENCH_CONFIG is passed on" "$pl" $'<key>WORKBENCH_CONFIG</key>\n\t\t<string>'"$T/c.toml</string>"
+# bash >= 5.2 (patsub_replacement, on by default) reads an & in ${v//pat/rep}'s replacement as
+# the match, so &lt; would come out <lt;. The suite runs on 3.2, so pin the construct instead.
+assert_eq "install.sh has no \${v//pat/rep}: bash 5.2 rewrites & in the replacement" \
+  "$(grep -cE '\$\{[A-Za-z_][A-Za-z0-9_]*//' "$REPO/install.sh")" "0"
 if command -v plutil >/dev/null; then assert_eq "schedule: plist with env is valid" "$(plutil -lint "$PL" >/dev/null 2>&1; echo $?)" "0"; fi
 rm -f "$PL"
 
