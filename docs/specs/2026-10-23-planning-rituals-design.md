@@ -130,7 +130,11 @@ Claude never writes to the bead store. Each run has two halves:
 
 Claimed (in-progress) beads — it lists claims untouched 14+ days under **Release?** — except for
 the `attention` flag, which it adds and removes on a claimed bead like any other (changed
-2026-10-24: a stale claim on money or legal work would otherwise never reach start-here). Closed beads.
+2026-10-24: a stale claim on money or legal work would otherwise never reach start-here). That
+write bumps the bead's `updated_at`, so a claim's idle days (the judge's CLAIMS input, and
+`wb-backlog`'s idle tag and `claimed` tie-break) walk back through grooming's own run records to the
+last touch before it (`lib/wb_touched.py`; bd's `started_at` won't do: it is the first claim ever,
+kept across a release and re-claim). Closed beads.
 Anything outside the space's bead store. Code and git.
 
 ### The run record and undo

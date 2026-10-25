@@ -3,7 +3,7 @@ source "$(dirname "$0")/lib.sh"
 T="$(newtmp)"; trap 'rm -rf "$T"' EXIT
 WB="$REPO/bin/wb-backlog"; FX="$REPO/tests/fixtures"
 mkstore "$T/store"; mkdir -p "$T/nostore"
-export FAKE_BD_DIR="$T/bd"
+export FAKE_BD_DIR="$T/bd" WB_GROOM_DIR="$T/groom"  # never the real run records
 reset_bd() { rm -rf "$FAKE_BD_DIR"; mkdir -p "$FAKE_BD_DIR"; }
 
 reset_bd; cp "$FX/waves.json" "$FAKE_BD_DIR/stdout"
@@ -151,6 +151,41 @@ cat > "$FAKE_BD_DIR/stdout" <<'EOF'
   "notes":"Branch: feat/a (worktree at /x/wt)"}]
 EOF
 assert_eq "claimed: two beads name the worktree, the newest update wins" "$("$WB" claimed "$T/store" /x/wt)" "bee-new"
+
+# grooming's own writes (an attention flag on a claim) don't count as touching it: the
+# stamp a grooming apply or undo left walks back to the one before, through the run records
+reset_bd; python3 - "$FAKE_BD_DIR/stdout" "$WB_GROOM_DIR" "$T/store" <<'EOF'
+import json, os, sys, datetime
+ago = lambda d: (datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(days=d, hours=1)).strftime("%Y-%m-%dT%H:%M:%SZ")
+stamp = lambda d, s: ago(d)[:-3] + s + "Z"  # a second no other bead has
+out, base, root = sys.argv[1:]
+json.dump([
+  {"id": "gt-1", "title": "Flagged then unflagged", "status": "in_progress", "priority": 1, "updated_at": stamp(0, "01"),
+   "notes": "Branch: a (worktree at /x/gt)"},
+  {"id": "gt-2", "title": "Touched since grooming", "status": "in_progress", "priority": 2, "updated_at": ago(1)},
+  {"id": "gt-3", "title": "Flag undone", "status": "in_progress", "priority": 3, "updated_at": stamp(0, "02")},
+  {"id": "gt-4", "title": "Newer claim on the same worktree", "status": "in_progress", "priority": 4, "updated_at": ago(3),
+   "notes": "Branch: a (worktree at /x/gt)"},
+  {"id": "gt-5", "title": "Another space's record", "status": "in_progress", "priority": 4, "updated_at": ago(2)},
+], open(out, "w"))
+def run(space, name, root, rows, undone=()):
+    d = os.path.join(base, space, name); os.makedirs(d)
+    w = lambda f, rs: open(os.path.join(d, f), "w").write("".join(json.dumps(r) + "\n" for r in rs))
+    w("before.jsonl", [{"id": i, "step": s, "updated_at": b} for i, s, b, _ in rows])
+    w("applied.jsonl", [{"id": i, "step": s, "root": root, "updated_at": a} for i, s, _, a in rows])
+    w("undone.jsonl", list(undone))
+run("acme", "20261001-0600", root, [("gt-1", "s1", ago(30), stamp(10, "30")), ("gt-2", "s1", ago(30), stamp(9, "30")),
+                                     ("gt-3", "s1", ago(20), stamp(8, "30"))],
+    [{"id": "gt-3", "through": 1, "updated_at": stamp(0, "02")}])
+run("acme", "20261008-0600", root, [("gt-1", "s2", stamp(10, "30"), stamp(0, "01"))])
+run("acme", "20261015-0600", root, [("gt-1", "s3", stamp(0, "01"), stamp(0, "01"))])  # a write that failed: no change
+run("other", "20261001-0600", "/elsewhere", [("gt-5", "x", ago(40), ago(2))])
+EOF
+out="$("$WB" list "$T/store")"
+assert_eq "touched: grooming's writes are walked back; a later touch and another space's record are not" \
+  "$(printf '%s\n' "$out" | cut -f1,10 | tr '\t\n' ': ')" "gt-1:30 gt-2:- gt-3:20 gt-4:- gt-5:- "
+assert_eq "touched: an idle claim grooming flagged is counted idle" "$("$WB" summary "$T/store")" "open 5 · claimed 5 (2 idle)"
+assert_eq "touched: claimed breaks the tie on the last real touch, not grooming's" "$("$WB" claimed "$T/store" /x/gt)" "gt-4"
 
 reset_bd
 cat > "$FAKE_BD_DIR/stdout" <<EOF

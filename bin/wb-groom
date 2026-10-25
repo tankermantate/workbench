@@ -78,6 +78,7 @@ import sys
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.realpath(__file__)), "..", "lib"))
 import wb_groom  # noqa: E402  (lives in lib/; realpath, since install.sh links bin/ elsewhere)
+import wb_touched  # noqa: E402
 
 BD = os.environ.get("WB_BD", "bd")
 HERE = os.path.dirname(os.path.realpath(__file__))
@@ -404,13 +405,19 @@ def groom_in(space, base, run_dir):
             return code if code != 0 else EXIT_RUN_DIR
         return code
 
+    # A store that can't be read now would fail apply after a long judge run: stop first.
+    try:
+        beads = wb_groom.read_beads(root, BD)
+    except wb_groom.BdReadError as e:
+        return stop(EXIT_BD, f"bd could not be read ({e}); the judge did not run; nothing applied")
     protocol = space["protocol"]
     judge_bd = os.path.join(run_dir, wb_groom.JUDGE_BD)
     fields = {"space": label, "root": root, "today": day.isoformat(), "run_dir": judge_dir, "bd": judge_bd,
               "plan_dir": plan_dir or f"{os.path.join(plans_dir(), label)} (missing)", "plan_state": state,
               "protocol": os.path.join(root, protocol) if protocol else "none named",
               "now_size": plan.now_size if plan else wb_groom.DEFAULT_SIZES["now"],
-              "next_size": plan.next_size if plan else wb_groom.DEFAULT_SIZES["next"]}
+              "next_size": plan.next_size if plan else wb_groom.DEFAULT_SIZES["next"],
+              "claims": wb_groom.claims_line(beads, wb_touched.grooming_stamps(root, groom_dir()), day)}
     try:
         os.mkdir(judge_dir)
         wb_groom.write_judge_bd(run_dir, root, BD)
@@ -424,11 +431,6 @@ def groom_in(space, base, run_dir):
             "judge_argv": argv})
     except OSError as e:
         return stop(EXIT_RUN_DIR, "the run could not be set up; nothing applied", f"{e}")
-    # A store that can't be read now would fail apply after a long judge run: stop first.
-    try:
-        wb_groom.read_beads(root, BD)
-    except wb_groom.BdReadError as e:
-        return stop(EXIT_BD, f"bd could not be read ({e}); the judge did not run; nothing applied")
     try:
         timeout = float(os.environ.get("WB_GROOM_TIMEOUT") or 1200)
     except ValueError:

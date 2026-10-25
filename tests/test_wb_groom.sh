@@ -637,6 +637,33 @@ assert_contains "claimed attention: the reason is in the notes" "$(field acme-3 
 assert_eq "claimed attention: unflagged, still claimed" "$(field acme-15 labels) $(field acme-15 status)" "[] in_progress"
 assert_eq "claimed attention: a closed bead is never flagged" "$(field acme-16 labels)" "[]"
 
+# a claim grooming flags, then unflags, keeps its real idle age: grooming's writes bump
+# updated_at, but wb-backlog's idle days and the judge's CLAIMS (its release list) walk them back
+reset_stores; rm -rf "$G"; mkdir -p "$T/judge-claim"
+python3 - "$T/ra/.beads/fake.json" <<'EOF'
+import json, sys
+d = json.load(open(sys.argv[1]))
+for b in d:
+    if b["id"] == "acme-3": b["updated_at"] = "2026-09-23T10:00:00Z"  # 30 days before WB_TODAY
+json.dump(d, open(sys.argv[1], "w"))
+EOF
+idle3() { env -u FAKE_BD_DIR "$REPO/bin/wb-backlog" list "$T/ra" | awk -F'\t' '$1 == "acme-3" {print $10}'; }
+want="$(python3 -c "import datetime; print((datetime.datetime.now(datetime.timezone.utc) - datetime.datetime(2026, 9, 23, 10, tzinfo=datetime.timezone.utc)).days)")"
+printf '# g\n' > "$T/judge-claim/summary.md"
+printf '%s' '{"attention":{"add":[{"id":"acme-3","why":"stale claim · due Nov 2"}]}}' > "$T/judge-claim/decisions.json"
+: > "$T/claude.log"; FAKE_CLAUDE_GROOM="$T/judge-claim" groom acme >/dev/null 2>&1
+assert_contains "claim age: the first run's judge is told the claim's idle days" "$(jl "a[-1]")" "CLAIMS: acme-3 30d"
+assert_eq "claim age: grooming flagged it, and that bumped updated_at" \
+  "$(sfield ra acme-3 labels) $(sfield ra acme-3 updated_at | cut -c1-10)" "['wave:1', 'attention'] 2026-10-23"
+assert_eq "claim age: wb-backlog still shows its idle days" "$(idle3)" "$want"
+printf '%s' '{"attention":{"remove":[{"id":"acme-3","why":"paid"}]}}' > "$T/judge-claim/decisions.json"
+: > "$T/claude.log"; FAKE_CLAUDE_GROOM="$T/judge-claim" groom acme >/dev/null 2>&1
+assert_contains "claim age: after the flag, the judge still sees 30 days (release list)" "$(jl "a[-1]")" "CLAIMS: acme-3 30d"
+assert_eq "claim age: unflagged" "$(sfield ra acme-3 labels)" "['wave:1']"
+assert_eq "claim age: once unflagged, wb-backlog still shows its idle days" "$(idle3)" "$want"
+: > "$T/claude.log"; FAKE_CLAUDE_GROOM="$T/judge-claim" groom acme >/dev/null 2>&1
+assert_contains "claim age: and so does the next week's judge" "$(jl "a[-1]")" "CLAIMS: acme-3 30d"
+
 # the prompt teaches the decisions.json shape and the plan inputs
 GP="$(cat "$REPO/prompts/groom.txt" 2>/dev/null)"
 for w in '"leaving"' '"attention"' '"protected"' goals.md protected.md calendar.md sources.md \

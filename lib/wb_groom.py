@@ -17,6 +17,8 @@ import sys
 import subprocess
 import uuid
 
+import wb_touched
+
 WAVES = {"now": "wave:1", "next": "wave:2"}  # sprint section -> label, as in bin/wb-backlog
 ICEBOX = "icebox"
 ATTENTION = "attention"
@@ -132,6 +134,21 @@ def read_beads(root, bd="bd", timeout=30):
     if data is None or not all(isinstance(b, dict) and isinstance(b.get("id"), str) for b in data):
         raise BdReadError("bd list did not return a list of beads")
     return {b["id"]: b for b in data}
+
+
+def claims_line(beads, stamps, today):
+    """The judge's CLAIMS: each claimed bead and the whole days since it was last touched,
+    grooming's own writes aside (lib/wb_touched.py). The judge would otherwise read updated_at,
+    which an attention flag bumps, and a stale claim would drop off its release list."""
+    out = []
+    for id in sorted(i for i, b in beads.items() if b.get("status") == CLAIMED):
+        stamp = wb_touched.last_touched(beads[id], stamps)
+        try:
+            days = (today - datetime.datetime.fromisoformat(str(stamp).replace("Z", "+00:00")).date()).days
+        except (TypeError, ValueError):
+            days = None
+        out.append(f"{id} {days}d" if days is not None else f"{id} ?")
+    return ", ".join(out) or "none"
 
 
 def _entries(value):

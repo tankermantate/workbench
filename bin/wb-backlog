@@ -4,7 +4,8 @@
   wb-backlog list ROOT [--snapshot FILE] [--flow FILE]
       TSV, best first: id, short id, mark (○ open / ◐ in progress), P<n>,
       section (NOW / NEXT / - / ICEBOX), title, parent, worktree from the claim
-      notes, the parent's title, days idle (a claim untouched for over IDLE_DAYS, or -),
+      notes, the parent's title, days idle (a claim untouched for over IDLE_DAYS, or -;
+      grooming's own writes don't count as touching it, see lib/wb_touched.py),
       start here (rank 1-3 and why, or -; see picks()),
       attention (rank and why for a bead labelled `attention`, or -; see attention()),
       deferred until (the date a past-due deferral was put off to, or -; see due()).
@@ -14,7 +15,7 @@
   wb-backlog summary ROOT      one line of counts for screen 1; always exits 0
   wb-backlog claimed ROOT PATH the bead whose current claim note names the
       worktree at PATH (end-session's way back to the bead), the one updated
-      last when several do; exits 1 if none
+      last (grooming's writes aside) when several do; exits 1 if none
   wb-backlog preview FILE ID [QUERY]
       the preview pane for one bead, from a snapshot, with QUERY's words
       highlighted in the title and description (lib/wb_search.py)
@@ -35,6 +36,7 @@ import threading
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.realpath(__file__)), "..", "lib"))
 import wb_search  # noqa: E402  (lives in lib/; realpath, since install.sh links bin/ elsewhere)
+import wb_touched  # noqa: E402
 
 TIMEOUT = float(os.environ.get("WB_BD_TIMEOUT", "10"))  # counts fill in after the screen draws; a big store under parallel load takes ~3s
 BD = os.environ.get("WB_BD", "bd")
@@ -45,6 +47,7 @@ ATTENTION_NOTE_RE = re.compile(r"^attention: (.+)$", re.M)
 IDLE_DAYS = 7  # a claim untouched this long is likely a forgotten tab
 PICKS = 3  # start here: few enough to choose from at a glance
 FLOW_DAYS = 30
+GROOMED = {}  # grooming's own writes to this root's beads; read() fills it (lib/wb_touched.py)
 DONE_RE = re.compile(r"^[\s>*#-]*(?:\*\*)?\s*done when\b", re.I | re.M)  # the "Done when …" line beads use
 WORKTREE_RE = re.compile(r"worktree at (/[^)\n]+)\)")  # paths may contain spaces
 # state -> (list exit code, summary text)
@@ -127,6 +130,9 @@ def read(root):
             data = run_bd(root)
     except BdError as e:
         return e.state, []
+    global GROOMED
+    if any(b.get("status") == "in_progress" for b in data):  # only a claim's age reads them
+        GROOMED = wb_touched.grooming_stamps(root)
     return ("ok" if data else "empty"), data
 
 
@@ -172,20 +178,19 @@ def ordered(beads):
     return sorted(beads, key=lambda b: (rank.get(section(b), 2), priority(b), str(b.get("id", ""))))
 
 
-def age(stamp):
-    """Whole days since an ISO timestamp, or None if it isn't one."""
-    try:
-        t = datetime.datetime.fromisoformat(str(stamp).replace("Z", "+00:00"))
-        return (datetime.datetime.now(datetime.timezone.utc) - t).days
-    except (TypeError, ValueError):
-        return None
+age = wb_touched.age  # whole days since an ISO timestamp, or None if it isn't one
+
+
+def touched(b):
+    """When a bead was last touched, not counting grooming's own writes (lib/wb_touched.py)."""
+    return wb_touched.last_touched(b, GROOMED)
 
 
 def idle(b):
     """Whole days since a claimed bead was last touched, when that's over IDLE_DAYS."""
     if b.get("status") != "in_progress":
         return None
-    days = age(b.get("updated_at"))
+    days = age(touched(b))
     return days if days is not None and days > IDLE_DAYS else None
 
 
@@ -214,7 +219,7 @@ def picks(beads):
              and b.get("status") != "blocked" and not blockers[b.get("id")]]
 
     def resume(b):
-        days = age(b.get("updated_at"))
+        days = age(touched(b))
         return b.get("status") == "in_progress" and days is not None and days <= IDLE_DAYS
 
     rank = {"NOW": 0, "NEXT": 1}
@@ -326,8 +331,9 @@ def cmd_claimed(root, path):
     if not hits:
         return 1
     # after "continue here" (wb-focus) the old and the new bead both name the
-    # worktree; the new one was noted last, so it was updated last
-    print(max(hits, key=lambda b: str(b.get("updated_at") or "")).get("id", ""))
+    # worktree; the new one was noted last, so it was updated last (by anyone but
+    # grooming: flagging the old one must not steer end-session to it)
+    print(max(hits, key=lambda b: str(touched(b) or "")).get("id", ""))
     return 0
 
 

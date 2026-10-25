@@ -10,6 +10,7 @@ allows and leaves the rest for the owner to review.
 - PLAN: {plan_dir} (plan state: {plan_state})
 - PROTOCOL: {protocol}
 - SPRINT SIZE: NOW {now_size}, NEXT {next_size}
+- CLAIMS: {claims} (each claimed bead, and the days since it was last touched)
 - RUN DIR: {run_dir} (the only place you may write)
 
 The plan is four markdown files the owner keeps in PLAN. Read each one that exists:
@@ -44,7 +45,8 @@ for the monthly strategy conversation, not settled.
    unattended. Otherwise say true, or leave the field out (the same as unsure).
 4. Claimed (in_progress) and closed beads: never change them, with one exception: a claimed
    bead may get or lose the attention flag (rule 5), since a stale claim on something due is
-   what the flag is for. List claims untouched 14+ days under release.
+   what the flag is for. List claims untouched 14+ days under release, by their days in CLAIMS:
+   a bead's updated_at counts workbench's own attention writes, CLAIMS does not.
 5. Attention: flag a bead (attention.add) when something is due within 14 days (on the calendar or
    in a bead), when a protected bead has been neglected, or when a bead blocks either of those.
    Remove the flag (attention.remove) once its reason is gone: done, closed, or the date passed.
