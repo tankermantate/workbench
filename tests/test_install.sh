@@ -106,6 +106,10 @@ git -C "$T/acmebench" -c user.email=t@example.com -c user.name=t commit -qm "acm
 printf '[[space]]\nname = "acmebench"\nroot = "%s"\n' "$T/acmebench" > "$T/self.toml"
 WORKBENCH_CONFIG="$T/self.toml" WB_LEAK_REPO="$T/acmebench" bash "$REPO/scripts/check-leaks.sh" >/dev/null 2>&1; rc=$?
 assert_eq "the repo's own name is not a leak" "$rc" "0"
+# A sibling worktree's folder is not the repo's name; the repo is still acmebench.
+git -C "$T/acmebench" worktree add -q --detach "$T/acmebench-groom"
+WORKBENCH_CONFIG="$T/self.toml" WB_LEAK_REPO="$T/acmebench-groom" bash "$REPO/scripts/check-leaks.sh" >/dev/null 2>&1; rc=$?
+assert_eq "the repo's own name is not a leak from a sibling worktree" "$rc" "0"
 
 # The bead store is a Dolt database that bd syncs to the git remote (refs/dolt/data), so its
 # rows and its history are published too, outside anything git grep sees.
@@ -130,6 +134,11 @@ if command -v dolt >/dev/null; then
   assert_contains "bead db: the warning names the table" "$out" "bead db: issues"
   assert_contains "bead db: the warning names the bead" "$out" "wb-2"
   assert_not_contains "bead db: the warning does not repeat the private name" "$out" "Zanzibar"
+  # The store is untracked, so it lives only in the main checkout; a worktree must still scan it.
+  git -C "$T/beady" worktree add -q --detach "$T/beady-groom"
+  out="$(WORKBENCH_CONFIG="$T/leak.toml" WB_LEAK_REPO="$T/beady-groom" bash "$REPO/scripts/check-leaks.sh" 2>&1)"
+  assert_contains "bead db: a sibling worktree scans the main checkout's store" "$out" "bead db: issues"
+  git -C "$T/beady" worktree remove "$T/beady-groom"
 
   git -C "$T/beady" remote add origin "$T/nowhere.git"
   out="$(leaks)"; rc=$?

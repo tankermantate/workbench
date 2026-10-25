@@ -8,8 +8,12 @@ here="$(cd "$(dirname "$0")/.." && pwd)"
 repo="${WB_LEAK_REPO:-$here}"
 terms="$(mktemp)"; trap 'rm -f "$terms"' EXIT
 # The repo's own name is public, even when a space is named after the repo;
-# as a term it would match nearly every file and commit.
-self="$(basename "$(git -C "$repo" rev-parse --show-toplevel)")"
+# as a term it would match nearly every file and commit. The name comes from the
+# main checkout (the folder holding the shared .git), not this one: a sibling
+# worktree like workbench-groom is still the workbench repo.
+main="$(git -C "$repo" rev-parse --path-format=absolute --git-common-dir)"
+if [ "$(basename "$main")" = .git ]; then main="$(dirname "$main")"; fi
+self="$(basename "$main" .git)"
 { "$here/bin/wb-spaces" --leak-terms; id -un; git -C "$repo" config user.email || true; } \
   | awk 'length($0) >= 3' | { grep -v -i -x -F -- "$self" || true; } | sort -u > "$terms"
 found=0
@@ -24,11 +28,12 @@ if [ -n "$revs" ]; then
 fi
 # The bead store syncs to the remote too. With no remote nothing carries it yet,
 # so a finding only warns; once a remote is set, it (or a store we can't scan) fails.
+# The store is untracked, so only the main checkout has it, whichever worktree runs this.
 beads_note=""
 if [ "${WB_LEAK_SKIP_BEADS:-}" = 1 ]; then
   beads_note=", bead db skipped (WB_LEAK_SKIP_BEADS=1)"
 else
-  brc=0; beads="$(python3 "$here/scripts/check-leaks-beads.py" "$terms" "$repo")" || brc=$?
+  brc=0; beads="$(python3 "$here/scripts/check-leaks-beads.py" "$terms" "$main")" || brc=$?
   remote="$(printf '%s\n' "$beads" | sed -n 's/^remote: //p')"
   if [ "$brc" -ne 0 ]; then
     printf '%s\n' "$beads" | grep -v '^remote: ' >&2 || true
