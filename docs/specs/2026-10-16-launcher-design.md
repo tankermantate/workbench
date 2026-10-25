@@ -274,11 +274,11 @@ never exits the window.
   `tankermantate/workbench`. Public is deliberate: the second laptop can install it without
   signing in to a personal account.
 - **Before the first push:** a check that no tracked file contains a real space name, path or email.
-  It greps for the names in this machine's `spaces.toml`, matching whole words.
-- **Commit authorship is public too.** This repo's commits so far carry the global git identity
-  (a personal Gmail address). Before the first push, decide whether to set a repo-local
-  `user.email` to the GitHub noreply address and rewrite the few local commits. Nothing is public
-  yet, so the rewrite is free until then.
+  It greps for the names in this machine's `spaces.toml` and every `user.email` git has here (global
+  and repo-local), matching whole words. A GitHub noreply address is not a term: it is public by design.
+- **Commit authorship is public too.** The repo sets a repo-local `user.email` to the GitHub noreply
+  address, and the commits were rewritten to it. The global address is still personal, and bd had
+  copied it into older beads as their owner; those were rewritten and the bead history flattened.
 
 ## Scope
 

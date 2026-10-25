@@ -14,8 +14,12 @@ terms="$(mktemp)"; trap 'rm -f "$terms"' EXIT
 main="$(git -C "$repo" rev-parse --path-format=absolute --git-common-dir)"
 if [ "$(basename "$main")" = .git ]; then main="$(dirname "$main")"; fi
 self="$(basename "$main" .git)"
-{ "$here/bin/wb-spaces" --leak-terms; id -un; git -C "$repo" config user.email || true; } \
-  | awk 'length($0) >= 3' | { grep -v -i -x -F -- "$self" || true; } | sort -u > "$terms"
+# Every scope's email, not just the winner: a repo set to a public address still has the
+# personal one in global config, and bd copied it into older beads. A GitHub noreply
+# address is public by design (it authors every pushed commit), so it is no term.
+{ "$here/bin/wb-spaces" --leak-terms; id -un; git -C "$repo" config --get-all user.email || true; } \
+  | awk 'length($0) >= 3' | { grep -v -i -x -F -- "$self" || true; } \
+  | { grep -v -i '@users\.noreply\.github\.com$' || true; } | sort -u > "$terms"
 found=0
 git -C "$repo" grep -n -I -w -i -F -f "$terms" -- . && found=1
 revs="$(git -C "$repo" rev-list --all 2>/dev/null || true)"

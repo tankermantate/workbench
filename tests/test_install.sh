@@ -111,6 +111,23 @@ git -C "$T/acmebench" worktree add -q --detach "$T/acmebench-groom"
 WORKBENCH_CONFIG="$T/self.toml" WB_LEAK_REPO="$T/acmebench-groom" bash "$REPO/scripts/check-leaks.sh" >/dev/null 2>&1; rc=$?
 assert_eq "the repo's own name is not a leak from a sibling worktree" "$rc" "0"
 
+# Every email git knows here is a term, not just the one that wins: a repo set to a public
+# address still has the personal one in its global config, and bd copied that into old beads.
+mkdir -p "$T/mail" && git -C "$T/mail" init -q && git -C "$T/mail" config user.email t@example.com
+echo "plain" > "$T/mail/a.txt"; git -C "$T/mail" add a.txt
+git -C "$T/mail" -c user.name=t commit -qm "first"
+printf '[user]\n\temail = jo.private@mail.test\n' > "$T/gitglobal"
+mailleaks() { GIT_CONFIG_GLOBAL="$T/gitglobal" WORKBENCH_CONFIG="$T/leak.toml" WB_LEAK_REPO="$T/mail" bash "$REPO/scripts/check-leaks.sh" 2>&1; }
+echo "ping jo.private@mail.test" > "$T/mail/b.txt"; git -C "$T/mail" add b.txt
+out="$(mailleaks)"; rc=$?
+assert_eq "the global email is a term when the repo sets its own" "$rc" "1"
+# A GitHub noreply address is public by design: it is the author of every pushed commit.
+git -C "$T/mail" rm -q --cached b.txt; rm "$T/mail/b.txt"
+git -C "$T/mail" config user.email 1234+jo@users.noreply.github.com
+echo "owner 1234+jo@users.noreply.github.com" > "$T/mail/c.txt"; git -C "$T/mail" add c.txt
+out="$(mailleaks)"; rc=$?
+assert_eq "a GitHub noreply email is not a leak" "$rc" "0"
+
 # The bead store is a Dolt database that bd syncs to the git remote (refs/dolt/data), so its
 # rows and its history are published too, outside anything git grep sees.
 leaks() { WORKBENCH_CONFIG="$T/leak.toml" WB_LEAK_REPO="$T/beady" bash "$REPO/scripts/check-leaks.sh" 2>&1; }
