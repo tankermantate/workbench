@@ -247,3 +247,44 @@ Afterwards:
 
 **Out:** the second laptop and its accounts (Project 3); moving `acme-predeploy` into workbench;
 hooks inside repos; any new way of starting sessions beyond the launcher and the two command forms.
+
+## Considered, not adopted: bd worktree and Claude Code's worktree hooks (2026-10-25)
+
+Worktree plumbing is now offered by bd and by Claude Code itself, so we tested whether either could
+replace the hand-written parts of `new-session` and `end-session` (wb-s3f.6). Neither does yet.
+Tested against bd 1.1.0 and the 1.3.2 release binary, and Claude Code 2.1.310.
+
+**`bd worktree create` / `remove`.** It does share the bead store when the store sits at the repo's
+top, which is the hand-written redirect's job. But:
+- When the space's store is in a subfolder of the repo (a project folder inside a larger repo,
+  which `new-session` supports), bd in the new worktree resolves to the worktree's own copy of the
+  tracked `.beads` files: an empty store that sees none of the beads. Still so in 1.3.2. The redirect
+  stays.
+- `create` takes no base: it branches from the current `HEAD`, not from `origin/<default>` after a
+  fetch, and has no form for reusing a branch an earlier `end-session` kept.
+- A worktree inside the repo adds its path to the tracked `.gitignore`, which dirties the main
+  checkout. (`new-session` puts worktrees outside the repo, so this only matters if we moved them.)
+- The global `-C` is ignored by `worktree create` (gastownhall/beads#6948; still so in 1.3.2).
+- `remove` adds nothing `end-session` lacks, and refuses a branch with no upstream, which is every
+  branch in a space with no remote (1.3.2 offers `--merged-into <ref>` instead).
+
+**Claude Code's `WorktreeCreate` / `WorktreeRemove` hooks**, held in each space's
+`CLAUDE_CONFIG_DIR` settings, with the launcher running `claude --worktree <bead-id>`. A live run
+showed that creation works. A hook passed with `--settings` fires for `--worktree`, gets the bead id
+as `name` and the launcher's `WB_*` variables, and the session runs in the path the hook prints,
+outside the repo. That run was nested in another Claude session; dotted bead ids were not tried.
+Three costs stop it:
+- The hook replaces worktree creation everywhere Claude makes one: subagents with
+  `isolation: worktree`, workflows, background sessions, `EnterWorktree`. It would have to tell
+  those apart from a bead session and create them too.
+- Claude never runs `WorktreeRemove` for a hook-made subagent or workflow worktree, and its cleanup
+  sweep skips worktrees it didn't make with git, so those would pile up for us to sweep.
+- On exit, Claude checks a hook-made worktree only for changed or untracked files. `WorktreeRemove`
+  (here, `end-session`) becomes the only guard on committed-but-unpushed work. It can refuse, but
+  the reason goes to Claude's debug log, not to the person at the terminal.
+
+What we would gain is Claude's own worktree flow and Agent view for workbench sessions. That is not
+worth giving up a visible, fail-closed close-out.
+
+**Reopen when** bd resolves a subfolder store from a worktree and `create` takes a base ref, or
+Claude Code gets a post-create hook that adds to its git worktree instead of replacing it.
