@@ -44,6 +44,13 @@
 
   wb-groom status LABEL
       What the launcher offers for the space LABEL, as TSV lines (none when there is nothing):
+        missed, <YYYY-MM-DD>                            the Saturday run left no run dir: the
+                                                        space's newest run is older than the last
+                                                        Saturday before today, the launch agent is
+                                                        installed (WB_LAUNCH_AGENTS_DIR, default
+                                                        ~/Library/LaunchAgents) and the space has a
+                                                        plan dir and earlier runs. launchd.log in
+                                                        the groom dir says why.
         review, <run dir>, <weekday>[, "<k> waiting"]   the newest run without a `reviewed` file
                                                         (k more are waiting, when any are)
         strategy, due                                   the plan is due, stale or missing, and the
@@ -504,16 +511,38 @@ RUN_ID_RE = re.compile(r"^(\d{8})-\d{4}(-\d{2})?$")
 WEEKDAYS = ("Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun")  # not strftime: it follows the locale
 
 
-def unreviewed_runs(label):
-    """The space's run dirs without a `reviewed` file, oldest first. Anything else in the groom
-    dir (.lock, stray files, other folders) is not a run."""
+def all_runs(label):
+    """The space's run dirs, oldest first. Anything else in the groom dir (.lock, stray files,
+    other folders) is not a run."""
     base = os.path.join(groom_dir(), label)
     try:
         names = sorted(os.listdir(base))
     except OSError:
-        return [], False
-    runs = [n for n in names if RUN_ID_RE.match(n) and os.path.isdir(os.path.join(base, n))]
-    return [os.path.join(base, n) for n in runs if not os.path.exists(os.path.join(base, n, "reviewed"))], bool(runs)
+        return []
+    return [os.path.join(base, n) for n in names if RUN_ID_RE.match(n) and os.path.isdir(os.path.join(base, n))]
+
+
+def unreviewed(runs):
+    return [r for r in runs if not os.path.exists(os.path.join(r, "reviewed"))]
+
+
+def scheduled():
+    """True when install.sh's launch agent is in place (it isn't after --no-schedule)."""
+    agents = os.environ.get("WB_LAUNCH_AGENTS_DIR") or os.path.expanduser("~/Library/LaunchAgents")
+    return os.path.isfile(os.path.join(agents, "workbench.groom.plist"))
+
+
+def missed_saturday(label, runs, day):
+    """The last Saturday before DAY (never DAY itself: its 06:00 run, or the run at wake, may be
+    still to come) when the space's newest run is older than it, else None. Any failure before a
+    run dir exists (an unwritable groom dir, the agent never starting wb-groom) leaves only this
+    gap, so the gap is what's checked. Only a space run --all grooms (it has a plan dir) that has
+    been groomed before, and only with the schedule installed."""
+    if not runs or not scheduled() or not os.path.isdir(os.path.join(plans_dir(), label)):
+        return None
+    sat = day - datetime.timedelta(days=(day.weekday() - 5) % 7 or 7)
+    newest = max(RUN_ID_RE.match(os.path.basename(r)).group(1) for r in runs)
+    return sat if newest < sat.strftime("%Y%m%d") else None
 
 
 def weekday(run_dir):
@@ -528,7 +557,11 @@ def cmd_status(label):
     if "/" in label or label.startswith("."):
         return 0  # not a space label (the launcher never makes one)
     try:
-        waiting, any_runs = unreviewed_runs(label)
+        runs = all_runs(label)
+        missed = missed_saturday(label, runs, today())
+        if missed:
+            print(tsv("missed", missed.isoformat()))
+        waiting, any_runs = unreviewed(runs), bool(runs)
         if waiting:
             line = ["review", waiting[-1], weekday(waiting[-1])]
             if len(waiting) > 1:

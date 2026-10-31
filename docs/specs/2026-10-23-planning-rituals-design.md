@@ -197,7 +197,13 @@ Cost seen in the dry run: ~6 min / ~160k tokens for a 400-bead space, ~2 min for
 ## Review (in the launcher)
 
 - Screen 1 adds to the space's line: `groomed Sat · review` while a run is unreviewed, and
-  `strategy due` once goals are 30+ days old. (Both dim, after the counts.)
+  `strategy due` once goals are 30+ days old. (Both dim, after the counts.) Before both,
+  `grooming missed Oct 24, see launchd.log` when a Saturday run left no run dir, so no summary
+  could say why: it failed before making one (groom dir not writable, a bad label) or wb-groom never
+  started (agent unloaded, repo moved, python gone). Those failures leave nowhere to write, so the
+  check is for the gap: with the agent installed, a space that has a plan dir and earlier runs, and
+  a newest run dated before the last Saturday before today (Saturday itself never counts: its run
+  may still be to come). A held lock is not a miss: the run holding it makes its own run dir.
 - The work screen gets a row at the top: `✦ review Saturday's grooming` (and `✦ strategy session`
   when due). Choosing it starts Claude in the space with `prompts/review.txt` and the run directory.
 - The user's yes in the review conversation is enough for Claude to apply any item, protected ones
@@ -208,7 +214,7 @@ Cost seen in the dry run: ~6 min / ~160k tokens for a 400-bead space, ~2 min for
   still goes through the policy and the run record. Candidates the user accepts become beads.
 - The launcher asks `wb-groom status <space>` for all of this (a few seconds at most; a failure or a
   slow answer adds nothing to the screens). `review` names the newest run without a `reviewed` file and,
-  when more are waiting, how many; `strategy due` appears when the plan is due or stale, or missing in a
+  when more are waiting, how many; `missed` names the Saturday with no run; `strategy due` appears when the plan is due or stale, or missing in a
   space that has runs. A space with neither plan nor runs, or one just started from the templates and
   never groomed, shows nothing.
 - Finishing the review marks the run reviewed (`wb-groom reviewed <run>`, a `reviewed` file with the date). An unreviewed run doesn't block the next one; the

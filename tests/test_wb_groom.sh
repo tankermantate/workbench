@@ -777,6 +777,31 @@ mkdir -p "$SG/acme/20261017-0600"
 assert_contains "status: an unedited template plan with runs is due" "$(st acme)" "strategy	due"
 assert_eq "status: always exit 0, even for an unknown label" "$(st nope/../x; echo $?)" "0"
 
+# missed: the Saturday run left no run dir (it failed before making one, or never started)
+MG="$T/mg"; MP="$T/mp"; MA="$T/agents"; mkdir -p "$MG/acme/20261010-0600" "$MP/acme" "$MA"
+cp "$FX/plan/"* "$MP/acme/"; : > "$MG/acme/20261010-0600/reviewed"
+mst() { WB_GROOM_DIR="$MG" WB_PLANS_DIR="$MP" WB_LAUNCH_AGENTS_DIR="$MA" st "$@"; }
+assert_eq "missed: no schedule installed (--no-schedule) says nothing" "$(mst acme)" ""
+: > "$MA/workbench.groom.plist"
+assert_eq "missed: newest run before last Saturday (Oct 17) is a missed run" "$(mst acme)" "missed	2026-10-17"
+mkdir -p "$MG/acme/20261017-0700"; : > "$MG/acme/20261017-0700/reviewed"
+assert_eq "missed: a run on that Saturday (any hour) is not missed" "$(mst acme)" ""
+rm -rf "$MG/acme/20261017-0700"; mkdir -p "$MG/acme/20261020-0900-02"; : > "$MG/acme/20261020-0900-02/reviewed"
+assert_eq "missed: a run by hand since then covers it" "$(mst acme)" ""
+rm -rf "$MG/acme/20261020-0900-02"
+assert_eq "missed: on Saturday itself the run may not have happened yet" "$(WB_TODAY=2026-10-17 mst acme)" ""
+assert_eq "missed: the day after, it has" "$(WB_TODAY=2026-10-18 mst acme)" "missed	2026-10-17"
+assert_eq "missed: two weeks on names the latest Saturday" "$(WB_TODAY=2026-10-31 mst acme)" "missed	2026-10-24"
+rm -f "$MG/acme/20261010-0600/reviewed"
+assert_eq "missed: before review and strategy" "$(WB_TODAY=2026-11-20 mst acme)" "missed	2026-11-14
+review	$MG/acme/20261010-0600	Sat
+strategy	due"
+: > "$MG/acme/20261010-0600/reviewed"
+rm -rf "$MP/acme"
+assert_eq "missed: a space with no plan dir is not in run --all" "$(mst acme | grep -c '^missed')" "0"
+mkdir -p "$MP/acme"; cp "$FX/plan/"* "$MP/acme/"; rm -rf "$MG/acme"; mkdir -p "$MG/acme"
+assert_eq "missed: a space never groomed says nothing (its plan may postdate the run)" "$(mst acme)" ""
+
 "$WG" reviewed "$SG/acme/20261017-0600" >"$T/out" 2>"$T/err"; assert_eq "reviewed: exit 0" "$?" "0"
 assert_eq "reviewed: writes the date" "$(cat "$SG/acme/20261017-0600/reviewed")" "$(date +%Y-%m-%d)"
 assert_eq "reviewed: the run is no longer offered" "$(st acme | grep -c '^review')" "0"

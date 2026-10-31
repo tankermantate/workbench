@@ -6,7 +6,7 @@ spaces.tsv (wb-spaces output).
   wb-ui render-spaces TMP      screen 1 lines: index, label, summary
   wb-ui fill-counts TMP        every space's summary, read in parallel, into
                                TMP/counts/<index> (ending, dim, with what `wb-groom status`
-                               says: groomed Sat · review, strategy due); with $FZF_PORT set,
+                               says: grooming missed, groomed Sat · review, strategy due); with $FZF_PORT set,
                                tells fzf to reload as each one lands
   wb-ui render-work TMP INDEX [QUERY]
                                screen 2 lines: kind, id, worktree, header, text
@@ -95,11 +95,26 @@ def ritual_status(label):
     return [l.split("\t") for l in out.splitlines() if l.strip()]
 
 
+MONTHS = ("Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec")  # not strftime: locale
+
+
+def short_date(iso):
+    """2026-10-24 as Oct 24; anything else as it came."""
+    try:
+        y, m, d = (int(x) for x in iso.split("-"))
+        return f"{MONTHS[m - 1]} {d}" if 1 <= m <= 12 else iso
+    except (ValueError, IndexError):
+        return iso
+
+
 def groomed_note(label):
-    """The dim ` · groomed Sat · review · strategy due` that ends a space's summary, or ''."""
+    """The dim ` · grooming missed Oct 24, see launchd.log · groomed Sat · review · strategy due`
+    that ends a space's summary, or ''."""
     parts = []
     for f in ritual_status(label):
-        if f[0] == "review" and len(f) >= 3:
+        if f[0] == "missed" and len(f) >= 2:
+            parts.append(f"grooming missed {short_date(f[1])}, see launchd.log")
+        elif f[0] == "review" and len(f) >= 3:
             parts.append(f"groomed {f[2]} · review")
         elif f[0] == "strategy":
             parts.append("strategy due")

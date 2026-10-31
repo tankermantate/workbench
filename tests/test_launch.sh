@@ -203,6 +203,12 @@ out="$("$REPO/bin/wb-ui" render-work "$T/start" 1)"
 assert_eq "render-work: a due plan adds the strategy row after review" "$(printf '%s\n' "$out" | sed -n 3p | cut -f1,2,5)" "strategy	-	✦ strategy session"
 "$REPO/bin/wb-ui" fill-counts "$T/start"; "$REPO/bin/wb-ui" render-spaces "$T/start" > "$T/screen1"
 assert_contains "screen 1: both, in order" "$(cat "$T/screen1")" $'\e[2m · groomed Sat · review · strategy due\e[0m'
+# a Saturday run that left no run dir (it failed early, or never started) shows on screen 1
+mkdir -p "$T/agents"; : > "$T/agents/workbench.groom.plist"
+WB_TODAY=2026-10-25 WB_LAUNCH_AGENTS_DIR="$T/agents" "$REPO/bin/wb-ui" fill-counts "$T/start"
+"$REPO/bin/wb-ui" render-spaces "$T/start" > "$T/screen1"
+assert_contains "screen 1: a missed run comes first and points at the log" "$(cat "$T/screen1")" \
+  $'\e[2m · grooming missed Oct 24, see launchd.log · groomed Sat · review · strategy due\e[0m'
 # a status that fails or hangs never fails the screen
 mkdir -p "$T/ui2/bin" "$T/ui2/lib"; cp "$REPO/bin/wb-ui" "$REPO/bin/wb-backlog" "$T/ui2/bin/"; cp "$REPO/lib/"*.py "$T/ui2/lib/"
 printf '#!/bin/sh\nsleep 30\n' > "$T/ui2/bin/wb-groom"; chmod +x "$T/ui2/bin/wb-groom"

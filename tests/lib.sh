@@ -3,6 +3,7 @@ PASS=0; FAIL=0
 REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 export PATH="$REPO/tests/fake:$PATH"
 export WB_BD_TIMEOUT=1
+export WB_LAUNCH_AGENTS_DIR=/nonexistent/wb-launch-agents   # never the real schedule; tests that want one set their own
 ok()  { PASS=$((PASS+1)); printf '  ok   %s\n' "$1"; }
 bad() { FAIL=$((FAIL+1)); printf '  FAIL %s\n' "$1"; [ -n "${2:-}" ] && printf '%s\n' "$2" | sed 's/^/       /'; return 0; }
 assert_eq()           { if [ "$2" == "$3" ]; then ok "$1"; else bad "$1" "expected: $3"$'\n'"got:      $2"; fi; }
