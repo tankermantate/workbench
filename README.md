@@ -78,6 +78,15 @@ A session the launcher (or `new-session`) starts knows which bead it's on:
 
   With no status line of your own, point `statusLine` in your Claude settings at
   `wb-statusline-bead` directly.
+- **It can show which space you're in, too.** `wb-statusline-space` reads the same JSON and prints
+  the space's name as the launcher shows it (`Acme`), `Acme ⑂ worktree` in one of its worktrees,
+  or `(folder)` where no space claims the folder. It goes by the folder Claude started in, so a
+  tool's `cd` doesn't move it, and it finds a worktree's space the way `end-session` does. Put it
+  first on the line when you work across several spaces:
+
+  ```bash
+  space=$(printf '%s' "$input" | wb-statusline-space)
+  ```
 - **Claude gets the goal back after compaction or resume:** the bead's title, description and
   acceptance criteria.
 - **`✦ something new` picks up its bead.** The first bead Claude claims in the session becomes the
