@@ -198,6 +198,13 @@ assert_eq "filter-work keeps the ritual rows with no query" "$("$REPO/bin/wb-ui"
 assert_not_contains "filter-work: a search shows only matches" "$("$REPO/bin/wb-ui" filter-work "$T/start" 1 'wave')" "✦ review"
 "$REPO/bin/wb-ui" fill-counts "$T/start"; "$REPO/bin/wb-ui" render-spaces "$T/start" > "$T/screen1"
 assert_contains "screen 1: groomed Sat · review, dim, after the counts" "$(cat "$T/screen1")" $'NOW 2 · NEXT 1 · claimed 1\e[2m · groomed Sat · review\e[0m'
+# a partial run (the judge did not show it read the whole backlog) says so on both screens
+printf 'the judge did not confirm it read the whole backlog\n' > "$T/groom/Acme/20261017-0600/partial"
+"$REPO/bin/wb-ui" fill-counts "$T/start"; "$REPO/bin/wb-ui" render-spaces "$T/start" > "$T/screen1"
+assert_contains "screen 1: a partial run says so" "$(cat "$T/screen1")" $'\e[2m · groomed Sat · partial · review\e[0m'
+assert_eq "render-work: ... and so does its review row" "$("$REPO/bin/wb-ui" render-work "$T/start" 1 | sed -n 2p | cut -f5)" \
+  "✦ review Saturday's grooming (partial: not the whole backlog)"
+rm "$T/groom/Acme/20261017-0600/partial"
 printf 'date: 2020-01-01\n' > "$T/plans/Acme/goals.md"
 out="$("$REPO/bin/wb-ui" render-work "$T/start" 1)"
 assert_eq "render-work: a due plan adds the strategy row after review" "$(printf '%s\n' "$out" | sed -n 3p | cut -f1,2,5)" "strategy	-	✦ strategy session"

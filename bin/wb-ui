@@ -6,7 +6,7 @@ spaces.tsv (wb-spaces output).
   wb-ui render-spaces TMP      screen 1 lines: index, label, summary
   wb-ui fill-counts TMP        every space's summary, read in parallel, into
                                TMP/counts/<index> (ending, dim, with what `wb-groom status`
-                               says: grooming missed, grooming failed Sat, groomed Sat · review,
+                               says: grooming missed, grooming failed Sat, groomed Sat [· partial] · review,
                                strategy due); with $FZF_PORT set,
                                tells fzf to reload as each one lands
   wb-ui render-work TMP INDEX [QUERY]
@@ -120,7 +120,7 @@ def groomed_note(label):
             why = "Claude login expired, log in again" if f[3:4] == ["login"] else ""
             parts.append(f"grooming failed {f[2]}: {why}" if why else f"grooming failed {f[2]}, see summary")
         elif f[0] == "review" and len(f) >= 3:
-            parts.append(f"groomed {f[2]} · review")
+            parts.append(f"groomed {f[2]}{' · partial' if 'partial' in f[3:] else ''} · review")
         elif f[0] == "strategy":
             parts.append("strategy due")
     return f"\033[2m · {' · '.join(parts)}\033[0m" if parts else ""
@@ -132,7 +132,8 @@ def ritual_rows(label):
     rows = []
     for f in ritual_status(label):
         if f[0] == "review" and len(f) >= 3:
-            rows.append(f"review\t-\t{f[1]}\t\t✦ review {DAYS.get(f[2], f[2])}'s grooming")
+            partial = " (partial: not the whole backlog)" if "partial" in f[3:] else ""
+            rows.append(f"review\t-\t{f[1]}\t\t✦ review {DAYS.get(f[2], f[2])}'s grooming{partial}")
         elif f[0] == "strategy":
             rows.append(f"strategy\t-\t{plan}\t\t✦ strategy session")
     return sorted(rows, key=lambda r: not r.startswith("review"))

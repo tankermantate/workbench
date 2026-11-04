@@ -77,6 +77,16 @@ Claude never writes to the bead store. Each run has two halves:
    settings and permission rules** (they could widen the allowlist). If the run can't be started
    that narrowly, it doesn't start (*my call*).
    It writes `decisions.json` (structured, below) and `summary.md` (for the human).
+   It reads the backlog from `<run dir>/judge/backlog.tsv`, which `wb-groom` writes from the same
+   `bd list` snapshot apply checks against: every live bead on one line (id, status, priority,
+   updated, labels, title), then `# end <marker> <N> beads`, with a fresh random marker per run.
+   `bd list --json` itself is too long to read in a big space (1.08 MB, 413 beads, in the largest
+   on 2026-11-04: the judge saw about a quarter of it); `bd show` gives the detail. The judge echoes
+   the marker and N as `decisions.backlog`; `wb-groom` keeps them in `inputs.json`, where the judge
+   can't write. A run is **partial** when they are missing or wrong, or when a sprint section it sets
+   leaves out an unclaimed bead now in that wave (named in none of now, next, leaving). A partial
+   run applies nothing unattended (every op becomes a proposal, reason `backlog not fully read`),
+   writes `partial` in the run dir (the reasons), and its summary leads with `partial grooming:`.
    As built (checked by hand with claude 2.1.309 on a throwaway store; comment in
    `lib/wb_groom.py`): `claude -p --setting-sources "" --strict-mcp-config --permission-mode
    dontAsk --tools Bash,Read,Write --no-session-persistence --output-format json --settings
@@ -143,7 +153,8 @@ Anything outside the space's bead store. Code and git.
 confirm it has no other effect), so applied changes stay local until the user syncs.
 
 Each run lives in `~/.local/state/workbench/groom/<space>/<run-id>/` (`-02`, `-03` … for a second run
-in the same minute): `inputs.json` (plan file hashes, plan state, the judge's argv), `judge.json` and
+in the same minute): `inputs.json` (plan file hashes, plan state, the backlog's marker and count, the
+judge's argv), `judge/backlog.tsv`, `partial` (a partial run's reasons), `judge.json` and
 `judge.err` (the judge's output), `decisions.json`, `summary.md`, `apply.log`, `proposals.json`, and
 `before.jsonl` — each touched bead's labels, priority, status and notes **before**
 the change, written and synced to disk before the first bd write. If `before.jsonl` can't be
@@ -213,6 +224,8 @@ Cost seen in the dry run: ~6 min / ~160k tokens for a 400-bead space, ~2 min for
   screen 1 says `grooming failed Sat, see summary` in place of `groomed Sat · review`, or
   `grooming failed Sat: Claude login expired, log in again` when `judge.json` reports an expired
   login (the fix is a fresh login on the space's Claude account). A later run supersedes it.
+- A partial run (above) is still to review, flagged: screen 1 says `groomed Sat · partial · review`
+  and its row `✦ review Saturday's grooming (partial: not the whole backlog)`.
 - The work screen gets a row at the top: `✦ review Saturday's grooming` (and `✦ strategy session`
   when due). Choosing it starts Claude in the space with `prompts/review.txt` and the run directory.
 - The user's yes in the review conversation is enough for Claude to apply any item, protected ones

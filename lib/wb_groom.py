@@ -136,6 +136,58 @@ def read_beads(root, bd="bd", timeout=30):
     return {b["id"]: b for b in data}
 
 
+BACKLOG = "backlog.tsv"  # in the judge's dir: `bd list --json` of a big store is too long to read
+
+
+def write_backlog(path, beads, end):
+    """Write PATH: every live (not closed) bead of BEADS on one line, priority then id, for the
+    judge to read whole (`bd show` gives the detail), and a last line `# end END N beads`, whose
+    marker the judge echoes to show it read to the end. Returns N. Raises OSError."""
+    def key(b):
+        p = b.get("priority")
+        return (p if isinstance(p, int) else 9, natural(b["id"]))
+    live = sorted((b for b in beads.values() if b.get("status") != "closed"), key=key)
+    rows = ["# id\tstatus\tpriority\tupdated\tlabels\ttitle"]
+    for b in live:
+        cells = [b["id"], b.get("status") or "-", f"P{b.get('priority')}", str(b.get("updated_at") or "-")[:10],
+                 ",".join(str(l) for l in b.get("labels") or []) or "-", b.get("title") or ""]
+        rows.append("\t".join(" ".join(str(c).split()) for c in cells))  # a tab or newline can't split a row
+    rows.append(f"# end {end} {len(live)} beads")
+    with open(path, "w", encoding="utf-8") as f:
+        f.write("\n".join(rows) + "\n")
+    return len(live)
+
+
+def natural(id):
+    """acme-9 before acme-10."""
+    return [int(t) if t.isdigit() else t for t in re.split(r"(\d+)", id)]
+
+
+def backlog_gaps(decisions, beads, expected):
+    """Why the judge's DECISIONS don't show it judged the whole backlog, as short lines (none
+    when they do). EXPECTED is {end, beads} from write_backlog: the judge must echo both in
+    decisions.backlog. And when it sets a sprint section, every unclaimed bead now in that wave
+    must be named in now, next or leaving: one it left out is one it most likely never saw."""
+    gaps = []
+    got = decisions.get("backlog")
+    if not isinstance(got, dict):
+        gaps.append("the judge did not confirm it read the whole backlog")
+    elif got.get("end") != expected["end"]:
+        gaps.append("the judge's end marker does not match backlog.tsv's: it did not read to the end")
+    elif got.get("beads") != expected["beads"]:
+        gaps.append(f"the judge counted {got.get('beads')} beads, not {expected['beads']}")
+    sprint = decisions.get("sprint")
+    if isinstance(sprint, dict):
+        named = {e.get("id") for k in ("now", "next", "leaving") if isinstance(sprint.get(k), list)
+                 for e in sprint[k] if isinstance(e, dict)}
+        set_waves = {WAVES[k] for k in ("now", "next") if k in sprint}
+        missed = sorted((id for id, b in beads.items() if b.get("status") not in (CLAIMED, "closed")
+                         and set(_wave_labels(b)) & set_waves and id not in named), key=natural)
+        if missed:
+            gaps.append(f"the sprint leaves out {', '.join(missed)} (in a wave now, named in none of now, next, leaving)")
+    return gaps
+
+
 def claims_line(beads, stamps, today):
     """The judge's CLAIMS: each claimed bead and the whole days since it was last touched,
     grooming's own writes aside (lib/wb_touched.py). The judge would otherwise read updated_at,
@@ -172,14 +224,15 @@ def _wave_labels(bead):
     return [l for l in (bead.get("labels") or []) if l in WAVES.values()]
 
 
-def plan_ops(decisions, beads, plan, today):
+def plan_ops(decisions, beads, plan, today, partial=False):
     """(ops, proposals, dropped) from the judge's DECISIONS and the live BEADS (by id).
 
     Proposals are numbered by position (1-based) in review: sprint-derived first, then
-    changes in decisions order, then attention. A missing or stale plan turns every op
-    into a proposal."""
+    changes in decisions order, then attention. A missing or stale plan, or a PARTIAL run (the
+    judge did not show it read the whole backlog: backlog_gaps), turns every op into a proposal."""
     state = plan_state(plan, today)
-    blocked = state in ("missing", "stale")
+    blocked = (f"plan {state}" if state in ("missing", "stale")
+               else "backlog not fully read" if partial else None)
     ops, proposals, dropped = [], [], []
 
     def propose(id, kind, to, why, reason):
@@ -187,7 +240,7 @@ def plan_ops(decisions, beads, plan, today):
 
     def apply(op):
         if blocked:
-            propose(op.id, op.kind, op.value, op.why, f"plan {state}")
+            propose(op.id, op.kind, op.value, op.why, blocked)
         else:
             ops.append(op)
 
@@ -302,7 +355,7 @@ def plan_ops(decisions, beads, plan, today):
         if b is None:
             continue
         if kind != "icebox":
-            propose(id, kind, to, why, "plan " + state if blocked else "always proposed")
+            propose(id, kind, to, why, blocked or "always proposed")
         elif ICEBOX in (b.get("labels") or []):
             continue
         elif is_protected(b, flag, plan):

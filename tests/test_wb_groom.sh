@@ -673,10 +673,68 @@ assert_eq "claim age: once unflagged, wb-backlog still shows its idle days" "$(i
 : > "$T/claude.log"; FAKE_CLAUDE_GROOM="$T/judge-claim" groom acme >/dev/null 2>&1
 assert_contains "claim age: and so does the next week's judge" "$(jl "a[-1]")" "CLAIMS: acme-3 30d"
 
+# the backlog: wb-groom writes every live bead, one line each, into the judge's dir, so a store
+# whose `bd list --json` is too big to read is still judged whole; a run that can't show it
+# read all of it is partial, and partial applies nothing unattended
+assert_eq "backlog: one line per live bead, header and end marker; tabs and newlines in a title are spaces" \
+  "$(py "import io, sys
+beads = {'a-2': {'id': 'a-2', 'title': 'Two\there\nnow', 'status': 'open', 'priority': 2, 'labels': ['wave:1', 'x'], 'updated_at': '2026-10-20T08:00:00Z'},
+         'a-1': {'id': 'a-1', 'title': 'One', 'status': 'blocked', 'priority': 1, 'labels': [], 'updated_at': '2026-10-01T00:00:00Z'},
+         'a-3': {'id': 'a-3', 'title': 'Gone', 'status': 'closed', 'priority': 0, 'labels': []},
+         'a-4': {'id': 'a-4', 'title': 'Older P2', 'status': 'deferred', 'priority': 2, 'updated_at': '2026-09-01T00:00:00Z'}}
+print(g.write_backlog('$T/backlog.tsv', beads, 'tok123')); sys.stdout.write(open('$T/backlog.tsv').read())")" \
+  "3
+# id	status	priority	updated	labels	title
+a-1	blocked	P1	2026-10-01	-	One
+a-2	open	P2	2026-10-20	wave:1,x	Two here now
+a-4	deferred	P2	2026-09-01	-	Older P2
+# end tok123 3 beads"
+cov() { py "import json; d = json.loads('''$1'''); b = {k: {'id': k, 'status': s, 'labels': l} for k, s, l in (('a-1', 'open', ['wave:1']), ('a-2', 'open', ['wave:2']), ('a-3', 'in_progress', ['wave:1']), ('a-4', 'open', []))}
+print(g.backlog_gaps(d, b, {'end': 'tok', 'beads': 4}))"; }
+assert_eq "coverage: the marker and count echoed, no sprint: no gaps" "$(cov '{"backlog":{"end":"tok","beads":4}}')" "[]"
+assert_contains "coverage: no backlog field is a gap" "$(cov '{}')" "did not confirm it read the whole backlog"
+assert_contains "coverage: a wrong marker is a gap" "$(cov '{"backlog":{"end":"nope","beads":4}}')" "end marker does not match"
+assert_contains "coverage: a wrong count is a gap" "$(cov '{"backlog":{"end":"tok","beads":3}}')" "3 beads, not 4"
+assert_eq "coverage: every unclaimed wave bead named in now, next or leaving: no gaps" \
+  "$(cov '{"backlog":{"end":"tok","beads":4},"sprint":{"now":[{"id":"a-1"}],"leaving":[{"id":"a-2"}]}}')" "[]"
+assert_contains "coverage: a wave bead the sprint leaves out is a gap (claimed ones are not)" \
+  "$(cov '{"backlog":{"end":"tok","beads":4},"sprint":{"now":[{"id":"a-1"}],"next":[]}}')" "sprint leaves out a-2 "
+assert_eq "coverage: a wave whose section the judge left out is not checked (apply leaves it alone)" \
+  "$(cov '{"backlog":{"end":"tok","beads":4},"sprint":{"now":[{"id":"a-1"}]}}')" "[]"
+assert_not_contains "... a claimed bead is not named" "$(cov '{"backlog":{"end":"tok","beads":4},"sprint":{"now":[{"id":"a-1"}]}}')" "a-3"
+
+reset_stores; rm -rf "$G"; : > "$T/bd.log"; : > "$T/claude.log"
+groom acme >/dev/null 2>&1; rc=$?; R="$(newest acme)"
+assert_eq "backlog: the run writes it in the judge's dir, every live bead and the end line" \
+  "$rc $(grep -vc '^#' "$R/judge/backlog.tsv") $(tail -1 "$R/judge/backlog.tsv" | cut -d' ' -f1,2,4,5)" "0 13 # end 13 beads"
+assert_eq "backlog: inputs.json keeps its marker and count (the judge can't write there)" \
+  "$(python3 -c "import json; b = json.load(open('$R/inputs.json'))['backlog']; print(b['beads'], b['end'] == open('$R/judge/backlog.tsv').read().split()[-3])")" "13 True"
+assert_contains "backlog: the prompt names the file" "$(jl "a[-1]")" "$R/judge/backlog.tsv"
+assert_eq "backlog: a run that read it all is not partial, and applies" "$(ls "$R/partial" 2>/dev/null)$(writes)" "2"
+assert_eq "backlog: two runs get different markers" \
+  "$(groom acme >/dev/null 2>&1; tail -1 "$(newest acme)/judge/backlog.tsv" | cut -d' ' -f3 | grep -c "$(tail -1 "$R/judge/backlog.tsv" | cut -d' ' -f3)")" "0"
+for how in skip wrong; do
+  reset_stores; rm -rf "$G"; : > "$T/bd.log"
+  FAKE_CLAUDE_BACKLOG=$how groom acme >/dev/null 2>"$T/err"; rc=$?; R="$(newest acme)"
+  assert_eq "partial ($how): exit 0, nothing written" "$rc $(writes)" "0 0"
+  assert_eq "partial ($how): the summary leads with it" "$(head -1 "$R/summary.md" | cut -c1-17)" "partial grooming:"
+  assert_contains "partial ($how): ... and says nothing was applied unattended" "$(head -1 "$R/summary.md")" "nothing was applied unattended; every change waits for review"
+  assert_eq "partial ($how): the ops wait as proposals, saying why" \
+    "$(python3 -c "import json; print(sorted({p['reason'] for p in json.load(open('$R/proposals.json'))}))")" "['backlog not fully read']"
+  assert_eq "partial ($how): the run dir records it" "$(test -s "$R/partial" && echo yes)" "yes"
+  assert_eq "partial ($how): status says so on the review line" "$("$WG" status acme | grep '^review' | cut -f1,4)" "review	partial"
+done
+reset_stores; rm -rf "$G"; : > "$T/bd.log"; mkdir -p "$T/judge-sprint"; printf '# g\n' > "$T/judge-sprint/summary.md"
+printf '%s' '{"sprint":{"now":[{"id":"acme-1","why":"g1","protected":false}],"leaving":[{"id":"acme-4","why":"no goal","protected":false}]}}' > "$T/judge-sprint/decisions.json"
+FAKE_CLAUDE_GROOM="$T/judge-sprint" groom acme >/dev/null 2>&1; R="$(newest acme)"
+assert_eq "partial (sprint): wave beads it left out make the run partial; nothing written" "$(writes) $(test -s "$R/partial" && echo yes)" "0 yes"
+assert_contains "partial (sprint): the summary names them" "$(head -1 "$R/summary.md")" "sprint leaves out acme-5, acme-8 "
+rm -rf "$G"
+
 # the prompt teaches the decisions.json shape and the plan inputs
 GP="$(cat "$REPO/prompts/groom.txt" 2>/dev/null)"
 for w in '"leaving"' '"attention"' '"protected"' goals.md protected.md calendar.md sources.md \
-         '{bd} list -n 0 --json' '{bd} show <id> --json' 'when unsure' 'within 14 days'; do
+         '{backlog}' '"backlog": {"end"' '{bd} show <id> --json' 'when unsure' 'within 14 days'; do
   assert_contains "prompt: mentions $w" "$GP" "$w"
 done
 assert_not_contains "prompt: no unqualified bd call" "$GP" '`bd list'
@@ -812,6 +870,10 @@ assert_eq "failed: a run still going (no summary yet) is not failed" "$(st acme)
 rm -rf "$SG/acme/20261105-0900"; : > "$SG/acme/20261104-0817/reviewed"
 mkdir -p "$SG/acme/20261107-0600"; : > "$SG/acme/20261107-0600/summary.md"; : > "$SG/acme/20261107-0600/reviewed"
 assert_eq "failed: one marked reviewed shows nothing" "$(st acme)" ""
+mkdir -p "$SG/acme/20261114-0600" "$SG/acme/20261121-0600"; : > "$SG/acme/20261121-0600/partial"
+assert_eq "partial: on the review line, after the waiting count" "$(st acme)" "review	$SG/acme/20261121-0600	Sat	1 waiting	partial"
+: > "$SG/acme/20261121-0600/reviewed"
+assert_eq "partial: only the run to review's own" "$(st acme)" "review	$SG/acme/20261114-0600	Sat"
 rm -rf "$SG/acme"; mkdir -p "$SG/acme/20261017-0600"  # as the tests above left it
 
 # missed: the Saturday run left no run dir (it failed before making one, or never started)
