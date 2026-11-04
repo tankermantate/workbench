@@ -9,6 +9,7 @@
   wb-spaces --leak-terms   private words check-leaks.sh greps for
   wb-spaces --judge-env    JSON {label: {NAME: value}}: each space's judge_env, the variables
                            its grooming judge gets beyond wb-groom's allowlist ({} when unset)
+  wb-spaces --colors       JSON {label: color} for the spaces that set one (status lines, tab titles)
 
 Exit 3: no config file. Exit 4: the config is invalid. Both explain on stderr.
 """
@@ -33,6 +34,8 @@ def expand(p):
 
 DEFAULT_SESSION_CMD = os.path.join(os.path.dirname(os.path.realpath(__file__)), "new-session")
 HOOKS = ("gh_account", "on_create", "before_end")
+# a fixed set: each has a circle emoji, which is all a terminal tab title can show
+COLORS = ("red", "orange", "yellow", "green", "blue", "purple", "brown")
 # judge_env can't move the judge onto another claude (PATH picks the binary) or another account
 # (claude_config is the one way to name it).
 JUDGE_ENV_RESERVED = {"PATH": "judge_env can't set PATH", "CLAUDE_CONFIG_DIR": "judge_env can't set CLAUDE_CONFIG_DIR; use claude_config"}
@@ -52,6 +55,13 @@ def judge_env(name, v):
         if "\n" in val or "\0" in val:
             raise ValueError(f"space '{name}': judge_env.{k} must be one line")
     return dict(v)
+
+
+def color(name, v):
+    c = v.lower() if isinstance(v, str) else None
+    if c not in COLORS:
+        raise ValueError(f"space '{name}': color must be one of {', '.join(COLORS)}")
+    return c
 
 
 def field(v):
@@ -93,6 +103,7 @@ def spaces(cfg):
             "safe": "1" if s.get("safe") else "0",
             **hooks,
             "judge_env": judge_env(name, s.get("judge_env", {})),
+            "color": color(name, s["color"]) if "color" in s else "",
         }
         if "root" in s:
             root = expand(s["root"])
@@ -139,6 +150,9 @@ def main(argv):
         terms |= {os.path.basename(expand(s["root"]) if "root" in s else os.path.dirname(expand(s["glob"])))
                   for s in cfg["space"]}
         print("\n".join(sorted(t for t in terms if t and t.casefold() not in allow)))
+        return 0
+    if argv[1:] == ["--colors"]:
+        print(json.dumps({r["label"]: r["color"] for r in rows if r["color"]}))
         return 0
     if argv[1:] == ["--judge-env"]:
         print(json.dumps({r["label"]: r["judge_env"] for r in rows}))

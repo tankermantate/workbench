@@ -87,6 +87,16 @@ A session the launcher (or `new-session`) starts knows which bead it's on:
   ```bash
   space=$(printf '%s' "$input" | wb-statusline-space)
   ```
+
+  Give a space a `color` and it's easy to spot in a row of terminal tabs. `--json` hands back
+  the parts (`label`, `space`, `worktree`, `color`, `emoji`), so your script can title the tab
+  with the colour's circle first:
+
+  ```bash
+  sp=$(printf '%s' "$input" | wb-statusline-space --json)
+  tab="$(jq -r '"\(.emoji) \(.label)" | ltrimstr(" ")' <<< "$sp") · $task"   # 🟣 Acme · x1y fix
+  printf '\033]1;%s\007' "$tab" > /dev/tty
+  ```
 - **Claude gets the goal back after compaction or resume:** the bead's title, description and
   acceptance criteria.
 - **`✦ something new` picks up its bead.** The first bead Claude claims in the session becomes the
@@ -148,6 +158,7 @@ never in this repo. `spaces.example.toml` documents every key. In short:
 | `claude_config` | A non-default Claude profile (`CLAUDE_CONFIG_DIR`) for this space. |
 | `protocol` | A file every session in this space reads first. |
 | `safe` | Keep Claude's permission prompts on. |
+| `color` | `red`, `orange`, `yellow`, `green`, `blue`, `purple` or `brown`: the space's colour in tab titles and the status line (see `wb-statusline-space`). |
 | `judge_env` | Variables the grooming judge needs beyond its allowlist (a proxy, Bedrock), with their values. |
 | `gh_account` | The `gh` account to switch to before fetching. |
 | `on_create`, `before_end` | Hooks: one-line shell commands, run in the worktree with `WB_SPACE`, `WB_WORKTREE`, `WB_PROJECT`, `WB_SOURCE`, `WB_BRANCH`, `WB_BEAD` set, and `WB_SHA` for `before_end`. Keep private setup scripts in `~/.config/workbench/hooks/`. |

@@ -17,6 +17,7 @@ space_key     = "acme"              # new-session/end-session call this space by
 claude_config = "~/.claude-acme"    # optional: a non-default Claude profile
 protocol      = "docs/PROTOCOL.md"  # optional: read first in every session
 # safe        = true                # keep Claude's permission prompts on
+# color       = "purple"            # red orange yellow green blue purple brown: tab titles, status line
 # The grooming judge gets only a short env allowlist; add what this account needs, with values
 # (not PATH or CLAUDE_CONFIG_DIR):
 # judge_env   = { HTTPS_PROXY = "http://proxy.acme.example:3128", CLAUDE_CODE_USE_BEDROCK = "1", AWS_PROFILE = "acme", AWS_REGION = "us-east-1" }

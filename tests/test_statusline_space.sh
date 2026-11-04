@@ -18,6 +18,7 @@ name      = "Acme"
 root      = "$T/acme"
 worktrees = true
 space_key = "acme"
+color     = "purple"
 
 [[space]]
 name      = "Web"
@@ -56,4 +57,14 @@ out="$(WORKBENCH_CONFIG="$T/none.toml" sp "$T/acme" 2>&1)"; rc=$?
 assert_eq "no config: the folder, quietly" "$out:$rc" "(acme):0"
 out="$(printf 'not json' | "$SP" 2>&1)"; rc=$?
 assert_eq "bad stdin prints nothing, exits 0" "$out:$rc" ":0"
+
+spj() { printf '{"workspace":{"project_dir":"%s"}}' "$1" | "$SP" --json | python3 -c \
+  'import json, sys; d = json.load(sys.stdin); print("|".join(str(d[k]) for k in ("label", "space", "worktree", "color", "emoji")))'; }
+assert_eq "--json: a space with a colour" "$(spj "$T/acme")" "Acme|True|False|purple|🟣"
+assert_eq "--json: its worktree" "$(spj "$T/wts/acme-x1y")" "Acme|True|True|purple|🟣"
+assert_eq "--json: a space without a colour" "$(spj "$T/side/alpha")" "alpha|True|False||"
+assert_eq "--json: no space" "$(spj "$T/elsewhere")" "elsewhere|False|False||"
+assert_eq "plain output doesn't change with a colour" "$(sp "$T/acme")" "Acme"
+out="$(printf 'not json' | "$SP" --json 2>&1)"; rc=$?
+assert_eq "--json, bad stdin: nothing, exits 0" "$out:$rc" ":0"
 finish

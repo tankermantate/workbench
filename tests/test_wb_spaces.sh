@@ -148,4 +148,30 @@ je_bad "with a bad name" '{ "my-var" = "x" }' "judge_env: 'my-var' is not a vari
 je_bad "with a newline" '{ HTTPS_PROXY = "a\nb" }' "judge_env.HTTPS_PROXY must be one line"
 je_bad "setting PATH" '{ PATH = "/tmp" }' "judge_env can't set PATH"
 je_bad "setting CLAUDE_CONFIG_DIR" '{ CLAUDE_CONFIG_DIR = "/tmp" }' "use claude_config"
+cat > "$T/col.toml" <<EOF
+[[space]]
+name  = "A"
+root  = "$T/acme"
+color = "purple"
+[[space]]
+name  = "S"
+glob  = "$T/side/*"
+color = "Green"
+[[space]]
+name = "B"
+root = "$T/acme"
+EOF
+out="$(WORKBENCH_CONFIG="$T/col.toml" "$WS" --colors 2>&1)"; rc=$?
+assert_eq "--colors exits 0" "$rc" "0"
+assert_eq "--colors: JSON by label, lower-cased; a glob space's folders share it; none is absent" \
+  "$(printf '%s' "$out" | python3 -c 'import json, sys; d = json.load(sys.stdin); print(d["A"], d["alpha"], d["my proj"], "B" in d)')" \
+  "purple green green False"
+assert_eq "color leaves the 13 TSV fields alone" "$(WORKBENCH_CONFIG="$T/col.toml" "$WS" | awk -F'\t' '{print NF}' | sort -u)" "13"
+printf '[[space]]\nname = "A"\nroot = "%s"\ncolor = "teal"\n' "$T/acme" > "$T/colbad.toml"
+out="$(WORKBENCH_CONFIG="$T/colbad.toml" "$WS" 2>&1)"; rc=$?
+assert_eq "an unknown color is invalid" "$rc" "4"
+assert_contains "an unknown color: names the choices" "$out" "color must be one of red, orange, yellow, green, blue, purple, brown"
+printf '[[space]]\nname = "A"\nroot = "%s"\ncolor = 3\n' "$T/acme" > "$T/colbad.toml"
+out="$(WORKBENCH_CONFIG="$T/colbad.toml" "$WS" 2>&1)"; rc=$?
+assert_eq "a non-string color is invalid" "$rc" "4"
 finish

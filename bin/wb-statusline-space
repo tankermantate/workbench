@@ -5,12 +5,18 @@
       Acme · Acme ⑂ worktree · (folder) when no space claims it · or nothing on bad input.
       Call it from your own status line script, early on the line: it's what tells
       one terminal from another when you work across several spaces.
+
+  <status line JSON on stdin> | wb-statusline-space --json
+      {"label", "space", "worktree", "color", "emoji"}: the same, in parts, with the space's
+      color from spaces.toml and its circle emoji ("" for both when unset), for tab titles.
 """
 import json
 import os
 import subprocess
 import sys
 
+EMOJI = {"red": "🔴", "orange": "🟠", "yellow": "🟡", "green": "🟢", "blue": "🔵",
+         "purple": "🟣", "brown": "🟤"}
 WB_SPACES = os.path.join(os.path.dirname(os.path.realpath(__file__)), "wb-spaces")
 
 
@@ -24,6 +30,14 @@ def git_dirs(path):
     except (OSError, subprocess.SubprocessError):
         return None
     return (out[0], out[1]) if len(out) > 1 and out[0] and out[1] else None
+
+
+def colors():
+    try:
+        out = subprocess.run([WB_SPACES, "--colors"], capture_output=True, text=True, timeout=3)
+        return json.loads(out.stdout) if out.returncode == 0 else {}
+    except (OSError, subprocess.SubprocessError, ValueError):
+        return {}
 
 
 def roots():
@@ -65,12 +79,13 @@ def owner(path, spaces):
     return best[1] if best else None
 
 
-def segment(stdin_json, env):
+def locate(stdin_json):
+    """(label, is a space, is a worktree) for the session's folder, or None."""
     ws = stdin_json.get("workspace") or {}
     # project_dir is where claude was launched; current_dir drifts when a tool cd's.
     folder = ws.get("project_dir") or ws.get("current_dir") or stdin_json.get("cwd")
     if not folder:
-        return ""
+        return None
     folder = os.path.realpath(folder)
     dirs = git_dirs(folder)
     worktree = bool(dirs) and dirs[0] != dirs[1]
@@ -81,20 +96,39 @@ def segment(stdin_json, env):
         main = os.path.realpath(os.path.dirname(dirs[1]))
         top = toplevel(folder)
         label = worktree_owner(top or folder, main, spaces) or owner(main, spaces)
-    if not label:
-        return f"({os.path.basename(folder)})"
+    return (label, True, worktree) if label else (os.path.basename(folder), False, worktree)
+
+
+def segment(stdin_json):
+    found = locate(stdin_json)
+    if not found:
+        return ""
+    label, space, worktree = found
+    if not space:
+        return f"({label})"
     return f"{label} ⑂ worktree" if worktree else label
 
 
-def main():
+def parts(stdin_json):
+    found = locate(stdin_json)
+    if not found:
+        return ""
+    label, space, worktree = found
+    color = colors().get(label, "") if space else ""
+    return json.dumps({"label": label, "space": space, "worktree": worktree,
+                       "color": color, "emoji": EMOJI.get(color, "")}, ensure_ascii=False)
+
+
+def main(argv):
     try:
-        seg = segment(json.loads(sys.stdin.read()), os.environ)
+        stdin_json = json.loads(sys.stdin.read())
+        out = parts(stdin_json) if argv[1:] == ["--json"] else segment(stdin_json)
     except Exception:
         return 0  # a status line must never show a traceback
-    if seg:
-        print(seg)
+    if out:
+        print(out)
     return 0
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    sys.exit(main(sys.argv))
