@@ -110,7 +110,12 @@ Claude never writes to the bead store. Each run has two halves:
    `rsync`, `nc`, `ncat`, `telnet`, `ftp`, `dig`, `nslookup`, `host`, `ping`, `whois`,
    `traceroute`, `env` and `printenv`. The judge's environment is an allowlist (PATH, HOME, USER,
    LOGNAME, SHELL, LANG, LC_*, TMPDIR, the Anthropic auth variables, the space's
-   CLAUDE_CONFIG_DIR): no caller token reaches it.
+   CLAUDE_CONFIG_DIR): no caller token reaches it. A space whose account needs more (a proxy,
+   Bedrock) sets them, with values, in its `judge_env` in `spaces.toml`; they go over the caller's,
+   never to `bd-readonly`, and `inputs.json` records their names only. Values, not names to pass
+   through: the launchd run has no shell environment, and the profile's `settings.json` `env` is
+   dropped with every settings source. `wb-spaces` refuses `PATH` (it picks the claude that runs)
+   and `CLAUDE_CONFIG_DIR` (`claude_config` names the account).
 2. **Apply** — `wb-groom apply` (python, in this repo) validates `decisions.json` and applies only
    what policy allows, through bd. **A bead is protected if any of these hold**: it carries a
    protected label from `protected.md` (checked by `apply` itself); the judge says it is protected;

@@ -139,6 +139,7 @@ never in this repo. `spaces.example.toml` documents every key. In short:
 | `claude_config` | A non-default Claude profile (`CLAUDE_CONFIG_DIR`) for this space. |
 | `protocol` | A file every session in this space reads first. |
 | `safe` | Keep Claude's permission prompts on. |
+| `judge_env` | Variables the grooming judge needs beyond its allowlist (a proxy, Bedrock), with their values. |
 | `gh_account` | The `gh` account to switch to before fetching. |
 | `on_create`, `before_end` | Hooks: one-line shell commands, run in the worktree with `WB_SPACE`, `WB_WORKTREE`, `WB_PROJECT`, `WB_SOURCE`, `WB_BRANCH`, `WB_BEAD` set, and `WB_SHA` for `before_end`. Keep private setup scripts in `~/.config/workbench/hooks/`. |
 

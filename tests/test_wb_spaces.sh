@@ -116,4 +116,36 @@ assert_contains "it says no tabs" "$out" "before_end must be one line without ta
 printf '[[space]]\nname = "S"\nglob = "%s/side/*"\nworktrees = true\nspace_key = "s"\n' "$T" > "$T/globkey.toml"
 out="$(WORKBENCH_CONFIG="$T/globkey.toml" "$WS" 2>&1)"; rc=$?
 assert_eq "glob worktree space with space_key is invalid" "$rc" "4"
+# judge_env: extra variables for the grooming judge's environment, per space (a proxy, Bedrock)
+cat > "$T/je.toml" <<EOF
+[[space]]
+name = "A"
+root = "$T/acme"
+judge_env = { HTTPS_PROXY = "http://proxy.acme.test:3128", CLAUDE_CODE_USE_BEDROCK = "1" }
+[[space]]
+name = "S"
+glob = "$T/side/*"
+judge_env = { AWS_REGION = "us-east-1" }
+[[space]]
+name = "B"
+root = "$T/acme"
+EOF
+out="$(WORKBENCH_CONFIG="$T/je.toml" "$WS" --judge-env 2>&1)"; rc=$?
+assert_eq "--judge-env exits 0" "$rc" "0"
+assert_eq "--judge-env: JSON by label; a glob space's folders share it; none is {}" \
+  "$(printf '%s' "$out" | python3 -c 'import json, sys; d = json.load(sys.stdin); print(d["A"]["HTTPS_PROXY"], d["A"]["CLAUDE_CODE_USE_BEDROCK"], d["alpha"], d["my proj"], d["B"])')" \
+  "http://proxy.acme.test:3128 1 {'AWS_REGION': 'us-east-1'} {'AWS_REGION': 'us-east-1'} {}"
+assert_eq "judge_env leaves the 13 TSV fields alone" "$(WORKBENCH_CONFIG="$T/je.toml" "$WS" | awk -F'\t' '{print NF}' | sort -u)" "13"
+je_bad() {  # je_bad NAME TOML-VALUE MESSAGE
+  printf '[[space]]\nname = "A"\nroot = "%s"\njudge_env = %s\n' "$T/acme" "$2" > "$T/jebad.toml"
+  out="$(WORKBENCH_CONFIG="$T/jebad.toml" "$WS" --judge-env 2>&1)"; rc=$?
+  assert_eq "judge_env $1 is invalid" "$rc" "4"
+  assert_contains "judge_env $1: says why" "$out" "$3"
+}
+je_bad "as a string" '"HTTPS_PROXY=x"' "judge_env must be a table"
+je_bad "with a number value" '{ AWS_MAX_ATTEMPTS = 3 }' "judge_env.AWS_MAX_ATTEMPTS must be a string"
+je_bad "with a bad name" '{ "my-var" = "x" }' "judge_env: 'my-var' is not a variable name"
+je_bad "with a newline" '{ HTTPS_PROXY = "a\nb" }' "judge_env.HTTPS_PROXY must be one line"
+je_bad "setting PATH" '{ PATH = "/tmp" }' "judge_env can't set PATH"
+je_bad "setting CLAUDE_CONFIG_DIR" '{ CLAUDE_CONFIG_DIR = "/tmp" }' "use claude_config"
 finish

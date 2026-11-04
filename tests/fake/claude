@@ -8,9 +8,10 @@
 # backlog.tsv writes (its end marker and bead count, from the file's last line), unless it has one
 # already; FAKE_CLAUDE_BACKLOG=skip leaves it out, =wrong writes a wrong marker.
 # FAKE_CLAUDE_LOG: one JSON line per call: argv, cwd, CLAUDE_CONFIG_DIR (null when unset) and
-# the names of the environment's variables.
+# the names of the environment's variables; with FAKE_CLAUDE_LOG_VALUES=A,B also "values", those
+# variables' values (null when unset).
 if [ -n "${FAKE_CLAUDE_LOG:-}" ]; then
-  python3 -c 'import json, os, sys; print(json.dumps({"argv": sys.argv[1:], "cwd": os.getcwd(), "config": os.environ.get("CLAUDE_CONFIG_DIR"), "env": sorted(os.environ)}))' "$@" >> "$FAKE_CLAUDE_LOG"
+  python3 -c 'import json, os, sys; e = os.environ; v = [n for n in e.get("FAKE_CLAUDE_LOG_VALUES", "").split(",") if n]; print(json.dumps({"argv": sys.argv[1:], "cwd": os.getcwd(), "config": e.get("CLAUDE_CONFIG_DIR"), "env": sorted(e), "values": {n: e.get(n) for n in v}}))' "$@" >> "$FAKE_CLAUDE_LOG"
 fi
 if [ -z "${FAKE_CLAUDE_GROOM:-}" ]; then
   echo "FAKE-CLAUDE $*"

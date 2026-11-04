@@ -478,6 +478,7 @@ protocol = "docs/PROTOCOL.md"
 [[space]]
 name = "beta"
 root = "$T/rb"
+judge_env = { HTTPS_PROXY = "http://proxy.acme.test:3128", AWS_PROFILE = "sentinel-acme-profile" }
 [[space]]
 name = "gamma"
 root = "$T/rc"
@@ -545,6 +546,15 @@ assert_not_contains "summary: no earlier runs, no count" "$(cat "$R/summary.md")
 : > "$T/claude.log"
 CLAUDE_CONFIG_DIR="$T/elsewhere" groom beta >/dev/null 2>&1
 assert_eq "judge: no claude_config, CLAUDE_CONFIG_DIR unset" "$(jl "c['config']")" "None"
+# beta's judge_env: added to the judge's environment, over the caller's; the rest still stays out
+: > "$T/claude.log"
+HTTPS_PROXY=http://caller.test GITHUB_TOKEN=secret FAKE_CLAUDE_LOG_VALUES=HTTPS_PROXY,AWS_PROFILE,GITHUB_TOKEN groom beta >/dev/null 2>&1
+RB="$(newest beta)"
+assert_eq "judge_env: the space's variables reach the judge, its value over the caller's" \
+  "$(jl "c['values']")" "{'HTTPS_PROXY': 'http://proxy.acme.test:3128', 'AWS_PROFILE': 'sentinel-acme-profile', 'GITHUB_TOKEN': None}"
+assert_eq "judge_env: inputs.json names the variables" "$(python3 -c "import json; print(json.load(open('$RB/inputs.json'))['judge_env'])")" "['AWS_PROFILE', 'HTTPS_PROXY']"
+assert_eq "judge_env: no value is written to the run dir" "$(grep -rl 'sentinel-acme-profile\|proxy.acme.test' "$RB" | wc -l | tr -d ' ')" "0"
+assert_eq "judge_env: the bd script doesn't get them" "$(grep -c 'HTTPS_PROXY\|AWS_PROFILE' "$RB/bd-readonly")" "0"
 assert_not_contains "summary: no remote, no remote line" "$(cat "$(newest beta)/summary.md")" "shared remote"
 
 # a second run in the same minute gets its own dir, and counts the first as unreviewed

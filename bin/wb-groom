@@ -229,16 +229,24 @@ def cmd_undo(run_dir, only):
 # --- run: the judge, then apply ---
 
 def read_spaces():
-    """wb-spaces' rows as dicts (label, root, claude_config, protocol; None for '-'), or None."""
+    """wb-spaces' rows as dicts (label, root, claude_config, protocol; None for '-'; judge_env, a
+    dict), or None."""
     p = subprocess.run([os.path.join(HERE, "wb-spaces")], text=True, capture_output=True)
-    if p.returncode != 0:
-        print(p.stderr.strip(), file=sys.stderr)
+    e = subprocess.run([os.path.join(HERE, "wb-spaces"), "--judge-env"], text=True, capture_output=True)
+    if p.returncode != 0 or e.returncode != 0:
+        print((p.stderr or e.stderr).strip(), file=sys.stderr)
+        return None
+    try:
+        extra = json.loads(e.stdout)
+    except ValueError:
+        print("workbench: wb-spaces --judge-env printed no JSON", file=sys.stderr)
         return None
     rows = []
     for line in p.stdout.splitlines():
         f = [None if v == "-" else v for v in line.split("\t")]
         if len(f) == 13:
-            rows.append({"label": f[0], "root": f[2], "claude_config": f[7], "protocol": f[8]})
+            rows.append({"label": f[0], "root": f[2], "claude_config": f[7], "protocol": f[8],
+                         "judge_env": extra.get(f[0], {})})
     return rows
 
 
@@ -356,13 +364,18 @@ def fill_prompt(fields):
 # authenticates with, and the test fake's knobs. Nothing else from the caller (GITHUB_TOKEN, cloud
 # keys …) reaches a process that reads untrusted bead text. Only the space's account is used:
 # never a CLAUDE_CONFIG_DIR inherited from whoever started wb-groom, nor a Claude session's markers.
+# A space whose account needs more (a proxy, Bedrock's settings) names it, with its value, in its
+# judge_env in spaces.toml: values, not names to pass through, since the Saturday launchd run has
+# no shell environment to take them from, and the profile's settings.json env is not read either
+# (judge_argv drops every settings source).
 JUDGE_ENV = ("PATH", "HOME", "USER", "LOGNAME", "SHELL", "LANG", "TMPDIR",
              "ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN", "ANTHROPIC_BASE_URL", "CLAUDE_CODE_OAUTH_TOKEN")
 
 
-def judge_env(claude_config):
+def judge_env(claude_config, extra=None):
     env = {k: v for k, v in os.environ.items()
            if k in JUDGE_ENV or k.startswith("LC_") or k.startswith("FAKE_CLAUDE_")}
+    env.update(extra or {})  # wb-spaces refuses PATH and CLAUDE_CONFIG_DIR here
     if claude_config:
         env["CLAUDE_CONFIG_DIR"] = claude_config
     return env
@@ -494,7 +507,9 @@ def groom_in(space, base, run_dir):
             "space": label, "root": root, "plan_dir": plan_dir, "plan_state": state,
             "goals_date": plan.goals_date.isoformat() if plan and plan.goals_date else None,
             "plan_files": {f: sha256(os.path.join(plan_dir, f)) if plan_dir else None for f in PLAN_FILES},
-            "claude_config": space["claude_config"], "started_at": datetime.datetime.now().isoformat(timespec="seconds"),
+            "claude_config": space["claude_config"],
+            "judge_env": sorted(space["judge_env"]),  # names only: a value may be a credential
+            "started_at": datetime.datetime.now().isoformat(timespec="seconds"),
             "backlog": backlog, "judge_argv": argv})
     except OSError as e:
         return stop(EXIT_RUN_DIR, "the run could not be set up; nothing applied", f"{e}")
@@ -503,7 +518,7 @@ def groom_in(space, base, run_dir):
     except ValueError:
         return stop(2, "WB_GROOM_TIMEOUT is not a number of seconds; the judge did not run")
     try:
-        rc, timed_out = wb_groom.run_judge(argv, root, judge_env(space["claude_config"]), timeout,
+        rc, timed_out = wb_groom.run_judge(argv, root, judge_env(space["claude_config"], space["judge_env"]), timeout,
                                            os.path.join(run_dir, "judge.json"), os.path.join(run_dir, "judge.err"))
     except OSError as e:
         return stop(EXIT_JUDGE, f"the judge could not start ({e}); nothing applied")

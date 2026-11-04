@@ -7,11 +7,15 @@
                            on_create, before_end   ('-' = unset)
   wb-spaces --terminals    [launcher].terminals, one per line
   wb-spaces --leak-terms   private words check-leaks.sh greps for
+  wb-spaces --judge-env    JSON {label: {NAME: value}}: each space's judge_env, the variables
+                           its grooming judge gets beyond wb-groom's allowlist ({} when unset)
 
 Exit 3: no config file. Exit 4: the config is invalid. Both explain on stderr.
 """
 import glob
+import json
 import os
+import re
 import sys
 
 if sys.version_info < (3, 11):
@@ -29,6 +33,25 @@ def expand(p):
 
 DEFAULT_SESSION_CMD = os.path.join(os.path.dirname(os.path.realpath(__file__)), "new-session")
 HOOKS = ("gh_account", "on_create", "before_end")
+# judge_env can't move the judge onto another claude (PATH picks the binary) or another account
+# (claude_config is the one way to name it).
+JUDGE_ENV_RESERVED = {"PATH": "judge_env can't set PATH", "CLAUDE_CONFIG_DIR": "judge_env can't set CLAUDE_CONFIG_DIR; use claude_config"}
+
+
+def judge_env(name, v):
+    """A space's judge_env table, checked: names are variable names, values one-line strings."""
+    if not isinstance(v, dict):
+        raise ValueError(f"space '{name}': judge_env must be a table, like {{ HTTPS_PROXY = \"...\" }}")
+    for k, val in v.items():
+        if not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", k):
+            raise ValueError(f"space '{name}': judge_env: '{k}' is not a variable name")
+        if k in JUDGE_ENV_RESERVED:
+            raise ValueError(f"space '{name}': {JUDGE_ENV_RESERVED[k]}")
+        if not isinstance(val, str):
+            raise ValueError(f"space '{name}': judge_env.{k} must be a string")
+        if "\n" in val or "\0" in val:
+            raise ValueError(f"space '{name}': judge_env.{k} must be one line")
+    return dict(v)
 
 
 def field(v):
@@ -69,6 +92,7 @@ def spaces(cfg):
             "protocol": s.get("protocol", ""),
             "safe": "1" if s.get("safe") else "0",
             **hooks,
+            "judge_env": judge_env(name, s.get("judge_env", {})),
         }
         if "root" in s:
             root = expand(s["root"])
@@ -115,6 +139,9 @@ def main(argv):
         terms |= {os.path.basename(expand(s["root"]) if "root" in s else os.path.dirname(expand(s["glob"])))
                   for s in cfg["space"]}
         print("\n".join(sorted(t for t in terms if t and t.casefold() not in allow)))
+        return 0
+    if argv[1:] == ["--judge-env"]:
+        print(json.dumps({r["label"]: r["judge_env"] for r in rows}))
         return 0
     for r in rows:
         print("\t".join(field(r[k]) for k in ORDER))

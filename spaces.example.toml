@@ -17,6 +17,9 @@ space_key     = "acme"              # new-session/end-session call this space by
 claude_config = "~/.claude-acme"    # optional: a non-default Claude profile
 protocol      = "docs/PROTOCOL.md"  # optional: read first in every session
 # safe        = true                # keep Claude's permission prompts on
+# The grooming judge gets only a short env allowlist; add what this account needs, with values
+# (not PATH or CLAUDE_CONFIG_DIR):
+# judge_env   = { HTTPS_PROXY = "http://proxy.acme.example:3128", CLAUDE_CODE_USE_BEDROCK = "1", AWS_PROFILE = "acme", AWS_REGION = "us-east-1" }
 # Optional, worktree spaces only. Hooks are one line, run with sh -c, with
 # WB_SPACE WB_WORKTREE WB_PROJECT WB_SOURCE WB_BRANCH WB_BEAD set (WB_SHA too for before_end).
 # gh_account  = "acme-bot"                                  # gh account to switch to before fetching
