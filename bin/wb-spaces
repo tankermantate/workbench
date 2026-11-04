@@ -9,7 +9,8 @@
   wb-spaces --leak-terms   private words check-leaks.sh greps for
   wb-spaces --judge-env    JSON {label: {NAME: value}}: each space's judge_env, the variables
                            its grooming judge gets beyond wb-groom's allowlist ({} when unset)
-  wb-spaces --colors       JSON {label: color} for the spaces that set one (status lines, tab titles)
+  wb-spaces --colors       JSON {label: color} for the spaces that set one (status lines, tab titles);
+                           a glob space's folder_colors overrides its color folder by folder
 
 Exit 3: no config file. Exit 4: the config is invalid. Both explain on stderr.
 """
@@ -57,11 +58,26 @@ def judge_env(name, v):
     return dict(v)
 
 
-def color(name, v):
+def color(name, v, key="color"):
     c = v.lower() if isinstance(v, str) else None
     if c not in COLORS:
-        raise ValueError(f"space '{name}': color must be one of {', '.join(COLORS)}")
+        raise ValueError(f"space '{name}': {key} must be one of {', '.join(COLORS)}")
     return c
+
+
+def folder_colors(name, s):
+    """A glob space's folder_colors table, checked: {folder name: color}."""
+    v = s["folder_colors"]
+    if "glob" not in s:
+        raise ValueError(f"space '{name}': folder_colors is for glob spaces; a root space sets color")
+    if not isinstance(v, dict):
+        raise ValueError(f"space '{name}': folder_colors must be a table, like {{ alpha = \"red\" }}")
+    out = {}
+    for k, c in v.items():
+        if not k or "/" in k or k in (".", ".."):
+            raise ValueError(f"space '{name}': folder_colors: '{k}' is not a folder name")
+        out[k] = color(name, c, f"folder_colors.{k}")
+    return out
 
 
 def field(v):
@@ -105,6 +121,8 @@ def spaces(cfg):
             "judge_env": judge_env(name, s.get("judge_env", {})),
             "color": color(name, s["color"]) if "color" in s else "",
         }
+        # checked before the glob runs, so a bad table fails even when it lists no folders
+        per_folder = folder_colors(name, s) if "folder_colors" in s else {}
         if "root" in s:
             root = expand(s["root"])
             if not os.path.isdir(root):
@@ -112,10 +130,16 @@ def spaces(cfg):
                 continue
             yield {"label": name, "group": "", "root": root, **common}
         else:
-            for d in sorted(glob.glob(expand(s["glob"]))):
-                if os.path.isdir(d):
-                    yield {"label": os.path.basename(d), "group": name, "root": d,
-                           **common, "space_key": common["space_key"] or os.path.basename(d)}
+            folders = [d for d in sorted(glob.glob(expand(s["glob"]))) if os.path.isdir(d)]
+            for k in sorted(set(per_folder) - {os.path.basename(d) for d in folders}):
+                # cosmetic, like a missing root: a note, not a refusal
+                print(f"workbench: space '{name}': folder_colors names '{k}', which its glob doesn't list",
+                      file=sys.stderr)
+            for d in folders:
+                base = os.path.basename(d)
+                yield {"label": base, "group": name, "root": d,
+                       **common, "space_key": common["space_key"] or base,
+                       "color": per_folder.get(base, common["color"])}
 
 
 ORDER = ("label", "group", "root", "beads", "worktrees", "session_cmd",

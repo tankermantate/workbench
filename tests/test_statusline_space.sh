@@ -6,7 +6,7 @@ SP="$REPO/bin/wb-statusline-space"
 unset WB_SPACE_ROOT WB_WORKTREE
 
 setup_repo "$T/acme"
-mkdir -p "$T/side/alpha/sub" "$T/elsewhere" "$T/wts"
+mkdir -p "$T/side/alpha/sub" "$T/side/gamma" "$T/elsewhere" "$T/wts"
 git -C "$T/acme" worktree add -q -b feat/x "$T/wts/acme-x1y"
 # a monorepo: two worktree spaces rooted in subfolders, worktrees made from the repo's top
 setup_repo "$T/mono"; mkdir -p "$T/mono/apps/web" "$T/mono/apps/api"
@@ -35,6 +35,7 @@ space_key = "api"
 [[space]]
 name = "Side"
 glob = "$T/side/*"
+folder_colors = { gamma = "red" }
 EOF
 export WORKBENCH_CONFIG="$T/spaces.toml"
 
@@ -63,6 +64,7 @@ spj() { printf '{"workspace":{"project_dir":"%s"}}' "$1" | "$SP" --json | python
 assert_eq "--json: a space with a colour" "$(spj "$T/acme")" "Acme|True|False|purple|🟣"
 assert_eq "--json: its worktree" "$(spj "$T/wts/acme-x1y")" "Acme|True|True|purple|🟣"
 assert_eq "--json: a space without a colour" "$(spj "$T/side/alpha")" "alpha|True|False||"
+assert_eq "--json: a glob folder with its own colour" "$(spj "$T/side/gamma")" "gamma|True|False|red|🔴"
 assert_eq "--json: no space" "$(spj "$T/elsewhere")" "elsewhere|False|False||"
 assert_eq "plain output doesn't change with a colour" "$(sp "$T/acme")" "Acme"
 out="$(printf 'not json' | "$SP" --json 2>&1)"; rc=$?

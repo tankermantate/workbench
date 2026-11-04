@@ -34,3 +34,5 @@ name      = "Side projects"
 glob      = "~/dev/side/*"
 beads     = "if-present"
 worktrees = false
+# color         = "orange"                                # every folder's colour, unless named below
+# folder_colors = { gadget = "red", "web site" = "blue" } # by folder name: tell a few tabs apart

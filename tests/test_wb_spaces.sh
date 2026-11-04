@@ -174,4 +174,37 @@ assert_contains "an unknown color: names the choices" "$out" "color must be one 
 printf '[[space]]\nname = "A"\nroot = "%s"\ncolor = 3\n' "$T/acme" > "$T/colbad.toml"
 out="$(WORKBENCH_CONFIG="$T/colbad.toml" "$WS" 2>&1)"; rc=$?
 assert_eq "a non-string color is invalid" "$rc" "4"
+# folder_colors: a glob space colours some folders apart; the rest keep its color
+mkdir -p "$T/side/beta"
+cat > "$T/fc.toml" <<EOF
+[[space]]
+name  = "S"
+glob  = "$T/side/*"
+color = "green"
+folder_colors = { alpha = "Red", "my proj" = "blue", nowhere = "brown" }
+EOF
+out="$(WORKBENCH_CONFIG="$T/fc.toml" "$WS" --colors 2>/dev/null)"; rc=$?
+assert_eq "folder_colors: exits 0" "$rc" "0"
+assert_eq "folder_colors: named folders get theirs, lower-cased; the rest the space's color" \
+  "$(printf '%s' "$out" | python3 -c 'import json, sys; d = json.load(sys.stdin); print(d["alpha"], d["my proj"], d["beta"])')" \
+  "red blue green"
+err="$(WORKBENCH_CONFIG="$T/fc.toml" "$WS" --colors 2>&1 >/dev/null)"
+assert_contains "folder_colors: a folder the glob doesn't list is noted" "$err" "folder_colors names 'nowhere'"
+assert_eq "folder_colors leaves the 13 TSV fields alone" \
+  "$(WORKBENCH_CONFIG="$T/fc.toml" "$WS" 2>/dev/null | awk -F'\t' '{print NF}' | sort -u)" "13"
+printf '[[space]]\nname = "S"\nglob = "%s/side/*"\nfolder_colors = { alpha = "red" }\n' "$T" > "$T/fc2.toml"
+assert_eq "folder_colors without color: unnamed folders have none" \
+  "$(WORKBENCH_CONFIG="$T/fc2.toml" "$WS" --colors | python3 -c 'import json, sys; d = json.load(sys.stdin); print(d["alpha"], "beta" in d)')" \
+  "red False"
+fc_bad() {  # what, glob-or-root line, value, expected message
+  printf '[[space]]\nname = "S"\n%s\nfolder_colors = %s\n' "$2" "$3" > "$T/fcbad.toml"
+  out="$(WORKBENCH_CONFIG="$T/fcbad.toml" "$WS" 2>&1)"; rc=$?
+  assert_eq "folder_colors $1 is invalid" "$rc" "4"
+  assert_contains "folder_colors $1: says why" "$out" "$4"
+}
+fc_bad "on a root space" "root = \"$T/acme\"" '{ alpha = "red" }' "folder_colors is for glob spaces; a root space sets color"
+fc_bad "with an unknown colour" "glob = \"$T/side/*\"" '{ alpha = "teal" }' "folder_colors.alpha must be one of red, orange"
+fc_bad "as a string" "glob = \"$T/side/*\"" '"red"' "folder_colors must be a table"
+fc_bad "with a path for a key" "glob = \"$T/side/*\"" '{ "a/b" = "red" }' "folder_colors: 'a/b' is not a folder name"
+fc_bad "when the glob lists nothing" "glob = \"$T/empty/*\"" '{ alpha = "teal" }' "folder_colors.alpha must be one of"
 finish
