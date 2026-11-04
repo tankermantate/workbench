@@ -209,6 +209,19 @@ WB_TODAY=2026-10-25 WB_LAUNCH_AGENTS_DIR="$T/agents" "$REPO/bin/wb-ui" fill-coun
 "$REPO/bin/wb-ui" render-spaces "$T/start" > "$T/screen1"
 assert_contains "screen 1: a missed run comes first and points at the log" "$(cat "$T/screen1")" \
   $'\e[2m · grooming missed Oct 24, see launchd.log · groomed Sat · review · strategy due\e[0m'
+# a newest run that failed (nothing applied) says so instead of review, and names an expired login
+mkdir -p "$T/groom/Acme/20261024-0600"; printf 'the judge failed (exit 1)\n' > "$T/groom/Acme/20261024-0600/summary.md"
+: > "$T/groom/Acme/20261017-0600/reviewed"
+WB_TODAY=2026-10-25 WB_LAUNCH_AGENTS_DIR="$T/agents" "$REPO/bin/wb-ui" fill-counts "$T/start"
+"$REPO/bin/wb-ui" render-spaces "$T/start" > "$T/screen1"
+assert_contains "screen 1: a failed run says so and points at its summary" "$(cat "$T/screen1")" \
+  $'\e[2m · grooming failed Sat, see summary · strategy due\e[0m'
+assert_not_contains "render-work: no review row for a failed run" "$("$REPO/bin/wb-ui" render-work "$T/start" 1)" "✦ review"
+printf '{"is_error":true,"result":"Failed to authenticate: OAuth session expired"}' > "$T/groom/Acme/20261024-0600/judge.json"
+"$REPO/bin/wb-ui" fill-counts "$T/start"; "$REPO/bin/wb-ui" render-spaces "$T/start" > "$T/screen1"
+assert_contains "screen 1: an expired login says what to do" "$(cat "$T/screen1")" \
+  $'\e[2m · grooming failed Sat: Claude login expired, log in again · strategy due\e[0m'
+rm -rf "$T/groom/Acme/20261024-0600" "$T/groom/Acme/20261017-0600/reviewed"
 # a status that fails or hangs never fails the screen
 mkdir -p "$T/ui2/bin" "$T/ui2/lib"; cp "$REPO/bin/wb-ui" "$REPO/bin/wb-backlog" "$T/ui2/bin/"; cp "$REPO/lib/"*.py "$T/ui2/lib/"
 printf '#!/bin/sh\nsleep 30\n' > "$T/ui2/bin/wb-groom"; chmod +x "$T/ui2/bin/wb-groom"

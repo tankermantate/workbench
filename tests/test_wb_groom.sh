@@ -554,6 +554,8 @@ assert_eq "run: a second run in the same minute has its own dir" "$(ls -d "$G/ac
 assert_contains "summary: earlier runs not yet reviewed" "$(cat "$R2/summary.md")" "1 earlier runs not yet reviewed"
 touch "$R/reviewed"; groom acme >/dev/null 2>&1
 assert_contains "summary: a reviewed run is not counted" "$(cat "$(newest acme)/summary.md")" "1 earlier runs not yet reviewed"
+FAKE_CLAUDE_RC=3 groom acme >/dev/null 2>&1; groom acme >/dev/null 2>&1
+assert_contains "summary: a failed run (nothing to review) is not counted" "$(cat "$(newest acme)/summary.md")" "2 earlier runs not yet reviewed"
 
 # missing plan: the judge runs, nothing is written, and the summary leads with strategy
 reset_stores; : > "$T/bd.log"
@@ -586,6 +588,13 @@ assert_eq "judge failed: exit 10" "$rc" "10"
 assert_contains "judge failed: summary says why" "$(cat "$(newest acme)/summary.md")" "the judge failed (exit 3); nothing applied"
 assert_contains "judge failed: summary names the files with the detail" "$(cat "$(newest acme)/summary.md")" "see judge.json and judge.err in the run dir"
 assert_eq "judge failed: no bd writes" "$(writes)" "0"
+assert_not_contains "judge failed: no login words without a login error" "$(cat "$(newest acme)/summary.md")" "log in"
+# the judge's login expired: the summary says so and what fixes it
+FAKE_CLAUDE_RC=1 FAKE_CLAUDE_OUT='{"type":"result","subtype":"success","is_error":true,"result":"Failed to authenticate: OAuth session expired and could not be refreshed"}' \
+  groom acme >/dev/null 2>"$T/err"; rc=$?
+assert_eq "login expired: exit 10" "$rc" "10"
+assert_contains "login expired: summary quotes the judge's error" "$(cat "$(newest acme)/summary.md")" "the judge failed (exit 1): Failed to authenticate: OAuth session expired"
+assert_contains "login expired: summary says the fix" "$(cat "$(newest acme)/summary.md")" "log in again on the space's Claude account"
 # the judge leaves no decisions.json
 mkdir -p "$T/judge2"; printf 'I could not finish.\n' > "$T/judge2/summary.md"
 FAKE_CLAUDE_GROOM="$T/judge2" groom acme >/dev/null 2>"$T/err"; rc=$?
@@ -776,6 +785,34 @@ assert_eq "status: an unedited template plan with no runs shows nothing" "$(st a
 mkdir -p "$SG/acme/20261017-0600"
 assert_contains "status: an unedited template plan with runs is due" "$(st acme)" "strategy	due"
 assert_eq "status: always exit 0, even for an unknown label" "$(st nope/../x; echo $?)" "0"
+
+# failed: a run that stopped with nothing applied (summary.md, no decisions.json) has nothing to review
+rm -rf "$SG/acme"; mkdir -p "$SG/acme/20261024-0600" "$SG/acme/20261031-0700"; cp "$FX/plan/"* "$SP/acme/"
+: > "$SG/acme/20261024-0600/summary.md"; : > "$SG/acme/20261024-0600/decisions.json"
+printf 'the judge failed (exit 1)\n' > "$SG/acme/20261031-0700/summary.md"
+assert_eq "failed: the newest run failed: a failed line, and the good run is still to review" "$(st acme)" \
+  "failed	$SG/acme/20261031-0700	Sat
+review	$SG/acme/20261024-0600	Sat"
+printf '{"type":"result","subtype":"success","is_error":true,"result":"Failed to authenticate: OAuth session expired and could not be refreshed"}' \
+  > "$SG/acme/20261031-0700/judge.json"
+assert_contains "failed: an expired login is named" "$(st acme)" "failed	$SG/acme/20261031-0700	Sat	login"
+printf '{"is_error":false,"result":"OAuth notes done"}' > "$SG/acme/20261031-0700/judge.json"
+assert_contains "failed: login only from a judge error" "$(st acme)" "failed	$SG/acme/20261031-0700	Sat
+"
+printf '{"is_err' > "$SG/acme/20261031-0700/judge.json"
+assert_contains "failed: a cut-off judge.json is just failed" "$(st acme)" "failed	$SG/acme/20261031-0700	Sat
+"
+mkdir -p "$SG/acme/20261104-0817"; : > "$SG/acme/20261104-0817/summary.md"; : > "$SG/acme/20261104-0817/decisions.json"
+assert_eq "failed: a newer good run supersedes it, and it isn't counted as waiting" "$(st acme)" \
+  "review	$SG/acme/20261104-0817	Wed	1 waiting"
+: > "$SG/acme/20261104-0817/reviewed"; : > "$SG/acme/20261024-0600/reviewed"
+assert_eq "failed: an older failed run never becomes the run to review" "$(st acme)" ""
+mkdir -p "$SG/acme/20261105-0900"
+assert_eq "failed: a run still going (no summary yet) is not failed" "$(st acme)" "review	$SG/acme/20261105-0900	Thu"
+rm -rf "$SG/acme/20261105-0900"; : > "$SG/acme/20261104-0817/reviewed"
+mkdir -p "$SG/acme/20261107-0600"; : > "$SG/acme/20261107-0600/summary.md"; : > "$SG/acme/20261107-0600/reviewed"
+assert_eq "failed: one marked reviewed shows nothing" "$(st acme)" ""
+rm -rf "$SG/acme"; mkdir -p "$SG/acme/20261017-0600"  # as the tests above left it
 
 # missed: the Saturday run left no run dir (it failed before making one, or never started)
 MG="$T/mg"; MP="$T/mp"; MA="$T/agents"; mkdir -p "$MG/acme/20261010-0600" "$MP/acme" "$MA"

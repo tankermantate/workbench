@@ -6,7 +6,8 @@ spaces.tsv (wb-spaces output).
   wb-ui render-spaces TMP      screen 1 lines: index, label, summary
   wb-ui fill-counts TMP        every space's summary, read in parallel, into
                                TMP/counts/<index> (ending, dim, with what `wb-groom status`
-                               says: grooming missed, groomed Sat · review, strategy due); with $FZF_PORT set,
+                               says: grooming missed, grooming failed Sat, groomed Sat · review,
+                               strategy due); with $FZF_PORT set,
                                tells fzf to reload as each one lands
   wb-ui render-work TMP INDEX [QUERY]
                                screen 2 lines: kind, id, worktree, header, text
@@ -74,8 +75,8 @@ def render_spaces(tmp):
 
 
 def ritual_status(label):
-    """wb-groom status's lines for the space, as field lists: review (run dir, weekday) and
-    strategy. Any failure or a slow answer is "nothing to add": it must never fail a screen."""
+    """wb-groom status's lines for the space, as field lists: missed, failed, review (run dir,
+    weekday) and strategy. Any failure or a slow answer is "nothing to add": it must never fail a screen."""
     try:
         # its own process group: a hung child's children would keep the pipe open past the kill
         p = subprocess.Popen([GROOM, "status", label], stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
@@ -108,12 +109,16 @@ def short_date(iso):
 
 
 def groomed_note(label):
-    """The dim ` · grooming missed Oct 24, see launchd.log · groomed Sat · review · strategy due`
+    """The dim ` · grooming missed Oct 24, see launchd.log · grooming failed Sat, see summary ·
+    groomed Sat · review · strategy due`
     that ends a space's summary, or ''."""
     parts = []
     for f in ritual_status(label):
         if f[0] == "missed" and len(f) >= 2:
             parts.append(f"grooming missed {short_date(f[1])}, see launchd.log")
+        elif f[0] == "failed" and len(f) >= 3:
+            why = "Claude login expired, log in again" if f[3:4] == ["login"] else ""
+            parts.append(f"grooming failed {f[2]}: {why}" if why else f"grooming failed {f[2]}, see summary")
         elif f[0] == "review" and len(f) >= 3:
             parts.append(f"groomed {f[2]} · review")
         elif f[0] == "strategy":

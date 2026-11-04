@@ -51,8 +51,12 @@
                                                         ~/Library/LaunchAgents) and the space has a
                                                         plan dir and earlier runs. launchd.log in
                                                         the groom dir says why.
+        failed, <run dir>, <weekday>[, login]           the newest run stopped with nothing applied
+                                                        (summary.md but no decisions.json); login
+                                                        when judge.json's error is an expired login
         review, <run dir>, <weekday>[, "<k> waiting"]   the newest run without a `reviewed` file
-                                                        (k more are waiting, when any are)
+                                                        that did not fail (k more are waiting, when
+                                                        any are)
         strategy, due                                   the plan is due, stale or missing, and the
                                                         space has runs (a space with neither plan
                                                         nor runs shows nothing)
@@ -268,7 +272,38 @@ def write_json(path, data):
 
 def earlier_unreviewed(base, run_dir):
     return sum(1 for d in os.listdir(base) if d[:1].isdigit() and os.path.join(base, d) != run_dir
-               and os.path.isdir(os.path.join(base, d)) and not os.path.exists(os.path.join(base, d, "reviewed")))
+               and os.path.isdir(os.path.join(base, d)) and not os.path.exists(os.path.join(base, d, "reviewed"))
+               and not run_failed(os.path.join(base, d)))
+
+
+def run_failed(run_dir):
+    """True when the run stopped with nothing applied: its summary is written but the judge left
+    no decisions.json, so there is nothing to review. Read from the files, not a record, so runs
+    from before this check count too; one still going has no summary.md yet."""
+    return (os.path.isfile(os.path.join(run_dir, "summary.md"))
+            and not os.path.exists(os.path.join(run_dir, "decisions.json")))
+
+
+LOGIN_RE = re.compile(r"oauth|authenticat|log ?in\b|/login", re.I)
+
+
+def judge_error(run_dir):
+    """The first line of the error `claude -p` reported in judge.json (is_error), or None. A
+    judge cut off mid-write leaves a file that isn't JSON: that's None too."""
+    try:
+        with open(os.path.join(run_dir, "judge.json"), encoding="utf-8") as f:
+            out = json.load(f)
+    except (OSError, ValueError):
+        return None
+    if not isinstance(out, dict) or out.get("is_error") is not True or not isinstance(out.get("result"), str):
+        return None
+    lines = out["result"].strip().splitlines()
+    return lines[0][:200] if lines else None
+
+
+def login_expired(run_dir):
+    err = judge_error(run_dir)
+    return bool(err and LOGIN_RE.search(err))
 
 
 def shared_remote(root):
@@ -454,7 +489,13 @@ def groom_in(space, base, run_dir):
     if timed_out:
         return stop(EXIT_JUDGE, f"the judge timed out after {timeout:g} s; nothing applied; see judge.json and judge.err in the run dir")
     if rc != 0:
-        return stop(EXIT_JUDGE, f"the judge failed (exit {rc}); nothing applied; see judge.json and judge.err in the run dir")
+        said = judge_error(run_dir)
+        if said and login_expired(run_dir):
+            # the fix is outside wb-groom: only a fresh login on that account lets the next run in
+            lead = [f"the judge's Claude login has expired: log in again on the space's Claude account "
+                    f"(CLAUDE_CONFIG_DIR={space['claude_config'] or 'the default'}), then wb-groom run {label}"] + lead
+        return stop(EXIT_JUDGE, f"the judge failed (exit {rc}){': ' + said if said else ''}; nothing applied; "
+                    "see judge.json and judge.err in the run dir")
     try:
         lift(judge_dir, run_dir, "decisions.json")  # only from a judge that finished
     except OSError as e:
@@ -561,7 +602,11 @@ def cmd_status(label):
         missed = missed_saturday(label, runs, today())
         if missed:
             print(tsv("missed", missed.isoformat()))
-        waiting, any_runs = unreviewed(runs), bool(runs)
+        # A failed run has nothing to review: it is never the run to review nor counted as waiting,
+        # and is news only while it is the newest run (a later run, good or not, supersedes it).
+        if runs and run_failed(runs[-1]) and not os.path.exists(os.path.join(runs[-1], "reviewed")):
+            print(tsv("failed", runs[-1], weekday(runs[-1]), *(["login"] if login_expired(runs[-1]) else [])))
+        waiting, any_runs = [r for r in unreviewed(runs) if not run_failed(r)], bool(runs)
         if waiting:
             line = ["review", waiting[-1], weekday(waiting[-1])]
             if len(waiting) > 1:

@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # Safety net: if a test ever reaches a real launch, it prints instead of starting Claude.
 # As wb-groom's judge (FAKE_CLAUDE_GROOM=DIR): copies every file in DIR into the first --add-dir
-# (the judge's own dir; a planted file tests what wb-groom keeps from it), then sleeps
+# (the judge's own dir; a planted file tests what wb-groom keeps from it), prints FAKE_CLAUDE_OUT
+# (what lands in judge.json), then sleeps
 # FAKE_CLAUDE_SLEEP seconds (a judge that wrote its answer and then hung) and exits FAKE_CLAUDE_RC
 # (default 0).
 # FAKE_CLAUDE_LOG: one JSON line per call: argv, cwd, CLAUDE_CONFIG_DIR (null when unset) and
@@ -21,5 +22,6 @@ done
 for f in "$FAKE_CLAUDE_GROOM"/*; do
   [ -f "$f" ] && cp "$f" "$run/"
 done
+[ -z "${FAKE_CLAUDE_OUT:-}" ] || printf '%s\n' "$FAKE_CLAUDE_OUT"
 [ -z "${FAKE_CLAUDE_SLEEP:-}" ] || sleep "$FAKE_CLAUDE_SLEEP"
 exit "${FAKE_CLAUDE_RC:-0}"

@@ -168,11 +168,14 @@ A launchd agent (`~/Library/LaunchAgents/workbench.groom.plist`, label `workbenc
 loaded by `install.sh` unless it gets `--no-schedule`; a re-run replaces it; output goes to `<groom dir>/launchd.log`) runs
 `wb-groom run --all` weekly, Saturday 06:00 (*my call*). A Mac asleep then runs it at wake. One run
 per space per week; a run that times out (default 20 min, `WB_GROOM_TIMEOUT`) applies nothing, as does
-one whose judge fails or leaves no `decisions.json`; its summary says why. A run holds
+one whose judge fails or leaves no `decisions.json`; its summary says why (quoting the judge's
+error from `judge.json`, and saying to log in again on the space's Claude account when that error
+is an expired login). A run holds
 `<groom dir>/<space>/.lock`; a second run for that space exits 9 (`a grooming run is in progress`).
 `--all` grooms every space with a plan directory and goes on past a failed one. A missing or stale
 plan still runs the judge, and its summary leads with `strategy session needed`. The summary ends
-with `N earlier runs not yet reviewed` when any run dir lacks a `reviewed` file (review writes it).
+with `N earlier runs not yet reviewed` when any run dir that has something to review lacks a
+`reviewed` file (review writes it).
 Cost seen in the dry run: ~6 min / ~160k tokens for a 400-bead space, ~2 min for a 50-bead one.
 
 ### `decisions.json` (shape, as `prompts/groom.txt` teaches it and `wb-groom` reads it)
@@ -204,6 +207,12 @@ Cost seen in the dry run: ~6 min / ~160k tokens for a 400-bead space, ~2 min for
   check is for the gap: with the agent installed, a space that has a plan dir and earlier runs, and
   a newest run dated before the last Saturday before today (Saturday itself never counts: its run
   may still be to come). A held lock is not a miss: the run holding it makes its own run dir.
+- A run that stopped with nothing applied (its `summary.md` is written but there is no
+  `decisions.json`: the judge failed, timed out or left none, or bd couldn't be read) has nothing
+  to review. It is never the run `review` names nor counted as waiting. While it is the newest run,
+  screen 1 says `grooming failed Sat, see summary` in place of `groomed Sat · review`, or
+  `grooming failed Sat: Claude login expired, log in again` when `judge.json` reports an expired
+  login (the fix is a fresh login on the space's Claude account). A later run supersedes it.
 - The work screen gets a row at the top: `✦ review Saturday's grooming` (and `✦ strategy session`
   when due). Choosing it starts Claude in the space with `prompts/review.txt` and the run directory.
 - The user's yes in the review conversation is enough for Claude to apply any item, protected ones
@@ -213,8 +222,9 @@ Cost seen in the dry run: ~6 min / ~160k tokens for a 400-bead space, ~2 min for
   edits each; Claude applies through `wb-groom` (`undo`, `apply --proposal <n>`) so every change
   still goes through the policy and the run record. Candidates the user accepts become beads.
 - The launcher asks `wb-groom status <space>` for all of this (a few seconds at most; a failure or a
-  slow answer adds nothing to the screens). `review` names the newest run without a `reviewed` file and,
-  when more are waiting, how many; `missed` names the Saturday with no run; `strategy due` appears when the plan is due or stale, or missing in a
+  slow answer adds nothing to the screens). `review` names the newest run without a `reviewed` file
+  that did not fail and, when more are waiting, how many; `failed` names the newest run when it failed
+  (with `login` for an expired login); `missed` names the Saturday with no run; `strategy due` appears when the plan is due or stale, or missing in a
   space that has runs. A space with neither plan nor runs, or one just started from the templates and
   never groomed, shows nothing.
 - Finishing the review marks the run reviewed (`wb-groom reviewed <run>`, a `reviewed` file with the date). An unreviewed run doesn't block the next one; the
