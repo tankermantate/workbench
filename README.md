@@ -106,7 +106,7 @@ in this repo: `goals.md` (3-5 goals, a `date: YYYY-MM-DD` line, optional `sprint
 | When | What | Who |
 |---|---|---|
 | Saturday 06:00 | **Grooming**: a read-only Claude judges the backlog against the plan. `wb-groom` applies what policy allows (sprint labels, icebox of unprotected beads, `attention` flags) and leaves the rest as proposals. | launchd, unattended (`wb-groom run --all`, log in `~/.local/state/workbench/groom/launchd.log`) |
-| Next time you open the launcher | **Review**: screen 1 shows `groomed Sat · review` (or `grooming missed Oct 24, see launchd.log` when a Saturday run left nothing to review); the work screen has `✦ review Saturday's grooming`. Claude walks the summary with you and applies what you accept. | you, with Claude |
+| Next time you open the launcher | **Review**: screen 1 shows `groomed Sat · review` (or `grooming missed Oct 24, see launchd.log` when a Saturday run left nothing to review, or `grooming failed Sat, see summary` when the newest run stopped with nothing applied; `grooming failed Sat: Claude login expired, log in again` when the fix is a fresh login on the space's Claude account); the work screen has `✦ review Saturday's grooming`. Claude walks the summary with you and applies what you accept. | you, with Claude |
 | Monthly, or when the plan is 30+ days old | **Strategy**: screen 1 shows `strategy due`; Claude prepares from the month's closes and what you reversed, and rewrites the plan with you. | you, with Claude |
 
 A plan whose `goals.md` has no date or is over 45 days old, or that has no `protected.md`, counts as missing or stale and fails closed: grooming still runs, but
