@@ -97,14 +97,20 @@ _wb_start_review() {
   _wb_claude prompt "$(_wb_prompt review - $1 ${WB_PLANS_DIR:-$HOME/.config/workbench/plans}/$s[1])" -
 }
 
-# $1 is the plan dir the row names; wb-groom makes it from the templates when a
-# space has none yet, and says where it is.
+# wb-groom makes the plan dir from the templates when a space has none yet, and
+# says where it is. Returns 1 to go back to screen 2 when it can't: nothing has
+# started, so leaving the launcher would only lose the user's place.
 _wb_start_strategy() {
-  local plan
-  # it said why on stderr; the launcher ends here like after any start, at a shell
-  plan=$($WORKBENCH_HOME/bin/wb-groom strategy $s[1]) || return 1
+  local plan ans
+  if ! plan=$($WORKBENCH_HOME/bin/wb-groom strategy $s[1]); then
+    print -u2 "workbench: the strategy session did not start (wb-groom said why, above)."
+    print -nu2 "Press Enter to go back "   # fzf's redraw would hide the message otherwise
+    read -r ans
+    return 1
+  fi
   cd -- $s[3] || return 0
   _wb_claude prompt "$(_wb_prompt strategy - - $plan)" -
+  return 0   # Claude ran: whatever it exited with, the launcher is done
 }
 
 # ◐ beads are probably another session's. $1 id, $2 worktree from the claim
@@ -250,8 +256,8 @@ _wb_main() {
       open)    _wb_start_bead $p[2]; return 0 ;;
       claimed) _wb_start_claimed $p[2] $p[3] && return 0 ;;
       review)  _wb_start_review $p[3]; return 0 ;;
-      strategy) _wb_start_strategy; return 0 ;;
-    esac                          # sep/msg rows, or a declined ◐: show screen 2 again
+      strategy) _wb_start_strategy && return 0 ;;
+    esac                          # sep/msg rows, a declined ◐, a failed strategy start: screen 2 again
   done
 }
 

@@ -228,6 +228,8 @@ Cost seen in the dry run: ~6 min / ~160k tokens for a 400-bead space, ~2 min for
   and its row `✦ review Saturday's grooming (partial: not the whole backlog)`.
 - The work screen gets a row at the top: `✦ review Saturday's grooming` (and `✦ strategy session`
   when due). Choosing it starts Claude in the space with `prompts/review.txt` and the run directory.
+  When `wb-groom strategy` can't make the plan directory, the launcher shows its reason, waits for
+  Enter and goes back to the work screen: nothing started, so there's nothing to leave a shell for.
 - The user's yes in the review conversation is enough for Claude to apply any item, protected ones
   included (user's call, 2026-10-23); `wb-groom` doesn't ask again on the terminal.
 - Claude walks the summary in this order: what's due soon (calendar), the new sprint, proposals on

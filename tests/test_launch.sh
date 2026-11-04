@@ -259,7 +259,15 @@ rm -rf "$T/plans/Acme"; mkdir -p "$T/groom/Acme/20261018-0600"
 out="$(printf '1\n3\n' | WB_NO_FZF=1 L)"
 assert_contains "menu: a strategy session on a space with no plan makes it from the templates" "$out" "$T/plans/Acme"
 assert_eq "... the four files" "$(ls "$T/plans/Acme" | tr '\n' ' ')" "calendar.md goals.md protected.md sources.md "
-rm -rf "$T/groom" "$T/plans"
+# wb-groom strategy fails (the plans dir can't be made): back to the work screen, not out
+: > "$T/blocker"
+out="$(printf '1\n3\n\nq\n' | WB_NO_FZF=1 WB_PLANS_DIR="$T/blocker/plans" L)"
+assert_contains "strategy fails: wb-groom's reason is shown" "$out" "wb-groom: cannot make $T/blocker/plans/Acme"
+assert_contains "strategy fails: says so and waits" "$out" "workbench: the strategy session did not start"
+assert_eq "strategy fails: the work screen comes back" "$(printf '%s\n' "$out" | grep -c '✦ strategy session')" "2"
+assert_not_contains "strategy fails: Claude is not started" "$out" "DRY-RUN"
+assert_contains "strategy fails: q then leaves a shell where it was" "$out" "AFTER rc=0 PWD=$T/start"
+rm -rf "$T/groom" "$T/plans" "$T/blocker"
 
 # test-pick path (stands in for fzf)
 out="$(WB_TEST_PICK_SPACE='Side › beta' WB_TEST_PICK_WORK='First by priority' L)"
