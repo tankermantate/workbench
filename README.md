@@ -105,6 +105,10 @@ A session the launcher (or `new-session`) starts knows which bead it's on:
   fresh. Start fresh puts the bead back to open, for you to start from the launcher in a new tab.
 - **Closing the bead ends the session's job.** Claude finishes the close-out (`end-session` in a
   worktree space), then tells you to `/exit` and start the next bead fresh.
+- **`wb-tabs`** shows every open terminal tab on one screen: its title, space and worktree, bead,
+  what the work is for and where it stands (closed, working, idle for how long, the latest note).
+  Plain shells and sessions with no bead are labelled, not dropped. It only reads, in about a
+  second; a bead store that doesn't answer within 2s (`WB_TABS_BD_TIMEOUT`) says so on its rows.
 - **`wb-focus`** prints this session's bead. Inside Claude, `wb-focus <id>` moves the session to
   another bead, and `wb-focus --clear` drops it.
 

@@ -120,11 +120,8 @@ def show(root, bead_id):
     return data if isinstance(data, dict) and data.get("id") else None
 
 
-def children(root, parent_id):
-    """Every bead whose direct parent is PARENT_ID, closed ones too, or None when bd can't say."""
-    rc, out = run_bd(root, ["list", "--parent", parent_id, "--all", "-n", "0", "--json"], READ_TIMEOUT)
-    if rc != 0:
-        return None
+def list_json(out):
+    """The list in bd's stdout, past any 'Warning: …' lines, or None."""
     start = re.search(r"^\[", out, re.M)
     if not start:
         return None
@@ -132,10 +129,44 @@ def children(root, parent_id):
         data = json.loads(out[start.start():])
     except ValueError:
         return None
-    if not isinstance(data, list):
+    return data if isinstance(data, list) else None
+
+
+def children(root, parent_id):
+    """Every bead whose direct parent is PARENT_ID, closed ones too, or None when bd can't say."""
+    rc, out = run_bd(root, ["list", "--parent", parent_id, "--all", "-n", "0", "--json"], READ_TIMEOUT)
+    data = list_json(out) if rc == 0 else None
+    if data is None:
         return None
     # direct children only: one level, as on the work screen
     return [b for b in data if isinstance(b, dict) and b.get("parent") == parent_id]
+
+
+def all_beads(root, timeout):
+    """{id: bead} for a whole store, or None when bd can't say in time. A read for a view: unlike
+    `bd show`, `bd list` leaves .beads/last-touched alone, the target of a bare bd close."""
+    rc, out = run_bd(root, ["list", "--all", "-n", "0", "--json"], timeout)
+    data = list_json(out) if rc == 0 else None
+    if data is None:
+        return None
+    return {b["id"]: b for b in data if isinstance(b, dict) and b.get("id")}
+
+
+def store_root(root):
+    """The folder holding ROOT's bead store: ROOT or a parent, up to the top of ROOT's git repo,
+    or None. bd itself walks up (a space's root can be a subfolder of the repo that holds
+    .beads), but a store above the repo, like ~/.beads, belongs to someone else. Outside any
+    repo the walk stops below $HOME. A store is a .beads with bd's config.yaml or
+    metadata.json, as in lib/session.sh: a .beads holding only old exports isn't."""
+    home = os.path.abspath(os.path.expanduser("~"))
+    d = os.path.abspath(root)
+    while d != home or d == os.path.abspath(root):
+        if any(os.path.isfile(os.path.join(d, ".beads", f)) for f in ("config.yaml", "metadata.json")):
+            return d
+        if os.path.exists(os.path.join(d, ".git")) or os.path.dirname(d) == d:
+            return None
+        d = os.path.dirname(d)
+    return None
 
 
 def section(b):

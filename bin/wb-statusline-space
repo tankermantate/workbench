@@ -15,21 +15,12 @@ import os
 import subprocess
 import sys
 
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.realpath(__file__)), "..", "lib"))
+import wb_space  # noqa: E402  (lives in lib/; realpath, since install.sh links bin/ elsewhere)
+
 EMOJI = {"red": "🔴", "orange": "🟠", "yellow": "🟡", "green": "🟢", "blue": "🔵",
          "purple": "🟣", "brown": "🟤"}
 WB_SPACES = os.path.join(os.path.dirname(os.path.realpath(__file__)), "wb-spaces")
-
-
-def git_dirs(path):
-    """(git dir, common dir) for a checkout, or None outside git. They differ only in a
-    linked worktree, and the common dir's parent is then the main checkout."""
-    try:
-        out = subprocess.run(["git", "-C", path, "--no-optional-locks", "rev-parse", "--path-format=absolute",
-                              "--git-dir", "--git-common-dir"],
-                             capture_output=True, text=True, timeout=2).stdout.split("\n")
-    except (OSError, subprocess.SubprocessError):
-        return None
-    return (out[0], out[1]) if len(out) > 1 and out[0] and out[1] else None
 
 
 def colors():
@@ -40,63 +31,12 @@ def colors():
         return {}
 
 
-def roots():
-    try:
-        out = subprocess.run([WB_SPACES], capture_output=True, text=True, timeout=3)
-    except (OSError, subprocess.SubprocessError):
-        return []
-    if out.returncode:
-        return []
-    rows = [line.split("\t") for line in out.stdout.splitlines()]
-    # (root, label, worktree space's key or None)
-    return [(os.path.realpath(r[2]), r[0], r[6] if r[4] == "1" else None) for r in rows if len(r) > 6]
-
-
-def toplevel(path):
-    try:
-        out = subprocess.run(["git", "-C", path, "--no-optional-locks", "rev-parse", "--show-toplevel"],
-                             capture_output=True, text=True, timeout=2).stdout.strip()
-    except (OSError, subprocess.SubprocessError):
-        return None
-    return os.path.realpath(out) if out else None
-
-
-def worktree_owner(folder, main, spaces):
-    """end-session's rule: a worktree space whose root is in the same repo, preferring the
-    one whose key names the worktree (new-session makes <key>-<slug>)."""
-    on_repo = [(label, key) for root, label, key in spaces if key and toplevel(root) == main]
-    name = os.path.basename(folder)
-    return next((label for label, key in on_repo if name.startswith(key + "-")),
-                on_repo[0][0] if on_repo else None)
-
-
-def owner(path, spaces):
-    """The label of the space whose root holds path; the deepest root wins."""
-    best = None
-    for root, label, _ in spaces:
-        if (path == root or path.startswith(root.rstrip("/") + "/")) and (not best or len(root) > len(best[0])):
-            best = (root, label)
-    return best[1] if best else None
-
-
 def locate(stdin_json):
-    """(label, is a space, is a worktree) for the session's folder, or None."""
+    """(label, is a space, worktree folder or None) for the session's folder, or None."""
     ws = stdin_json.get("workspace") or {}
     # project_dir is where claude was launched; current_dir drifts when a tool cd's.
     folder = ws.get("project_dir") or ws.get("current_dir") or stdin_json.get("cwd")
-    if not folder:
-        return None
-    folder = os.path.realpath(folder)
-    dirs = git_dirs(folder)
-    worktree = bool(dirs) and dirs[0] != dirs[1]
-    spaces = roots()
-    label = owner(folder, spaces)
-    if not label and worktree:
-        # a worktree lives outside its space's root; its main checkout doesn't
-        main = os.path.realpath(os.path.dirname(dirs[1]))
-        top = toplevel(folder)
-        label = worktree_owner(top or folder, main, spaces) or owner(main, spaces)
-    return (label, True, worktree) if label else (os.path.basename(folder), False, worktree)
+    return wb_space.locate(folder) if folder else None
 
 
 def segment(stdin_json):
@@ -115,7 +55,7 @@ def parts(stdin_json):
         return ""
     label, space, worktree = found
     color = colors().get(label, "") if space else ""
-    return json.dumps({"label": label, "space": space, "worktree": worktree,
+    return json.dumps({"label": label, "space": space, "worktree": bool(worktree),
                        "color": color, "emoji": EMOJI.get(color, "")}, ensure_ascii=False)
 
 

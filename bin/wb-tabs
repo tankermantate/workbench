@@ -1,0 +1,247 @@
+#!/usr/bin/env python3
+"""wb-tabs — every open terminal tab: what it's on, what that's for, where it stands.
+
+  wb-tabs     prints one block per tab (a plain shell is one line). Reads only: ps, Claude's and
+              workbench's session files, and one `bd list` per bead store (never `bd show`,
+              which rewrites .beads/last-touched, the target of a bare `bd close`).
+              Spec: docs/specs/2026-11-05-tabs-view-design.md
+
+Exit 1: ps failed, so nothing can say which tabs are live.
+"""
+import concurrent.futures
+import json
+import os
+import re
+import shutil
+import subprocess
+import sys
+import time
+
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.realpath(__file__)), "..", "lib"))
+import wb_session  # noqa: E402  (lives in lib/; realpath, since install.sh links bin/ elsewhere)
+import wb_space  # noqa: E402
+
+PS = os.environ.get("WB_PS", "ps")
+BD_TIMEOUT = float(os.environ.get("WB_TABS_BD_TIMEOUT", "2"))
+GOAL_MAX, EPIC_MAX, NOTE_MAX = 90, 40, 80
+MIN_WORDS = 5
+LABEL = r"^(#+\s*|(WHY|GOAL|EPIC)\s*:\s*)"
+BD_SILENT = "bead status unknown (bd didn't answer)"
+
+
+def cut(text, n):
+    text = " ".join(str(text).split())
+    return text if len(text) <= n else text[:n - 1].rstrip() + "…"
+
+
+def processes():
+    """(pid, ppid, tty, command name) for everything on a tty, or None when ps fails."""
+    try:
+        p = subprocess.run([PS, "-axo", "pid=,ppid=,tty=,comm="], capture_output=True, text=True, timeout=5)
+    except (OSError, subprocess.SubprocessError):
+        return None
+    if p.returncode:
+        return None
+    found = []
+    for line in p.stdout.splitlines():
+        f = line.split(None, 3)
+        if len(f) == 4 and f[0].isdigit() and f[1].isdigit() and f[2][0] not in "?-":
+            found.append((int(f[0]), int(f[1]), f[2], os.path.basename(f[3].strip())))
+    return found
+
+
+def tabs(procs):
+    """{tty: the pid of its session's claude, or None}. The outermost claude is the session:
+    it may have spawned another, as a grooming judge or a subagent."""
+    claudes = {pid for pid, _, _, comm in procs if comm == "claude"}
+    live = {tty: None for _, _, tty, _ in procs}
+    for pid, ppid, tty, _ in sorted(procs):
+        if pid in claudes and ppid not in claudes and live[tty] is None:
+            live[tty] = pid
+    return live
+
+
+def config_dirs(space_rows):
+    dirs = [os.path.expanduser("~/.claude"), os.environ.get("CLAUDE_CONFIG_DIR", "")]
+    dirs += [os.path.expanduser(r[7]) for r in space_rows if len(r) > 7 and r[7] != "-"]
+    return list(dict.fromkeys(d for d in dirs if d))
+
+
+def pid_file(pid, dirs):
+    """Claude's own record of a live pid, or None. Internal to Claude Code and undocumented, so
+    any surprise in it means "don't know". In two config dirs, the newest start wins: a pid gets
+    reused, and a session that crashed left its file behind."""
+    found = []
+    for d in dirs:
+        try:
+            with open(os.path.join(d, "sessions", f"{pid}.json")) as f:
+                j = json.load(f)
+        except (OSError, ValueError):
+            continue
+        if isinstance(j, dict) and j.get("pid") == pid and isinstance(j.get("sessionId"), str):
+            found.append(j)
+    return max(found, key=lambda j: j.get("startedAt") if isinstance(j.get("startedAt"), (int, float)) else 0,
+               default=None)
+
+
+def launched_by_workbench(pids):
+    """Which of these claudes the launcher started. Only asked of the sessions with no record:
+    an environment can hold secrets, so this one name is all that's looked for, and none of it
+    is kept."""
+    if not pids:
+        return set()
+    try:
+        out = subprocess.run([PS, "-E", "-o", "pid=,command=", "-p", ",".join(map(str, pids))],
+                             capture_output=True, text=True, timeout=5).stdout
+    except (OSError, subprocess.SubprocessError):
+        return set()
+    return {int(m.group(1)) for m in re.finditer(r"^\s*(\d+)\s.*?(?<!\S)WB_SPACE_ROOT=", out, re.M)}
+
+
+def tab_title(tty, session):
+    """The tab's half of what the status line last set, while it's this session's: the file
+    outlives the session that wrote it."""
+    path = os.path.expanduser(f"~/.cache/claude-titles/last-{tty}")
+    started = session.get("startedAt") if session else None
+    try:
+        if not isinstance(started, (int, float)) or os.path.getmtime(path) < started / 1000:
+            return ""
+        with open(path) as f:
+            return f.read().partition("|")[0].strip()
+    except OSError:
+        return ""
+
+
+def age(seconds):
+    s = max(0, int(seconds))
+    for unit, size in (("d", 86400), ("h", 3600), ("m", 60)):
+        if s >= size:
+            return f"{s // size}{unit}"
+    return f"{s}s"
+
+
+def session_state(session):
+    word = {"busy": "working"}.get(session.get("status"), session.get("status")) or ""
+    at = session.get("statusUpdatedAt")
+    if not word:
+        return ""
+    return f"{word} {age(time.time() - at / 1000)}" if isinstance(at, (int, float)) else str(word)
+
+
+def first_sentence(text):
+    """The description's first sentence that says something. One of a few words is usually
+    where the bead came from ("Split from x.", "Seen on Monday."), so it's only the answer
+    when nothing longer follows."""
+    sentences = [" ".join(x.split()) for x in re.split(r"(?<=[.!?])\s+|\n\s*\n", str(text or "").strip())]
+    sentences = [re.sub(LABEL, "", x, flags=re.I) for x in sentences if x]
+    return next((x for x in sentences if len(x.split()) >= MIN_WORDS), sentences[0] if sentences else "")
+
+
+def goal(bead, beads):
+    text = first_sentence(bead.get("description")) or "no description"
+    parent = beads.get(bead.get("parent")) if bead.get("parent") else None
+    if not parent:
+        return cut(text, GOAL_MAX)
+    epic = re.sub(LABEL, "", str(parent.get("title") or ""), flags=re.I)
+    return f"{cut(epic, EPIC_MAX)} › {cut(text, GOAL_MAX)}"
+
+
+def latest_note(bead):
+    for line in reversed(str(bead.get("notes") or "").splitlines()):
+        # a worktree claim line records where, not how it's going
+        if line.strip() and not wb_session.WORKTREE_RE.search(line):
+            return line
+    return ""
+
+
+def status(record, bead, beads, session):
+    """Bead state, session state, then the latest word on it. bd outranks the record: a bead
+    can be reopened after a session closed it."""
+    if beads is None:
+        state = "closed by this session" if record.get("done") else BD_SILENT
+        news = ""
+    elif bead is None:
+        state, news = "bead not found", ""
+    elif bead.get("status") == "closed":
+        state = "closed by this session" if record.get("done") else "closed"
+        news = str(bead.get("close_reason") or "") or latest_note(bead)
+    else:
+        state, news = str(bead.get("status") or "status unknown"), latest_note(bead)
+    return " · ".join(x for x in (state, session_state(session), cut(news, NOTE_MAX)) if x)
+
+
+def place(session, record, spaces):
+    """Where the session is. A bound session whose folder no longer says (end-session removed
+    its worktree under it) still has the space it was bound in, from its record."""
+    found = wb_space.locate(session["cwd"], spaces) if isinstance(session.get("cwd"), str) else None
+    if record and record.get("root") and not (found and found[1]):
+        return wb_space.locate(record["root"], spaces)
+    return found
+
+
+def where(found, tail):
+    label, is_space, worktree = found
+    place = label if is_space else f"({label})"
+    if worktree:
+        place += f" ⑂ {os.path.basename(worktree)}"
+    return f"{place} · {tail}"
+
+
+def block(tty, pid, session, record, located, beads, launched):
+    if pid is None:
+        return [f"{tty}  plain shell"]
+    title = tab_title(tty, session)
+    lines = [f"{tty}  {title}" if title else tty]
+    if record is None:
+        tail = "no bead" if pid in launched else "unbound"
+        lines.append(f"  {where(located, tail)}" if located else f"  {tail}")
+        state = session_state(session) if session else ""
+        return lines + ([f"  status  {state}"] if state else [])
+    store = beads.get(wb_session.store_root(record.get("root") or "/nonexistent") or "")
+    bead = store.get(record["bead"]) if store else None
+    title = (bead or {}).get("title") or record.get("title") or ""
+    head = record["bead"] + " " + title
+    lines.append(f"  {where(located, head)}" if located else f"  {head}")
+    if bead:
+        lines.append(f"  goal    {goal(bead, store)}")
+    lines.append(f"  status  {status(record, bead, store, session)}")
+    return lines
+
+
+def main():
+    procs = processes()
+    if procs is None:
+        print("wb-tabs: can't read the process table, so can't say which tabs are live.", file=sys.stderr)
+        return 1
+    live = tabs(procs)
+    if not live:
+        print("no open terminal tabs")
+        return 0
+    space_rows = wb_space.rows()
+    spaces = wb_space.roots(space_rows)
+    dirs = config_dirs(space_rows)
+    sessions = {pid: pid_file(pid, dirs) for pid in live.values() if pid}
+    records = {pid: wb_session.load(s["sessionId"]) for pid, s in sessions.items() if s}
+    launched = launched_by_workbench([pid for pid in live.values() if pid and not records.get(pid)])
+    stores = {r for r in (wb_session.store_root(x.get("root") or "/nonexistent")
+                          for x in records.values() if x) if r}
+    # one read per store, so two spaces in a repo don't contend; stores and git calls side by side,
+    # so the view takes as long as its slowest store, not their sum
+    with concurrent.futures.ThreadPoolExecutor(max_workers=len(stores) + len(sessions) + 1) as pool:
+        store_jobs = {s: pool.submit(wb_session.all_beads, s, BD_TIMEOUT) for s in stores}
+        place_jobs = {pid: pool.submit(place, s, records.get(pid), spaces) for pid, s in sessions.items() if s}
+        beads = {s: j.result() for s, j in store_jobs.items()}
+        places = {pid: j.result() for pid, j in place_jobs.items()}
+    lines = []
+    for tty in sorted(live):
+        pid = live[tty]
+        lines += block(tty, pid, sessions.get(pid), records.get(pid), places.get(pid), beads, launched)
+    if sys.stdout.isatty():  # a wrapped line would break the one-screen read; pipes get it all
+        width = shutil.get_terminal_size().columns - 2  # an emoji takes two cells and one len()
+        lines = [line if len(line) <= width else line[:width - 1] + "…" for line in lines]
+    print("\n".join(lines))
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

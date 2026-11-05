@@ -35,6 +35,7 @@ import sys
 import threading
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.realpath(__file__)), "..", "lib"))
+import wb_session  # noqa: E402
 import wb_search  # noqa: E402  (lives in lib/; realpath, since install.sh links bin/ elsewhere)
 import wb_touched  # noqa: E402
 
@@ -102,20 +103,7 @@ def run_bd(root, *extra):
 
 
 def has_store(root):
-    """A bead store in ROOT or a parent, up to the top of ROOT's git repo. bd itself
-    walks up (a space's root can be a subfolder of the repo that holds .beads), but a
-    store above the repo, like ~/.beads, belongs to someone else. Outside any
-    repo the walk stops below $HOME. A store is a .beads with bd's config.yaml or
-    metadata.json, as in lib/session.sh: a .beads holding only old exports isn't."""
-    home = os.path.abspath(os.path.expanduser("~"))
-    d = os.path.abspath(root)
-    while d != home or d == os.path.abspath(root):
-        if any(os.path.isfile(os.path.join(d, ".beads", f)) for f in ("config.yaml", "metadata.json")):
-            return True
-        if os.path.exists(os.path.join(d, ".git")) or os.path.dirname(d) == d:
-            return False
-        d = os.path.dirname(d)
-    return False
+    return wb_session.store_root(root) is not None
 
 
 def read(root):
