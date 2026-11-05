@@ -145,9 +145,17 @@ _wb_start_claimed() {
 _wb_use_fzf() { [[ -z ${WB_NO_FZF-} ]] && (( $+commands[fzf] )) }
 
 # fzf, or, when a test passes a query in $1, the first line containing it.
+#
+# Inside $(...) it execs fzf, so no zsh is left waiting on it (wb-k3v). When
+# the subshell around it died while fzf was up (seen after closing a tab on
+# screen 2), the waiting zsh 5.9 livelocked in its job-wait loop: 100% CPU,
+# deaf to SIGHUP, adopted by launchd, for days, starving everything else on
+# the Mac. With exec there is no waiter left to spin. Outside a subshell it
+# must not exec, or it would replace the login shell.
 _wb_fzf() {
   local q=$1; shift
   if [[ -n $q ]]; then grep -F -- "$q" | head -n 1 | grep .; return; fi
+  (( ZSH_SUBSHELL )) && exec fzf "$@"
   fzf "$@"
 }
 

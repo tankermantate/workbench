@@ -295,4 +295,16 @@ assert_contains "missing config: still a shell" "$out" "AFTER rc=0"
 out="$( (cd "$T/start" && zsh -f -c "source '$REPO/shell/workbench.zsh'; _wb_main() { integer i=1/0 }; launch; print AFTER rc=\$?") 2>&1)"
 assert_contains "an internal error is trapped" "$out" "launcher hit an error"
 assert_contains "an internal error still leaves a shell" "$out" "AFTER rc=0"
+
+# wb-k3v: inside $(...), _wb_fzf execs fzf, so no zsh waits on it. A waiting
+# zsh livelocked at 100% CPU for days when the subshell around it died. The
+# fake fzf prints its own pid; exec means it is the subshell's pid.
+mkdir -p "$T/execbin"
+printf '#!/bin/sh\necho "$$"\n' > "$T/execbin/fzf"; chmod +x "$T/execbin/fzf"
+out="$(PATH="$T/execbin:$PATH" zsh -f -c "zmodload zsh/system; source '$REPO/shell/workbench.zsh'
+  r=\$(print -n \"\$sysparams[pid] \"; _wb_fzf ''); print -r -- \$r
+  _wb_fzf '' >/dev/null; print AFTER")"
+read -r sub fzfpid _ <<< "$(printf '%s\n' "$out" | head -1)"
+assert_eq "in a subshell, fzf replaces it (no zsh left waiting)" "$fzfpid" "$sub"
+assert_contains "outside a subshell, the shell survives fzf" "$out" "AFTER"
 finish
