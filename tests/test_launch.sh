@@ -277,6 +277,38 @@ assert_contains "pick: lands in the project" "$out" "AFTER rc=0 PWD=$T/side/beta
 out="$(WB_TEST_PICK_SPACE='Side › gamma' WB_TEST_PICK_WORK='something new' L)"
 assert_contains "pick: no-store space still offers something new" "$out" "start something new in gamma"
 
+# the tabs row (wb-xw0): on screen 1, after the spaces; wb-tabs runs only when chosen, then back
+export WB_PS="$REPO/tests/fake/fake-ps" FAKE_PS_OUT="$T/ps.out" FAKE_PS_LOG="$T/ps.log"
+printf '  901     1 ttys901  -zsh\n' > "$FAKE_PS_OUT"; : > "$FAKE_PS_LOG"
+out="$(printf 'q\n' | WB_NO_FZF=1 L)"
+assert_contains "tabs row: in the numbered menu, after the three spaces" "$out" "4) ✦ open tabs"
+assert_eq "tabs row: drawing the screen does not run wb-tabs" "$(cat "$FAKE_PS_LOG")" ""
+out="$(printf '4\n\n1\n1\n' | WB_NO_FZF=1 L)"
+assert_contains "tabs row: choosing it shows the tabs view" "$out" "ttys901"
+assert_contains "tabs row: it waits before going back" "$out" "Press Enter to go back"
+assert_eq "tabs row: back on screen 1" "$(printf '%s\n' "$out" | grep -c '✦ open tabs')" "2"
+assert_contains "tabs row: a session still starts afterwards" "$out" "DRY-RUN"
+out="$(printf '4\n\nq\n' | WB_NO_FZF=1 FAKE_PS_RC=1 L)"
+assert_contains "tabs row: a failed view says why" "$out" "wb-tabs: can't read the process table"
+assert_eq "tabs row: ... and still comes back" "$(printf '%s\n' "$out" | grep -c '✦ open tabs')" "2"
+assert_contains "tabs row: ... and q leaves a shell" "$out" "AFTER rc=0 PWD=$T/start"
+out="$(WB_TEST_PICK_SPACE='✦ open tabs' L </dev/null)"
+assert_contains "tabs row: fzf path shows the view" "$out" "ttys901"
+assert_contains "tabs row: EOF at the pause leaves a shell rather than looping" "$out" "AFTER rc=0 PWD=$T/start"
+# a fake fzf, as the real one is driven: choose the row, then Esc on the screen that comes back
+mkdir -p "$T/pickbin"
+cat > "$T/pickbin/fzf" <<EOF
+#!/bin/sh
+if [ -e "$T/picked" ]; then exit 130; fi
+: > "$T/picked"
+grep '✦ open tabs'
+EOF
+chmod +x "$T/pickbin/fzf"
+out="$(printf '\n' | PATH="$T/pickbin:$PATH" L)"
+assert_contains "tabs row: fzf: choosing it shows the view" "$out" "ttys901"
+assert_contains "tabs row: fzf: screen 1 comes back and esc leaves a shell" "$out" "AFTER rc=0 PWD=$T/start"
+rm -f "$T/picked"; unset WB_PS FAKE_PS_OUT FAKE_PS_LOG
+
 # leaving
 out="$(printf 'q\n' | WB_NO_FZF=1 L)"
 assert_contains "q on screen 1 leaves a working shell" "$out" "AFTER rc=0 PWD=$T/start"

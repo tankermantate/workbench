@@ -109,6 +109,7 @@ A session the launcher (or `new-session`) starts knows which bead it's on:
   what the work is for and where it stands (closed, working, idle for how long, the latest note).
   Plain shells and sessions with no bead are labelled, not dropped. It only reads, in about a
   second; a bead store that doesn't answer within 2s (`WB_TABS_BD_TIMEOUT`) says so on its rows.
+  The launcher's first screen has it too, as `✦ open tabs`; Enter brings you back.
 - **`wb-focus`** prints this session's bead. Inside Claude, `wb-focus <id>` moves the session to
   another bead, and `wb-focus --clear` drops it.
 

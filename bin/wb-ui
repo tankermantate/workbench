@@ -71,6 +71,7 @@ def render_spaces(tmp):
             except FileNotFoundError:
                 summary = "…"
         print(f"{i}\t{name.ljust(width)}  \t{summary}")
+    print("tabs\t✦ open tabs\t")
     print("q\t[q] just give me a shell\t")
 
 

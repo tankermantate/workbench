@@ -85,7 +85,13 @@ status are the point, so a tab is one block (a plain shell is one line):
 
 Lines are cut to the terminal's width only when printing to one.
 
+## On the launcher
+
+Screen 1 has a `✦ open tabs` row after the spaces, since the view covers every space. It runs
+`wb-tabs` only when chosen, so drawing the screen costs nothing, and then waits for Enter and
+returns to screen 1. A view longer than the window scrolls: there is no pager, because `wb-tabs`
+only cuts lines to fit when it's printing straight to the terminal.
+
 ## Not built
 
-- A launcher row: the bead asked for a row and/or a command, and the command meets acceptance.
 - Anything that writes, caches or spawns a model.

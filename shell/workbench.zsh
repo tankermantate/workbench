@@ -113,6 +113,17 @@ _wb_start_strategy() {
   return 0   # Claude ran: whatever it exited with, the launcher is done
 }
 
+# Screen 1's tabs row. wb-tabs takes about a second, so it runs only when chosen,
+# and not inside $(...): it cuts lines to the terminal's width only on a terminal.
+# If it fails it has said why, and the pause still lets that be read. Returns 1 on
+# EOF, when no Enter is coming.
+_wb_show_tabs() {
+  local ans
+  $WORKBENCH_HOME/bin/wb-tabs
+  print -nu2 "Press Enter to go back "   # fzf's redraw would hide the view otherwise
+  read -r ans
+}
+
 # ◐ beads are probably another session's. $1 id, $2 worktree from the claim
 # notes (or -). Returns 1 to go back to screen 2.
 _wb_start_claimed() {
@@ -253,7 +264,11 @@ _wb_main() {
   rows=("${(@f)$(<$tmp/spaces.tsv)}")
   [[ -n $rows[1] ]] || { print -u2 "workbench: no spaces found; check ${WORKBENCH_CONFIG:-~/.config/workbench/spaces.toml}"; return 0 }
   _wb_fzf_hint
-  i=$(_wb_screen_spaces) || return 0
+  while true; do
+    i=$(_wb_screen_spaces) || return 0
+    [[ $i == tabs ]] || break
+    _wb_show_tabs || return 0
+  done
   [[ $i == <1-> ]] || return 0
   s=("${(@ps:\t:)rows[i]}")
   while true; do
