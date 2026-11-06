@@ -25,3 +25,6 @@ setup_repo() {
 }
 # mkstore DIR…: a bead store bd would use (it has bd's config.yaml) in each DIR.
 mkstore() { local d; for d in "$@"; do mkdir -p "$d/.beads"; : > "$d/.beads/config.yaml"; done; }
+
+# the launcher's waiting count runs wb-tabs: no suite reads the real tabs (a suite can override it)
+export WB_PS="$REPO/tests/fake/fake-ps"

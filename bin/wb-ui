@@ -8,7 +8,8 @@ spaces.tsv (wb-spaces output).
                                TMP/counts/<index> (ending, dim, with what `wb-groom status`
                                says: grooming missed, grooming failed Sat, groomed Sat [· partial] · review,
                                strategy due); with $FZF_PORT set,
-                               tells fzf to reload as each one lands
+                               tells fzf to reload as each one lands. Also what
+                               `wb-tabs --waiting` says, into TMP/waiting.json
   wb-ui render-work TMP INDEX [QUERY]
                                screen 2 lines: kind, id, worktree, header, text
                                (sep and msg rows have an empty id, so the
@@ -37,7 +38,8 @@ import urllib.request
 ME = os.path.realpath(__file__)
 BACKLOG = os.path.join(os.path.dirname(ME), "wb-backlog")
 GROOM = os.path.join(os.path.dirname(ME), "wb-groom")
-STATUS_TIMEOUT = 3  # seconds; the screens never wait longer than this for grooming's news
+TABS = os.path.join(os.path.dirname(ME), "wb-tabs")
+STATUS_TIMEOUT = 3  # seconds; the screens never wait longer than this for grooming's news or the waiting count
 DAYS = {"Mon": "Monday", "Tue": "Tuesday", "Wed": "Wednesday", "Thu": "Thursday", "Fri": "Friday",
         "Sat": "Saturday", "Sun": "Sunday"}
 sys.path.insert(0, os.path.join(os.path.dirname(ME), "..", "lib"))
@@ -58,8 +60,23 @@ def spaces(tmp):
         return [dict(zip(FIELDS, l.rstrip("\n").split("\t"))) for l in f if l.strip()]
 
 
+def waiting_counts(tmp):
+    """(total, {space label: n}); nothing to say if the count hasn't landed or doesn't make sense."""
+    try:
+        with open(os.path.join(tmp, "waiting.json")) as f:
+            j = json.load(f)
+        return int(j["total"]), dict(j["spaces"])
+    except (OSError, ValueError, KeyError, TypeError):
+        return 0, {}
+
+
+def waiting_text(n):
+    return f"\033[33m{n} waiting on you\033[0m" if n else ""
+
+
 def render_spaces(tmp):
     rows = spaces(tmp)
+    total, by_space = waiting_counts(tmp)
     names = [s["label"] if s["group"] == "-" else f"{s['group']} › {s['label']}" for s in rows]
     width = max(map(len, names), default=0)
     for i, (s, name) in enumerate(zip(rows, names), 1):
@@ -70,20 +87,20 @@ def render_spaces(tmp):
                     summary = f.read().strip()
             except FileNotFoundError:
                 summary = "…"
+        summary = " · ".join(x for x in (waiting_text(by_space.get(s["label"])), summary) if x)
         print(f"{i}\t{name.ljust(width)}  \t{summary}")
-    print("tabs\t✦ open tabs\t")
+    print(f"tabs\t✦ open tabs\t{waiting_text(total)}")
     print("q\t[q] just give me a shell\t")
 
 
-def ritual_status(label):
-    """wb-groom status's lines for the space, as field lists: missed, failed, review (run dir,
-    weekday) and strategy. Any failure or a slow answer is "nothing to add": it must never fail a screen."""
+def quiet_output(cmd):
+    """A helper's stdout, or None if it fails or is slow: these reads must never fail or hold a screen."""
     try:
         # its own process group: a hung child's children would keep the pipe open past the kill
-        p = subprocess.Popen([GROOM, "status", label], stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
+        p = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
                              text=True, start_new_session=True)
     except OSError:
-        return []
+        return None
     try:
         out, _ = p.communicate(timeout=STATUS_TIMEOUT)
     except subprocess.TimeoutExpired:
@@ -91,10 +108,14 @@ def ritual_status(label):
             os.killpg(p.pid, signal.SIGKILL)
         except OSError:
             pass
-        return []
-    if p.returncode != 0:
-        return []
-    return [l.split("\t") for l in out.splitlines() if l.strip()]
+        return None
+    return out if p.returncode == 0 else None
+
+
+def ritual_status(label):
+    """wb-groom status's lines for the space, as field lists: missed, failed, review (run dir,
+    weekday) and strategy. Any failure or a slow answer is "nothing to add"."""
+    return [l.split("\t") for l in (quiet_output([GROOM, "status", label]) or "").splitlines() if l.strip()]
 
 
 MONTHS = ("Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec")  # not strftime: locale
@@ -146,12 +167,7 @@ def fill_counts(tmp):
     port = os.environ.get("FZF_PORT")
     reload = f"reload({shlex.quote(sys.executable)} {shlex.quote(ME)} render-spaces {shlex.quote(tmp)})"
 
-    def one(i, s):
-        p = subprocess.run([BACKLOG, "summary", s["root"]], capture_output=True, text=True)
-        path = os.path.join(counts, str(i))
-        with open(path + ".part", "w") as f:
-            f.write((p.stdout.strip() or "(bd unavailable)") + groomed_note(s["label"]))
-        os.replace(path + ".part", path)
+    def tell_fzf():
         if port:
             try:
                 urllib.request.urlopen(urllib.request.Request(
@@ -159,8 +175,31 @@ def fill_counts(tmp):
             except OSError:
                 pass  # fzf has already closed
 
+    def one(i, s):
+        p = subprocess.run([BACKLOG, "summary", s["root"]], capture_output=True, text=True)
+        path = os.path.join(counts, str(i))
+        with open(path + ".part", "w") as f:
+            f.write((p.stdout.strip() or "(bd unavailable)") + groomed_note(s["label"]))
+        os.replace(path + ".part", path)
+        tell_fzf()
+
+    def waiting():
+        path = os.path.join(tmp, "waiting.json")
+        out = quiet_output([TABS, "--waiting"])
+        if out is None:
+            try:
+                os.remove(path)  # an old count saying "2 waiting" is worse than none
+            except FileNotFoundError:
+                pass
+        else:
+            with open(path + ".part", "w") as f:
+                f.write(out)
+            os.replace(path + ".part", path)
+        tell_fzf()
+
     threads = [threading.Thread(target=one, args=(i, s))
                for i, s in enumerate(spaces(tmp), 1) if s["beads"] != "false"]
+    threads.append(threading.Thread(target=waiting))
     for t in threads:
         t.start()
     for t in threads:

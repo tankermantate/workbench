@@ -46,7 +46,9 @@ cat > "$T/acme/.beads/fake.json" <<'EOF'
  {"id":"ac-2","title":"Trim the footer","status":"closed","close_reason":"footer trimmed; logo did not change",
   "description":"The footer is too tall."},
  {"id":"ac-3","title":"Reopened after a close","status":"open","description":"Split from ac-1. The retry must survive a restart."},
- {"id":"ac-web","title":"Web bead","status":"open","description":"Too short."}
+ {"id":"ac-web","title":"Web bead","status":"open","description":"Too short."},
+ {"id":"ac-4","title":"Approve the refund","status":"in_progress",
+  "description":"Refunds over the limit need a person to approve them.","notes":"one refund left to approve"}
 ]
 EOF
 cat > "$T/globex/.beads/fake.json" <<'EOF'
@@ -56,15 +58,17 @@ EOF
 # ps_row PID PPID TTY COMM
 : > "$T/ps.out"; : > "$T/ps.env"
 ps_row() { echo "$1 $2 $3 $4" >> "$T/ps.out"; }
-# session DIR PID SID CWD STATUS AGE_SECONDS [STARTED_AGO_SECONDS]
+# session DIR PID SID CWD STATUS AGE_SECONDS [STARTED_AGO_SECONDS] [WAITING_FOR]
 session() {
-  python3 - "$1" "$2" "$3" "$4" "$5" "$6" "${7:-86400}" "$NOW" <<'PY'
+  python3 - "$1" "$2" "$3" "$4" "$5" "$6" "${7:-86400}" "$NOW" "${8:-}" <<'PY'
 import json, sys
-d, pid, sid, cwd, st, age, started, now = sys.argv[1:]
+d, pid, sid, cwd, st, age, started, now, waiting = sys.argv[1:]
 now = int(now)
-json.dump({"pid": int(pid), "sessionId": sid, "cwd": cwd, "status": st,
-           "statusUpdatedAt": (now - int(age)) * 1000, "startedAt": (now - int(started)) * 1000},
-          open(f"{d}/sessions/{pid}.json", "w"))
+j = {"pid": int(pid), "sessionId": sid, "cwd": cwd, "status": st,
+     "statusUpdatedAt": (now - int(age)) * 1000, "startedAt": (now - int(started)) * 1000}
+if waiting:
+    j["waitingFor"] = waiting
+json.dump(j, open(f"{d}/sessions/{pid}.json", "w"))
 PY
 }
 # record SID BEAD TITLE ROOT [DONE]
@@ -76,14 +80,17 @@ json.dump({"bead": bead, "title": title, "root": root, "since": "2026-11-05T00:0
            "done": bool(done), "named": False}, open(p, "w"))
 PY
 }
-# the block of lines for one tab
-block() { awk -v t="$1" '$1==t && !/^ /{p=1; print; next} !/^ /{p=0} p' <<<"$OUT"; }
+# a tab's row, found by its text, with the goal and next lines under it
+tab() { awk -v t="$1" 'p && /^      /{print; next} p{exit} index($0, t){p=1; print}' <<<"$OUT"; }
+# everything under a heading, up to the next one
+section() { awk -v h="$1" 'index($0, h)==1{p=1; next} p && /^[A-Z]/{exit} p' <<<"$OUT"; }
+# the line number of a row: order is what this view is for
+line_of() { grep -nF -- "$1" <<<"$OUT" | head -1 | cut -d: -f1; }
 
 # ttys001: bound, in a worktree, under an epic, idle 5h
 ps_row 101 1 ttys001 login; ps_row 102 101 ttys001 -zsh; ps_row 103 102 ttys001 claude
 session "$CFG" 103 sid-a "$T/wts/acme-x1y" idle 18000
 record sid-a ac-1 "Resend the order email" "$T/acme"
-printf '🟣 Acme · x1y Resend|window title' > "$TITLES/last-ttys001"
 # ttys002: plain shell, with a title left by a session that ended
 ps_row 201 1 ttys002 login; ps_row 202 201 ttys002 -zsh
 printf 'STALE PLAIN TITLE|w' > "$TITLES/last-ttys002"
@@ -107,11 +114,10 @@ session "$CFG" 603 sid-e "$T/globex" idle 60
 echo "603 claude WB_SPACE_ROOT=$T/globex SECRET_TOKEN=hunter2" >> "$T/ps.env"
 # ttys007: claude with no pid file at all
 ps_row 701 1 ttys007 login; ps_row 702 701 ttys007 -zsh; ps_row 703 702 ttys007 claude
-# ttys008: another config dir, another root on the same store as ttys001; a title older than its session
+# ttys008: another config dir, another root on the same store as ttys001
 ps_row 801 1 ttys008 login; ps_row 802 801 ttys008 -zsh; ps_row 803 802 ttys008 claude
 session "$ALT" 803 sid-f "$T/acme/apps/web" idle 30 3600
 record sid-f ac-web "Web bead" "$T/acme/apps/web"
-printf 'OLD SESSION TITLE|w' > "$TITLES/last-ttys008"; touch -t 202001010000 "$TITLES/last-ttys008"
 # ttys009: bound to a bead its store doesn't have
 ps_row 901 1 ttys009 login; ps_row 902 901 ttys009 -zsh; ps_row 903 902 ttys009 claude
 session "$CFG" 903 sid-g "$T/acme" idle 60
@@ -127,6 +133,20 @@ record sid-i ac-3 "Reopened after a close" "$T/acme"
 # ttys012: the same gone folder with no record: nothing says which space, so no guess
 ps_row 1201 1 ttys012 login; ps_row 1202 1201 ttys012 -zsh; ps_row 1203 1202 ttys012 claude
 session "$CFG" 1203 sid-j "$T/wts/removed-long-ago" idle 60
+# ttys013: stuck on a prompt, on a bead
+ps_row 1301 1 ttys013 login; ps_row 1302 1301 ttys013 -zsh; ps_row 1303 1302 ttys013 claude
+session "$CFG" 1303 sid-k "$T/acme" waiting 120 86400 "input needed"
+record sid-k ac-4 "Approve the refund" "$T/acme"
+# ttys014: stuck on a prompt with no bead at all
+ps_row 1401 1 ttys014 login; ps_row 1402 1401 ttys014 -zsh; ps_row 1403 1402 ttys014 claude
+session "$CFG" 1403 sid-l "$T/globex" waiting 60 86400 "dialog open"
+# ttys015: stuck on a prompt, its bead already closed
+ps_row 1501 1 ttys015 login; ps_row 1502 1501 ttys015 -zsh; ps_row 1503 1502 ttys015 claude
+session "$CFG" 1503 sid-m "$T/acme" waiting 60 86400 "sandbox request"
+record sid-m ac-2 "Trim the footer" "$T/acme"
+# ttys016: stuck on a prompt in a folder that's no space
+ps_row 1601 1 ttys016 login; ps_row 1602 1601 ttys016 -zsh; ps_row 1603 1602 ttys016 claude
+session "$CFG" 1603 sid-n "$T/plainfolder" waiting 60 86400 "input needed"
 # no process: daemons, and a tty whose tab has closed
 ps_row 1 0 '??' launchd; ps_row 2000 1 '??' claude
 printf 'DEAD TAB TITLE|w' > "$TITLES/last-ttys099"
@@ -134,102 +154,113 @@ printf 'DEAD TAB TITLE|w' > "$TITLES/last-ttys099"
 OUT=$("$TABS" 2>&1); RC=$?
 assert_eq "exits 0" "$RC" 0
 
-A=$(block ttys001)
-assert_contains "tab: tty and title"           "$A" "ttys001  🟣 Acme · x1y Resend"
-assert_not_contains "tab: only the tab's half of the title" "$A" "window title"
-assert_contains "space and worktree"           "$A" "Acme ⑂ acme-x1y"
-assert_contains "bead id and title"            "$A" "ac-1 Resend the order email"
-assert_contains "goal: first sentence, no WHY" "$A" "customers lose the email when the provider times out."
-assert_not_contains "goal: one sentence"       "$A" "happened twice"
-assert_contains "goal: the parent epic"        "$A" "Checkout reliability ›"
-assert_not_contains "goal: the epic's own label goes" "$A" "EPIC:"
-assert_contains "status: bead state"           "$A" "in_progress"
-assert_contains "status: idle time"            "$A" "idle 5h"
-assert_contains "status: latest real note"     "$A" "retry added, deploy pending"
-assert_not_contains "status: a claim line isn't news" "$A" "worktree at"
+# the three groups, what needs you first
+WAITING=$(section "WAITING ON YOU"); WORKING=$(section "WORKING"); NOTHING=$(section "NOTHING PENDING")
+assert_contains "heading counts waiting tabs"    "$OUT" "WAITING ON YOU (8)"
+assert_contains "heading counts working tabs"    "$OUT" "WORKING (1)"
+assert_contains "heading counts the rest"        "$OUT" "NOTHING PENDING (7)"
+assert_eq "waiting comes before working" "$(( $(line_of "WAITING ON YOU") < $(line_of "WORKING (") ))" 1
+assert_eq "working comes before the rest" "$(( $(line_of "WORKING (") < $(line_of "NOTHING PENDING") ))" 1
 
-P=$(block ttys002)
-assert_contains "plain shell labelled"         "$P" "plain shell"
-assert_not_contains "plain shell: no stale title" "$P" "STALE PLAIN TITLE"
+# waiting tabs run to three lines each, so they need telling apart; one-line rows don't
+assert_eq "a blank line between waiting tabs" "$(grep -c '^$' <<<"$WAITING")" 7
+assert_eq "no blank lines between the one-line rows" "$(grep -c '^$' <<<"$NOTHING")" 0
 
-W=$(block ttys003)
-assert_contains "a busy session reads as working" "$W" "working 2m"
-assert_contains "the outermost claude is the session" "$W" "ac-3"
-assert_not_contains "a spawned claude is not the session" "$OUT" "sid-sub"
-assert_eq "a tty is one tab, however many claudes" "$(grep -c '^ttys003' <<<"$OUT")" 1
+# blocked: a real prompt, whatever the bead says
+B=$(tab "Approve the refund")
+assert_contains "blocked: is waiting"            "$WAITING" "Approve the refund"
+assert_contains "blocked: says so, why, how long" "$B" "blocked · input needed · 2m"
+assert_contains "blocked: the goal"              "$B" "goal  Refunds over the limit need a person to approve them."
+assert_contains "blocked: the next step"         "$B" "next  one refund left to approve"
+assert_contains "blocked: no bead still counts"  "$WAITING" "blocked · dialog open · 1m"
+assert_contains "blocked: a closed bead still counts" "$WAITING" "blocked · sandbox request · 1m"
+assert_eq "blocked tabs come before your-turn tabs" \
+  "$(( $(line_of "blocked · sandbox request") < $(line_of "your turn") ))" 1
 
-assert_contains "goal: past a sentence saying where it came from" "$W" "The retry must survive a restart."
-assert_not_contains "goal: not that sentence" "$W" "Split from"
+# your turn: finished, with the bead still open
+A=$(tab "Resend the order email")
+assert_contains "your turn: is waiting"          "$WAITING" "Resend the order email"
+assert_contains "your turn: says so and how long" "$A" "your turn · 5h"
+assert_contains "the bead's short id"            "$A" "1     Resend the order email"
+assert_contains "the space, marked as a worktree" "$A" "Acme ⑂"
+assert_not_contains "the worktree's long name stays out" "$A" "acme-x1y"
+assert_contains "goal: first sentence, no WHY"   "$A" "goal  customers lose the email when the provider times out."
+assert_not_contains "goal: one sentence"         "$A" "happened twice"
+assert_not_contains "goal: no epic in front"     "$A" "Checkout reliability"
+assert_contains "next: the latest real note"     "$A" "next  retry added, deploy pending"
+assert_not_contains "next: a claim line isn't a next step" "$A" "worktree at"
+assert_eq "the bead title is said once" "$(grep -c "Resend the order email" <<<"$A")" 1
+assert_contains "no notes: says so"              "$(tab "Web bead")" "next  no next step recorded"
+assert_contains "a short description is still the goal" "$(tab "Web bead")" "goal  Too short."
+assert_contains "the deepest space wins"         "$(tab "Web bead")" "Web"
+assert_contains "a space's claude_config is searched" "$WAITING" "Web bead"
+G1=$(tab "Globex bead")
+assert_contains "second store read; a blocked bead says so" "$G1" "your turn · bead blocked · 1m"
+assert_contains "no description: says so"        "$G1" "goal  no description"
+assert_contains "worktree gone: the record names the space" "$(tab "Reopened after a close")" "Acme"
 
-C=$(block ttys004)
-assert_contains "closed by this session"       "$C" "closed by this session"
-assert_contains "closed: says what shipped"    "$C" "footer trimmed"
-assert_contains "closed: still says idle"      "$C" "idle 2h"
+# working
+assert_contains "busy reads as working, with its age" "$WORKING" "working · 2m"
+assert_contains "the outermost claude is the session" "$WORKING" "Reopened after a close"
+assert_not_contains "working tabs get no goal line" "$WORKING" "goal"
+assert_not_contains "a spawned claude is not the session" "$WORKING" "Trim the footer"
 
-U=$(block ttys005)
+# nothing pending
+assert_contains "closed bead: nothing pending"   "$NOTHING" "Trim the footer"
+assert_contains "closed: says so and how long"   "$NOTHING" "closed · 2h"
+assert_contains "plain shell labelled"           "$NOTHING" "plain shell"
+assert_not_contains "plain shell: no stale title" "$OUT" "STALE PLAIN TITLE"
+assert_eq "plain shells come last" "$(tail -1 <<<"$OUT" | tr -d ' ')" "plainshell"
+assert_not_contains "nothing pending: no goal line" "$NOTHING" "goal"
+U=$(grep "Globex" <<<"$NOTHING")
 assert_contains "no binding, not launched: unbound" "$U" "unbound"
-assert_contains "unbound: the folder's space"  "$U" "Globex"
-assert_not_contains "unbound: not called no bead" "$U" "no bead"
+assert_contains "launched on no bead: no bead"   "$U" "no bead"
 assert_not_contains "the environment is never echoed" "$OUT" "hunter2"
+assert_contains "no pid file: unbound, not dropped" "$NOTHING" "status unknown"
+assert_contains "missing bead: the record's title" "$NOTHING" "Deleted bead"
+assert_contains "missing bead: says so"          "$NOTHING" "bead not found"
+assert_contains "worktree gone, no record: the folder, no guess" "$NOTHING" "(removed-long-ago)"
 
-N=$(block ttys006)
-assert_contains "launched on no bead: no bead" "$N" "no bead"
-assert_not_contains "no bead: not called unbound" "$N" "unbound"
-
-M=$(block ttys007)
-assert_contains "no pid file: unbound, not dropped" "$M" "unbound"
-
-F=$(block ttys008)
-assert_contains "a space's claude_config is searched" "$F" "ac-web Web bead"
-assert_contains "the deepest space wins"       "$F" "Web"
-assert_not_contains "a title older than the session isn't shown" "$F" "OLD SESSION TITLE"
-
-G=$(block ttys009)
-assert_contains "missing bead: the record's title" "$G" "ac-gone Deleted bead"
-assert_contains "missing bead: says so"        "$G" "bead not found"
-
-assert_contains "goal: a short description is still the goal" "$F" "Too short."
-
-R=$(block ttys011)
-assert_contains "worktree gone: the record names the space" "$R" "Acme · ac-3"
-assert_not_contains "worktree gone: not a stray folder" "$R" "removed-long-ago"
-Q=$(block ttys012)
-assert_contains "worktree gone, no record: the folder, no guess" "$Q" "(removed-long-ago) · unbound"
-
-H=$(block ttys010)
-assert_contains "second store read"            "$H" "blocked"
-assert_contains "no description: says so"      "$H" "no description"
-
-assert_not_contains "a closed tab isn't listed"     "$OUT" "ttys099"
 assert_not_contains "a closed tab's title isn't listed" "$OUT" "DEAD TAB TITLE"
 assert_not_contains "a process with no tty isn't a tab" "$OUT" "??"
+assert_not_contains "piped: no colour" "$OUT" $'\e['
 
 # bd: one list per store, whatever the number of tabs and roots, and nothing that writes
 assert_eq "one bd call per store" "$(wc -l < "$T/bd.log" | tr -d ' ')" 2
 assert_not_contains "never bd show: it rewrites last-touched" "$(cat "$T/bd.log")" "show"
 assert_eq "every bd call is a list" "$(grep -vc '^list ' "$T/bd.log")" 0
 
+# what the launcher reads: waiting tabs per space, and a total that includes folders in no space
+J=$("$TABS" --waiting 2>&1)
+assert_eq "--waiting: per space and in total" \
+  "$(python3 -c 'import json,sys; j=json.loads(sys.argv[1]); print(j["total"], sorted(j["spaces"].items()))' "$J")" \
+  "8 [('Acme', 4), ('Globex', 2), ('Web', 1)]"
+
 # on a terminal, lines stop at its width; a pipe gets them whole
-assert_contains "piped: lines stay whole" "$(block ttys001)" "ac-1 Resend the order email"
+assert_contains "piped: lines stay whole" "$(tab "Resend the order")" "Resend the order email"
 LONGEST=$(COLUMNS=40 script -q /dev/null "$TABS" 2>/dev/null </dev/null | tr -d '\r' | python3 -c 'import sys; print(max(len(l.rstrip("\n")) for l in sys.stdin))')
 assert_eq "on a terminal: cut to its width" "$((LONGEST <= 38))" 1
+TERM_OUT=$(COLUMNS=120 script -q /dev/null "$TABS" 2>/dev/null </dev/null)
+assert_contains "on a terminal: the waiting heading is yellow" "$TERM_OUT" $'\e[33mWAITING ON YOU (8)\e[0m'
+assert_not_contains "on a terminal: the rest isn't" "$TERM_OUT" $'\e[33mWORKING'
 
 # the session record names the bead, even when the launch environment says otherwise
 echo "103 claude WB_BEAD=ac-3 WB_SPACE_ROOT=$T/acme" >> "$T/ps.env"
 OUT=$("$TABS" 2>&1)
-assert_contains "the record beats the launch env" "$(block ttys001)" "ac-1 Resend"
+assert_contains "the record beats the launch env" "$(tab "Resend the order")" "Resend the order email"
 
 # a pid file in two config dirs: the newest start wins (a recycled pid leaves the old one)
 session "$ALT" 103 sid-old "$T/globex" idle 60 999999
 OUT=$("$TABS" 2>&1)
-assert_contains "recycled pid: the newest pid file wins" "$(block ttys001)" "ac-1 Resend"
+assert_contains "recycled pid: the newest pid file wins" "$(tab "Resend the order")" "your turn · 5h"
 rm -f "$ALT/sessions/103.json"
 
 # a pid file in an unexpected shape reads as unbound, and doesn't break the view
 echo 'not json' > "$CFG/sessions/403.json"
 OUT=$("$TABS" 2>&1); RC=$?
 assert_eq "odd pid file: still exits 0" "$RC" 0
-assert_contains "odd pid file: unbound" "$(block ttys004)" "unbound"
+assert_eq "odd pid file: unbound, status unknown, not waiting" \
+  "$(grep -c "unbound .*status unknown" <<<"$(section "NOTHING PENDING")")" 2
 assert_not_contains "odd pid file: no traceback" "$OUT" "Traceback"
 session "$CFG" 403 sid-c "$T/acme" idle 7200
 
@@ -237,11 +268,12 @@ session "$CFG" 403 sid-c "$T/acme" idle 7200
 FAKE_DIR="$T/fakebd"; mkdir -p "$FAKE_DIR"; echo 1 > "$FAKE_DIR/rc"
 OUT=$(FAKE_BD_DIR="$FAKE_DIR" "$TABS" 2>&1); RC=$?
 assert_eq "bd failing: still exits 0" "$RC" 0
-A=$(block ttys001)
-assert_contains "bd failing: the record's title stays" "$A" "ac-1 Resend the order email"
-assert_contains "bd failing: says so"          "$A" "bead status unknown (bd didn't answer)"
-assert_contains "bd failing: session state stays" "$A" "idle 5h"
-assert_contains "bd failing: a done record still says closed" "$(block ttys004)" "closed by this session"
+A=$(tab "Resend the order")
+assert_contains "bd failing: the record's title stays" "$A" "Resend the order email"
+assert_contains "bd failing: an idle bound tab stays waiting" "$(section "WAITING ON YOU")" "Resend the order email"
+assert_contains "bd failing: says so, with the age" "$A" "your turn · bead status unknown (bd didn't answer) · 5h"
+assert_not_contains "bd failing: no empty goal line" "$A" "goal"
+assert_contains "bd failing: a done record is still closed" "$(section "NOTHING PENDING")" "closed · 2h"
 
 # bd slow: the deadline holds the view to it
 FAKE_DIR="$T/slowbd"; mkdir -p "$FAKE_DIR"; echo 5 > "$FAKE_DIR/sleep"; echo '[]' > "$FAKE_DIR/stdout"
@@ -249,7 +281,13 @@ S=$(python3 -c 'import time; print(time.time())')
 OUT=$(FAKE_BD_DIR="$FAKE_DIR" WB_TABS_BD_TIMEOUT=0.2 "$TABS" 2>&1)
 E=$(python3 -c "import time; print(int(time.time() - $S < 3))")
 assert_eq "bd slow: the deadline holds" "$E" 1
-assert_contains "bd slow: says so" "$(block ttys001)" "bead status unknown (bd didn't answer)"
+assert_contains "bd slow: says so" "$(tab "Resend the order")" "bead status unknown (bd didn't answer)"
+
+# a status this view has never heard of is shown, and doesn't claim anyone's time
+session "$CFG" 103 sid-a "$T/wts/acme-x1y" compacting 60
+OUT=$("$TABS" 2>&1)
+assert_contains "unknown status: shown as it is" "$(section "NOTHING PENDING")" "compacting · 1m"
+session "$CFG" 103 sid-a "$T/wts/acme-x1y" idle 18000
 
 # ps failing: nothing to say what's live, so say that
 OUT=$(FAKE_PS_RC=1 "$TABS" 2>&1); RC=$?
@@ -261,5 +299,6 @@ assert_contains "ps failing: says so" "$OUT" "can't read the process table"
 OUT=$("$TABS" 2>&1); RC=$?
 assert_eq "no tabs: exits 0" "$RC" 0
 assert_contains "no tabs: says so" "$OUT" "no open terminal tabs"
+assert_eq "no tabs: --waiting is zero" "$("$TABS" --waiting)" '{"total": 0, "spaces": {}}'
 
 finish

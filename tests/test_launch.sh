@@ -277,14 +277,14 @@ assert_contains "pick: lands in the project" "$out" "AFTER rc=0 PWD=$T/side/beta
 out="$(WB_TEST_PICK_SPACE='Side › gamma' WB_TEST_PICK_WORK='something new' L)"
 assert_contains "pick: no-store space still offers something new" "$out" "start something new in gamma"
 
-# the tabs row (wb-xw0): on screen 1, after the spaces; wb-tabs runs only when chosen, then back
+# the tabs row (wb-xw0): on screen 1, after the spaces; its view is only shown when chosen, then back
 export WB_PS="$REPO/tests/fake/fake-ps" FAKE_PS_OUT="$T/ps.out" FAKE_PS_LOG="$T/ps.log"
 printf '  901     1 ttys901  -zsh\n' > "$FAKE_PS_OUT"; : > "$FAKE_PS_LOG"
 out="$(printf 'q\n' | WB_NO_FZF=1 L)"
 assert_contains "tabs row: in the numbered menu, after the three spaces" "$out" "4) ✦ open tabs"
-assert_eq "tabs row: drawing the screen does not run wb-tabs" "$(cat "$FAKE_PS_LOG")" ""
+assert_not_contains "tabs row: drawing the screen does not show the view" "$out" "plain shell"
 out="$(printf '4\n\n1\n1\n' | WB_NO_FZF=1 L)"
-assert_contains "tabs row: choosing it shows the tabs view" "$out" "ttys901"
+assert_contains "tabs row: choosing it shows the tabs view" "$out" "plain shell"
 assert_contains "tabs row: it waits before going back" "$out" "Press Enter to go back"
 assert_eq "tabs row: back on screen 1" "$(printf '%s\n' "$out" | grep -c '✦ open tabs')" "2"
 assert_contains "tabs row: a session still starts afterwards" "$out" "DRY-RUN"
@@ -293,7 +293,7 @@ assert_contains "tabs row: a failed view says why" "$out" "wb-tabs: can't read t
 assert_eq "tabs row: ... and still comes back" "$(printf '%s\n' "$out" | grep -c '✦ open tabs')" "2"
 assert_contains "tabs row: ... and q leaves a shell" "$out" "AFTER rc=0 PWD=$T/start"
 out="$(WB_TEST_PICK_SPACE='✦ open tabs' L </dev/null)"
-assert_contains "tabs row: fzf path shows the view" "$out" "ttys901"
+assert_contains "tabs row: fzf path shows the view" "$out" "plain shell"
 assert_contains "tabs row: EOF at the pause leaves a shell rather than looping" "$out" "AFTER rc=0 PWD=$T/start"
 # a fake fzf, as the real one is driven: choose the row, then Esc on the screen that comes back
 mkdir -p "$T/pickbin"
@@ -305,9 +305,36 @@ grep '✦ open tabs'
 EOF
 chmod +x "$T/pickbin/fzf"
 out="$(printf '\n' | PATH="$T/pickbin:$PATH" L)"
-assert_contains "tabs row: fzf: choosing it shows the view" "$out" "ttys901"
+assert_contains "tabs row: fzf: choosing it shows the view" "$out" "plain shell"
 assert_contains "tabs row: fzf: screen 1 comes back and esc leaves a shell" "$out" "AFTER rc=0 PWD=$T/start"
-rm -f "$T/picked"; unset WB_PS FAKE_PS_OUT FAKE_PS_LOG
+rm -f "$T/picked"; unset FAKE_PS_OUT FAKE_PS_LOG
+
+# the yellow count (wb-pmr): from wb-tabs --waiting, on the space's row and the tabs row
+mkdir -p "$T/ui3/bin" "$T/ui3/lib"; cp "$REPO"/bin/wb-ui "$REPO"/bin/wb-backlog "$T/ui3/bin/"; cp -R "$REPO"/lib/. "$T/ui3/lib/"
+cat > "$T/ui3/bin/wb-tabs" <<'EOF'
+#!/usr/bin/env bash
+[ "$1" = --waiting ] || exit 9
+[ -n "${FAKE_TABS_SLEEP:-}" ] && sleep "$FAKE_TABS_SLEEP"
+[ -n "${FAKE_TABS_RC:-}" ] && exit "$FAKE_TABS_RC"
+echo '{"total": 3, "spaces": {"Acme": 2}}'
+EOF
+chmod +x "$T/ui3/bin/wb-tabs"
+rm -rf "$T/start3"; mkdir -p "$T/start3"; "$REPO/bin/wb-spaces" > "$T/start3/spaces.tsv"
+"$T/ui3/bin/wb-ui" fill-counts "$T/start3"; S1=$("$T/ui3/bin/wb-ui" render-spaces "$T/start3")
+assert_contains "waiting count: yellow, first on its space's row" "$(grep Acme <<<"$S1")" $'\t\e[33m2 waiting on you\e[0m · '
+assert_not_contains "waiting count: not on another space's row" "$(grep -v 'Acme\|open tabs' <<<"$S1")" "waiting on you"
+assert_contains "waiting count: the total on the tabs row" "$(grep 'open tabs' <<<"$S1")" $'\e[33m3 waiting on you\e[0m'
+rm -rf "$T/start3/counts" "$T/start3/waiting.json"
+"$T/ui3/bin/wb-ui" render-spaces "$T/start3" > "$T/screen3"; RC=$?
+assert_eq "waiting count: not read yet, the screen still draws" "$RC" 0
+assert_not_contains "waiting count: not read yet, none shown" "$(cat "$T/screen3")" "waiting on you"
+"$T/ui3/bin/wb-ui" fill-counts "$T/start3"   # a good read first: a failed one must not leave it showing
+FAKE_TABS_RC=1 "$T/ui3/bin/wb-ui" fill-counts "$T/start3"
+assert_not_contains "waiting count: a failing wb-tabs adds nothing" "$("$T/ui3/bin/wb-ui" render-spaces "$T/start3")" "waiting on you"
+assert_contains "waiting count: a failing wb-tabs leaves the other counts" "$("$T/ui3/bin/wb-ui" render-spaces "$T/start3")" "NOW"
+rm -rf "$T/start3/counts"; s0=$SECONDS; FAKE_TABS_SLEEP=30 "$T/ui3/bin/wb-ui" fill-counts "$T/start3"
+assert_eq "waiting count: a hung wb-tabs can't hold the screen" "$(( SECONDS - s0 < 10 ))" 1
+assert_not_contains "waiting count: a hung wb-tabs adds nothing" "$("$T/ui3/bin/wb-ui" render-spaces "$T/start3")" "waiting on you"
 
 # leaving
 out="$(printf 'q\n' | WB_NO_FZF=1 L)"

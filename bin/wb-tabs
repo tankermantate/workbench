@@ -1,10 +1,13 @@
 #!/usr/bin/env python3
 """wb-tabs — every open terminal tab: what it's on, what that's for, where it stands.
 
-  wb-tabs     prints one block per tab (a plain shell is one line). Reads only: ps, Claude's and
-              workbench's session files, and one `bd list` per bead store (never `bd show`,
-              which rewrites .beads/last-touched, the target of a bare `bd close`).
-              Spec: docs/specs/2026-11-05-tabs-view-design.md
+  wb-tabs            prints the tabs grouped by what they need from you: waiting (with the goal
+                     and next step), working, nothing pending.
+  wb-tabs --waiting  prints {"total": n, "spaces": {label: n}}, for the launcher's yellow count.
+
+Reads only: ps, Claude's and workbench's session files, and one `bd list` per bead store (never
+`bd show`, which rewrites .beads/last-touched, the target of a bare `bd close`).
+Spec: docs/specs/2026-11-05-tabs-view-design.md
 
 Exit 1: ps failed, so nothing can say which tabs are live.
 """
@@ -23,10 +26,13 @@ import wb_space  # noqa: E402
 
 PS = os.environ.get("WB_PS", "ps")
 BD_TIMEOUT = float(os.environ.get("WB_TABS_BD_TIMEOUT", "2"))
-GOAL_MAX, EPIC_MAX, NOTE_MAX = 90, 40, 80
+GOAL_MAX, NOTE_MAX, REASON_MAX, MIN_TITLE = 100, 100, 30, 20
 MIN_WORDS = 5
 LABEL = r"^(#+\s*|(WHY|GOAL|EPIC)\s*:\s*)"
 BD_SILENT = "bead status unknown (bd didn't answer)"
+BLOCKED, YOUR_TURN, WORKING, NOTHING = range(4)
+SECTIONS = (("WAITING ON YOU", (BLOCKED, YOUR_TURN)), ("WORKING", (WORKING,)), ("NOTHING PENDING", (NOTHING,)))
+YELLOW, RESET = "\033[33m", "\033[0m"
 
 
 def cut(text, n):
@@ -98,34 +104,12 @@ def launched_by_workbench(pids):
     return {int(m.group(1)) for m in re.finditer(r"^\s*(\d+)\s.*?(?<!\S)WB_SPACE_ROOT=", out, re.M)}
 
 
-def tab_title(tty, session):
-    """The tab's half of what the status line last set, while it's this session's: the file
-    outlives the session that wrote it."""
-    path = os.path.expanduser(f"~/.cache/claude-titles/last-{tty}")
-    started = session.get("startedAt") if session else None
-    try:
-        if not isinstance(started, (int, float)) or os.path.getmtime(path) < started / 1000:
-            return ""
-        with open(path) as f:
-            return f.read().partition("|")[0].strip()
-    except OSError:
-        return ""
-
-
 def age(seconds):
     s = max(0, int(seconds))
     for unit, size in (("d", 86400), ("h", 3600), ("m", 60)):
         if s >= size:
             return f"{s // size}{unit}"
     return f"{s}s"
-
-
-def session_state(session):
-    word = {"busy": "working"}.get(session.get("status"), session.get("status")) or ""
-    at = session.get("statusUpdatedAt")
-    if not word:
-        return ""
-    return f"{word} {age(time.time() - at / 1000)}" if isinstance(at, (int, float)) else str(word)
 
 
 def first_sentence(text):
@@ -137,13 +121,8 @@ def first_sentence(text):
     return next((x for x in sentences if len(x.split()) >= MIN_WORDS), sentences[0] if sentences else "")
 
 
-def goal(bead, beads):
-    text = first_sentence(bead.get("description")) or "no description"
-    parent = beads.get(bead.get("parent")) if bead.get("parent") else None
-    if not parent:
-        return cut(text, GOAL_MAX)
-    epic = re.sub(LABEL, "", str(parent.get("title") or ""), flags=re.I)
-    return f"{cut(epic, EPIC_MAX)} › {cut(text, GOAL_MAX)}"
+def goal(bead):
+    return cut(first_sentence(bead.get("description")) or "no description", GOAL_MAX)
 
 
 def latest_note(bead):
@@ -154,20 +133,32 @@ def latest_note(bead):
     return ""
 
 
-def status(record, bead, beads, session):
-    """Bead state, session state, then the latest word on it. bd outranks the record: a bead
-    can be reopened after a session closed it."""
-    if beads is None:
-        state = "closed by this session" if record.get("done") else BD_SILENT
-        news = ""
-    elif bead is None:
-        state, news = "bead not found", ""
-    elif bead.get("status") == "closed":
-        state = "closed by this session" if record.get("done") else "closed"
-        news = str(bead.get("close_reason") or "") or latest_note(bead)
-    else:
-        state, news = str(bead.get("status") or "status unknown"), latest_note(bead)
-    return " · ".join(x for x in (state, session_state(session), cut(news, NOTE_MAX)) if x)
+def standing(session, record, bead, store):
+    """(group, status text). What Claude says comes first: a real prompt is a real prompt, whatever
+    the bead says. An idle session then takes its meaning from the bead, and bd outranks the record,
+    since a bead can be reopened after a session closed it. If bd can't say, a tab that may be
+    waiting on you stays in view."""
+    def text(*parts):
+        ago = session.get("statusUpdatedAt") if session else None
+        ago = age(time.time() - ago / 1000) if isinstance(ago, (int, float)) else ""
+        return " · ".join(x for x in (*parts, ago) if x)
+    state = session.get("status") if session else None
+    if state == "waiting":
+        return BLOCKED, text("blocked", cut(session.get("waitingFor") or "", REASON_MAX))
+    if state == "busy":
+        return WORKING, text("working")
+    if state != "idle":
+        return NOTHING, text(str(state or "status unknown"))
+    if record is None:
+        return NOTHING, text("idle")
+    if store is None:
+        return (NOTHING, text("closed")) if record.get("done") else (YOUR_TURN, text("your turn", BD_SILENT))
+    if bead is None:
+        return NOTHING, text("bead not found")
+    if bead.get("status") == "closed":
+        return NOTHING, text("closed")
+    note = "" if bead.get("status") in ("open", "in_progress") else f"bead {bead.get('status') or 'status unknown'}"
+    return YOUR_TURN, text("your turn", note)
 
 
 def place(session, record, spaces):
@@ -179,50 +170,78 @@ def place(session, record, spaces):
     return found
 
 
-def where(found, tail):
+def place_name(found):
+    if not found:
+        return ""
     label, is_space, worktree = found
-    place = label if is_space else f"({label})"
-    if worktree:
-        place += f" ⑂ {os.path.basename(worktree)}"
-    return f"{place} · {tail}"
+    return (label if is_space else f"({label})") + (" ⑂" if worktree else "")
 
 
-def block(tty, pid, session, record, located, beads, launched):
+def tab_row(pid, session, record, located, beads, launched):
     if pid is None:
-        return [f"{tty}  plain shell"]
-    title = tab_title(tty, session)
-    lines = [f"{tty}  {title}" if title else tty]
-    if record is None:
-        tail = "no bead" if pid in launched else "unbound"
-        lines.append(f"  {where(located, tail)}" if located else f"  {tail}")
-        state = session_state(session) if session else ""
-        return lines + ([f"  status  {state}"] if state else [])
-    store = beads.get(wb_session.store_root(record.get("root") or "/nonexistent") or "")
-    bead = store.get(record["bead"]) if store else None
-    title = (bead or {}).get("title") or record.get("title") or ""
-    head = record["bead"] + " " + title
-    lines.append(f"  {where(located, head)}" if located else f"  {head}")
-    if bead:
-        lines.append(f"  goal    {goal(bead, store)}")
-    lines.append(f"  status  {status(record, bead, store, session)}")
+        return {"group": NOTHING, "plain": True, "place": "plain shell", "id": "", "title": "", "state": "",
+                "details": [], "space": None}
+    store = bead = None
+    if record:
+        store = beads.get(wb_session.store_root(record.get("root") or "/nonexistent") or "")
+        bead = store.get(record["bead"]) if store else None
+    group, state = standing(session, record, bead, store)
+    row = {"group": group, "plain": False, "place": place_name(located), "state": state, "details": [],
+           "id": wb_session.short(record["bead"]) if record else "",
+           "space": located[0] if located and located[1] else None}
+    if record:
+        row["title"] = (bead or {}).get("title") or record.get("title") or ""
+    else:
+        row["title"] = "no bead" if pid in launched else "unbound"
+    if bead and group in (BLOCKED, YOUR_TURN):  # the tabs that need a decision get what it takes to make one
+        row["details"] = [f"goal  {goal(bead)}", f"next  {cut(latest_note(bead), NOTE_MAX) or 'no next step recorded'}"]
+    return row
+
+
+def render(rows, width=None):
+    """The view's lines. On a terminal the title gives way, so the status column stays readable."""
+    place_w = max(len(r["place"]) for r in rows)
+    id_w = max(len(r["id"]) for r in rows)
+    state_w = max(len(r["state"]) for r in rows)
+    title_w = max(len(r["title"]) for r in rows)
+    if width:
+        title_w = min(title_w, max(MIN_TITLE, width - place_w - id_w - state_w - 8))
+    lines = []
+    for heading, groups in SECTIONS:
+        # stable, so tabs stay in tty order within a group; a plain shell says least, so it's last
+        members = sorted((r for r in rows if r["group"] in groups), key=lambda r: (r["group"], r["plain"]))
+        if not members:
+            continue
+        if lines:
+            lines.append("")
+        lines.append(f"{heading} ({len(members)})")
+        for i, r in enumerate(members):
+            if i and any(m["details"] for m in members):
+                lines.append("")  # three-line tabs run together without it; one-line rows don't
+            title = cut(r["title"], title_w) if width else r["title"]
+            lines.append(f"  {r['place']:<{place_w}}  {r['id']:<{id_w}}  {title:<{title_w}}  {r['state']}".rstrip())
+            lines += [f"      {d}" for d in r["details"]]
     return lines
 
 
-def main():
+def main(argv):
+    only_waiting = "--waiting" in argv
     procs = processes()
     if procs is None:
         print("wb-tabs: can't read the process table, so can't say which tabs are live.", file=sys.stderr)
         return 1
     live = tabs(procs)
     if not live:
-        print("no open terminal tabs")
+        print(json.dumps({"total": 0, "spaces": {}}) if only_waiting else "no open terminal tabs")
         return 0
     space_rows = wb_space.rows()
     spaces = wb_space.roots(space_rows)
     dirs = config_dirs(space_rows)
     sessions = {pid: pid_file(pid, dirs) for pid in live.values() if pid}
     records = {pid: wb_session.load(s["sessionId"]) for pid, s in sessions.items() if s}
-    launched = launched_by_workbench([pid for pid in live.values() if pid and not records.get(pid)])
+    # the count doesn't need this, and it's the one read of another process's environment
+    launched = set() if only_waiting else launched_by_workbench(
+        [pid for pid in live.values() if pid and not records.get(pid)])
     stores = {r for r in (wb_session.store_root(x.get("root") or "/nonexistent")
                           for x in records.values() if x) if r}
     # one read per store, so two spaces in a repo don't contend; stores and git calls side by side,
@@ -232,16 +251,26 @@ def main():
         place_jobs = {pid: pool.submit(place, s, records.get(pid), spaces) for pid, s in sessions.items() if s}
         beads = {s: j.result() for s, j in store_jobs.items()}
         places = {pid: j.result() for pid, j in place_jobs.items()}
-    lines = []
-    for tty in sorted(live):
-        pid = live[tty]
-        lines += block(tty, pid, sessions.get(pid), records.get(pid), places.get(pid), beads, launched)
-    if sys.stdout.isatty():  # a wrapped line would break the one-screen read; pipes get it all
-        width = shutil.get_terminal_size().columns - 2  # an emoji takes two cells and one len()
-        lines = [line if len(line) <= width else line[:width - 1] + "…" for line in lines]
-    print("\n".join(lines))
+    rows = [tab_row(live[tty], sessions.get(live[tty]), records.get(live[tty]), places.get(live[tty]), beads, launched)
+            for tty in sorted(live)]
+    if only_waiting:
+        waiting = [r for r in rows if r["group"] in (BLOCKED, YOUR_TURN)]
+        counts = {}
+        for r in waiting:
+            if r["space"]:
+                counts[r["space"]] = counts.get(r["space"], 0) + 1
+        print(json.dumps({"total": len(waiting), "spaces": counts}))
+        return 0
+    on_terminal = sys.stdout.isatty()
+    # a wrapped line would break the one-screen read; pipes get it all, and an emoji takes two cells and one len()
+    width = shutil.get_terminal_size().columns - 2 if on_terminal else None
+    for line in render(rows, width):
+        if width and len(line) > width:
+            line = line[:width - 1] + "…"
+        waiting_heading = on_terminal and line.startswith(SECTIONS[0][0])
+        print(f"{YELLOW}{line}{RESET}" if waiting_heading else line)
     return 0
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    sys.exit(main(sys.argv[1:]))
