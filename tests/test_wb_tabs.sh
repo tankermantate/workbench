@@ -236,6 +236,49 @@ assert_eq "--waiting: per space and in total" \
   "$(python3 -c 'import json,sys; j=json.loads(sys.argv[1]); print(j["total"], sorted(j["spaces"].items()))' "$J")" \
   "8 [('Acme', 4), ('Globex', 2), ('Web', 1)]"
 
+# what the launcher's list reads: a tab's lines all carry its tty, the others carry -
+ROWS=$(COLUMNS=200 "$TABS" --rows 2>&1)   # wide enough that no title is cut
+row_tty() { awk -F'\t' -v t="$1" 'index($2, t){print $1; exit}' <<<"$ROWS"; }
+assert_eq "rows: a tab's row carries its tty"    "$(row_tty "Resend the order email")" "ttys001"
+assert_eq "rows: its goal line goes there too"   "$(row_tty "goal  customers lose")" "ttys001"
+assert_eq "rows: its next line goes there too"   "$(row_tty "next  retry added")" "ttys001"
+assert_eq "rows: a plain shell can be picked"    "$(row_tty "plain shell")" "ttys002"
+assert_eq "rows: a heading can't"                "$(row_tty "WORKING (")" "-"
+assert_eq "rows: nor can a blank line"           "$(grep -c $'^-\t$' <<<"$ROWS")" 9
+assert_contains "rows: the waiting heading is yellow, for fzf --ansi" "$ROWS" $'\e[33mWAITING ON YOU (8)\e[0m'
+assert_eq "rows: always two fields" "$(awk -F'\t' 'NF!=2' <<<"$ROWS" | wc -l | tr -d ' ')" 0
+assert_eq "rows: fit inside fzf's gutter at the given width" \
+  "$(COLUMNS=60 "$TABS" --rows | cut -f2 | sed $'s/\e\\[[0-9;]*m//g' | python3 -c 'import sys; print(int(max(len(l.rstrip("\n")) for l in sys.stdin) <= 56))')" 1
+
+# jumping: the tty reaches osascript as an argument, and only if it looks like one
+export FAKE_OSA_LOG="$T/osa.log" TERM_PROGRAM=Apple_Terminal
+: > "$FAKE_OSA_LOG"
+"$TABS" --jump ttys013; RC=$?
+assert_eq "jump: exits 0"                        "$RC" 0
+assert_eq "jump: asks for that tab"              "$(cat "$FAKE_OSA_LOG")" "ttys013"
+: > "$FAKE_OSA_LOG"
+J=$("$TABS" --jump 'ttys013"; do shell script "x' 2>&1); RC=$?
+assert_eq "jump: a strange tty fails"            "$RC" 1
+assert_contains "jump: and says so"              "$J" "not a terminal tab"
+assert_eq "jump: without reaching a script"      "$(cat "$FAKE_OSA_LOG")" ""
+J=$(FAKE_OSA_OUT=gone "$TABS" --jump ttys013 2>&1); RC=$?
+assert_eq "jump: a closed tab fails"             "$RC" 1
+assert_contains "jump: and says so"              "$J" "has closed"
+J=$(FAKE_OSA_RC=1 FAKE_OSA_ERR="execution error: Not authorized to send Apple events to Terminal. (-1743)" "$TABS" --jump ttys013 2>&1); RC=$?
+assert_eq "jump: declined permission fails"      "$RC" 1
+assert_contains "jump: and says where to allow it" "$J" "Privacy & Security"
+J=$(FAKE_OSA_RC=1 FAKE_OSA_ERR="something else" "$TABS" --jump ttys013 2>&1); RC=$?
+assert_eq "jump: another failure fails"          "$RC" 1
+assert_contains "jump: and passes on the reason" "$J" "something else"
+: > "$FAKE_OSA_LOG"
+J=$(TERM_PROGRAM=iTerm.app "$TABS" --jump ttys013 2>&1); RC=$?
+assert_eq "jump: another terminal fails"         "$RC" 1
+assert_contains "jump: and says so"              "$J" "Apple Terminal"
+assert_eq "jump: without trying"                 "$(cat "$FAKE_OSA_LOG")" ""
+J=$(WB_OSASCRIPT=/nonexistent/osascript "$TABS" --jump ttys013 2>&1); RC=$?
+assert_eq "jump: no osascript fails"             "$RC" 1
+assert_not_contains "jump: no traceback"         "$J" "Traceback"
+
 # on a terminal, lines stop at its width; a pipe gets them whole
 assert_contains "piped: lines stay whole" "$(tab "Resend the order")" "Resend the order email"
 LONGEST=$(COLUMNS=40 script -q /dev/null "$TABS" 2>/dev/null </dev/null | tr -d '\r' | python3 -c 'import sys; print(max(len(l.rstrip("\n")) for l in sys.stdin))')
@@ -300,5 +343,6 @@ OUT=$("$TABS" 2>&1); RC=$?
 assert_eq "no tabs: exits 0" "$RC" 0
 assert_contains "no tabs: says so" "$OUT" "no open terminal tabs"
 assert_eq "no tabs: --waiting is zero" "$("$TABS" --waiting)" '{"total": 0, "spaces": {}}'
+assert_eq "no tabs: --rows says so, unpickable" "$("$TABS" --rows)" $'-\tno open terminal tabs'
 
 finish

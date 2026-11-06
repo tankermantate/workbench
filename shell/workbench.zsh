@@ -113,15 +113,37 @@ _wb_start_strategy() {
   return 0   # Claude ran: whatever it exited with, the launcher is done
 }
 
-# Screen 1's tabs row. wb-tabs takes about a second, so it runs only when chosen,
-# and not inside $(...): it cuts lines to the terminal's width only on a terminal.
-# If it fails it has said why, and the pause still lets that be read. Returns 1 on
-# EOF, when no Enter is coming.
-_wb_show_tabs() {
+# The printed tabs view, or what went wrong: fzf's redraw would hide either, so wait for Enter.
+# Returns 1 on EOF, when no Enter is coming.
+_wb_tabs_pause() {
   local ans
-  $WORKBENCH_HOME/bin/wb-tabs
-  print -nu2 "Press Enter to go back "   # fzf's redraw would hide the view otherwise
+  print -nu2 "Press Enter to go back "
   read -r ans
+}
+
+_wb_print_tabs() {
+  # not inside $(...): it cuts lines to the terminal's width only on a terminal
+  $WORKBENCH_HOME/bin/wb-tabs
+  _wb_tabs_pause
+}
+
+# Screen 1's tabs row. wb-tabs takes about a second, so it runs only when chosen. With fzf
+# it's a list: picking a tab's line goes to that tab and back to screen 1, which re-reads
+# its counts. Returns 1 on EOF at a pause.
+_wb_show_tabs() {
+  local wb=$WORKBENCH_HOME/bin/wb-tabs rows line rc
+  _wb_use_fzf || { _wb_print_tabs; return }
+  while true; do
+    rows=$(COLUMNS=$COLUMNS $wb --rows) || { _wb_tabs_pause; return }
+    line=$(print -r -- $rows | _wb_fzf "" --delimiter=$'\t' --with-nth=2 --no-sort --exact --ignore-case \
+      --layout=reverse --ansi --prompt='Tabs? › ' --header='enter or double-click: go to tab · ctrl-r: re-read · esc: back' \
+      --bind 'load:pos(2)' --bind "ctrl-r:reload(COLUMNS=$COLUMNS ${(q)wb} --rows)"); rc=$?
+    (( rc == 1 || rc == 130 )) && return 0
+    (( rc == 0 )) || { _wb_print_tabs; return }
+    [[ ${line%%$'\t'*} == - ]] && continue    # a heading or a blank line
+    $wb --jump ${line%%$'\t'*} && return 0
+    _wb_tabs_pause || return 1
+  done
 }
 
 # ◐ beads are probably another session's. $1 id, $2 worktree from the claim

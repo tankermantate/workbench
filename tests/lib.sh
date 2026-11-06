@@ -28,3 +28,4 @@ mkstore() { local d; for d in "$@"; do mkdir -p "$d/.beads"; : > "$d/.beads/conf
 
 # the launcher's waiting count runs wb-tabs: no suite reads the real tabs (a suite can override it)
 export WB_PS="$REPO/tests/fake/fake-ps"
+export WB_OSASCRIPT="$REPO/tests/fake/fake-osascript"   # never the real tab bar

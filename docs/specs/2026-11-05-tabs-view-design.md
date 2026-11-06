@@ -73,7 +73,8 @@ for: a process's environment can hold secrets, so nothing else is read from it o
    `WHY:`. Next is the latest note line (a worktree-claim line isn't news), or
    `no next step recorded`. A model only if these read badly in use; nothing here is cached.
 2. **No AppleScript for tab titles.** It would bring an Automation permission prompt and more
-   latency to a command meant to be instant, and only work in one terminal.
+   latency to a command meant to be instant, and only work in one terminal. Jumping to a tab does
+   use it, because the cost then falls only on a pick, not on the view.
 3. **ps is the source of truth for live tabs**, as above.
 4. **No binding means `unbound`**, never a guess from the title or folder. The space is still
    shown, since the folder does say that.
@@ -136,11 +137,23 @@ over 3s the rows just show no count, and an earlier count is removed rather than
 The count is right as of when the screen was drawn and doesn't update live; the bell covers changes
 while the launcher is open.
 
-Choosing `✦ open tabs` runs the view, then waits for Enter and returns to screen 1. A view longer than
+## Going to a tab
+
+With fzf, choosing `✦ open tabs` opens the view as a list, from `wb-tabs --rows`: `tty<TAB>line`, sized
+to `$COLUMNS` less fzf's gutter. All of a tab's lines carry its tty, so its goal or next line goes
+there too; headings and blanks carry `-`, and picking one does nothing. Enter or a double-click goes
+to the tab, through `wb-tabs --jump TTY`, and the launcher's tab returns to screen 1, which re-reads
+its counts. Esc returns there too. `ctrl-r` re-reads the list.
+
+`--jump` selects the tab with `osascript`, in Apple Terminal only, with the tty passed as an argument
+after it's checked to be `ttysNNN`. On the Mac it was built on, macOS asked for no permission; another
+Mac might ask for Automation permission. If that's declined, the tab has closed or it's another terminal, it says so and waits for Enter, then returns to the list.
+
+Without fzf, or if fzf itself fails, the view prints as before and waits for Enter. A view longer than
 the window scrolls: there is no pager, because `wb-tabs` only cuts lines to fit when it's printing
 straight to the terminal.
 
 ## Not built
 
 - Anything that writes, caches or spawns a model.
-- Blinking, a background watcher, a status line segment, jumping to a tab from the list.
+- Blinking, a background watcher, a status line segment, jumping in any terminal but Apple Terminal.

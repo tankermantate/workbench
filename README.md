@@ -110,8 +110,8 @@ A session the launcher (or `new-session`) starts knows which bead it's on:
   step), working, and nothing pending. Plain shells and sessions with no bead are labelled, not
   dropped. It only reads, in about a second; a bead store that doesn't answer within 2s
   (`WB_TABS_BD_TIMEOUT`) says so on its rows. The launcher's first screen has it too, as
-  `✦ open tabs`; Enter brings you back. That screen also shows a yellow `N waiting on you` on each
-  space and in total.
+  `✦ open tabs`, where it's a list: Enter or a double-click goes to that tab (Apple Terminal), and esc brings you back. That screen also shows a yellow
+  `N waiting on you` on each space and in total.
 - **A bell on the tab that needs you:** add `"preferredNotifChannel": "terminal_bell"` to
   `settings.json` in each Claude config dir. Claude Code then rings the terminal bell when a session
   finishes or pauses for permission while you're away, and Apple Terminal shows it on that tab.

@@ -1,0 +1,9 @@
+#!/usr/bin/env bash
+# Fake osascript for wb-tabs --jump, picked with WB_OSASCRIPT, so no suite can switch a real tab.
+#   FAKE_OSA_LOG   each call's last argument (the tty) is appended to it
+#   FAKE_OSA_OUT   what the script answers (default: found)
+#   FAKE_OSA_ERR   its stderr; FAKE_OSA_RC its exit code (default 0)
+[ -n "${FAKE_OSA_LOG:-}" ] && echo "${*: -1}" >> "$FAKE_OSA_LOG"
+[ -n "${FAKE_OSA_ERR:-}" ] && echo "$FAKE_OSA_ERR" >&2
+[ "${FAKE_OSA_RC:-0}" = 0 ] && echo "${FAKE_OSA_OUT:-found}"
+exit "${FAKE_OSA_RC:-0}"

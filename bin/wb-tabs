@@ -4,9 +4,12 @@
   wb-tabs            prints the tabs grouped by what they need from you: waiting (with the goal
                      and next step), working, nothing pending.
   wb-tabs --waiting  prints {"total": n, "spaces": {label: n}}, for the launcher's yellow count.
+  wb-tabs --rows     prints the same view as tty<TAB>line, for the launcher's list: all of a tab's
+                     lines carry its tty, and headings and blank lines carry -.
+  wb-tabs --jump TTY switches Apple Terminal to that tab, through osascript; exit 1 says why not.
 
-Reads only: ps, Claude's and workbench's session files, and one `bd list` per bead store (never
-`bd show`, which rewrites .beads/last-touched, the target of a bare `bd close`).
+Apart from --jump it only reads: ps, Claude's and workbench's session files, and one `bd list` per
+bead store (never `bd show`, which rewrites .beads/last-touched, the target of a bare `bd close`).
 Spec: docs/specs/2026-11-05-tabs-view-design.md
 
 Exit 1: ps failed, so nothing can say which tabs are live.
@@ -25,6 +28,26 @@ import wb_session  # noqa: E402  (lives in lib/; realpath, since install.sh link
 import wb_space  # noqa: E402
 
 PS = os.environ.get("WB_PS", "ps")
+OSASCRIPT = os.environ.get("WB_OSASCRIPT", "osascript")
+JUMP_TIMEOUT = 60  # seconds; the first jump waits on macOS's permission dialog
+FZF_GUTTER = 4  # the columns fzf keeps for itself
+# the tty goes in as an argument, never into the script's text
+JUMP_SCRIPT = """on run argv
+  set wanted to "/dev/" & item 1 of argv
+  tell application "Terminal"
+    repeat with w in windows
+      repeat with t in tabs of w
+        if tty of t is wanted then
+          set selected of t to true
+          set index of w to 1
+          activate
+          return "found"
+        end if
+      end repeat
+    end repeat
+  end tell
+  return "gone"
+end run"""
 BD_TIMEOUT = float(os.environ.get("WB_TABS_BD_TIMEOUT", "2"))
 GOAL_MAX, NOTE_MAX, REASON_MAX, MIN_TITLE = 100, 100, 30, 20
 MIN_WORDS = 5
@@ -199,7 +222,7 @@ def tab_row(pid, session, record, located, beads, launched):
 
 
 def render(rows, width=None):
-    """The view's lines. On a terminal the title gives way, so the status column stays readable."""
+    """The view as (tty or -, line). On a terminal the title gives way, so the status column stays readable."""
     place_w = max(len(r["place"]) for r in rows)
     id_w = max(len(r["id"]) for r in rows)
     state_w = max(len(r["state"]) for r in rows)
@@ -213,26 +236,51 @@ def render(rows, width=None):
         if not members:
             continue
         if lines:
-            lines.append("")
-        lines.append(f"{heading} ({len(members)})")
+            lines.append(("-", ""))
+        lines.append(("-", f"{heading} ({len(members)})"))
         for i, r in enumerate(members):
             if i and any(m["details"] for m in members):
-                lines.append("")  # three-line tabs run together without it; one-line rows don't
+                lines.append(("-", ""))  # three-line tabs run together without it; one-line rows don't
             title = cut(r["title"], title_w) if width else r["title"]
-            lines.append(f"  {r['place']:<{place_w}}  {r['id']:<{id_w}}  {title:<{title_w}}  {r['state']}".rstrip())
-            lines += [f"      {d}" for d in r["details"]]
+            lines.append((r["tty"], f"  {r['place']:<{place_w}}  {r['id']:<{id_w}}  {title:<{title_w}}  {r['state']}".rstrip()))
+            lines += [(r["tty"], f"      {d}") for d in r["details"]]
     return lines
 
 
+def fail(message):
+    print(f"wb-tabs: {message}", file=sys.stderr)
+    return 1
+
+
+def jump(tty):
+    if not re.fullmatch(r"ttys\d+", tty):
+        return fail(f"{tty!r} is not a terminal tab.")
+    if os.environ.get("TERM_PROGRAM") != "Apple_Terminal":
+        return fail("jumping to a tab only works in Apple Terminal.")
+    try:
+        p = subprocess.run([OSASCRIPT, "-e", JUMP_SCRIPT, tty], capture_output=True, text=True, timeout=JUMP_TIMEOUT)
+    except (OSError, subprocess.SubprocessError) as e:
+        return fail(f"couldn't ask Terminal to switch tabs ({e}).")
+    if p.returncode:
+        if "-1743" in p.stderr or "Not authorized" in p.stderr:
+            return fail("Terminal isn't allowed to switch its tabs. Allow it in System Settings > "
+                        "Privacy & Security > Automation.")
+        return fail(f"couldn't switch tabs: {p.stderr.strip()}")
+    return 0 if p.stdout.strip() == "found" else fail(f"that tab ({tty}) has closed.")
+
+
 def main(argv):
-    only_waiting = "--waiting" in argv
+    if argv[:1] == ["--jump"]:
+        return jump(argv[1] if len(argv) > 1 else "")
+    only_waiting, as_rows = "--waiting" in argv, "--rows" in argv
     procs = processes()
     if procs is None:
         print("wb-tabs: can't read the process table, so can't say which tabs are live.", file=sys.stderr)
         return 1
     live = tabs(procs)
     if not live:
-        print(json.dumps({"total": 0, "spaces": {}}) if only_waiting else "no open terminal tabs")
+        print(json.dumps({"total": 0, "spaces": {}}) if only_waiting
+              else "-\tno open terminal tabs" if as_rows else "no open terminal tabs")
         return 0
     space_rows = wb_space.rows()
     spaces = wb_space.roots(space_rows)
@@ -251,7 +299,8 @@ def main(argv):
         place_jobs = {pid: pool.submit(place, s, records.get(pid), spaces) for pid, s in sessions.items() if s}
         beads = {s: j.result() for s, j in store_jobs.items()}
         places = {pid: j.result() for pid, j in place_jobs.items()}
-    rows = [tab_row(live[tty], sessions.get(live[tty]), records.get(live[tty]), places.get(live[tty]), beads, launched)
+    rows = [dict(tab_row(live[tty], sessions.get(live[tty]), records.get(live[tty]), places.get(live[tty]),
+                         beads, launched), tty=tty)
             for tty in sorted(live)]
     if only_waiting:
         waiting = [r for r in rows if r["group"] in (BLOCKED, YOUR_TURN)]
@@ -263,12 +312,14 @@ def main(argv):
         return 0
     on_terminal = sys.stdout.isatty()
     # a wrapped line would break the one-screen read; pipes get it all, and an emoji takes two cells and one len()
-    width = shutil.get_terminal_size().columns - 2 if on_terminal else None
-    for line in render(rows, width):
+    width = shutil.get_terminal_size().columns - FZF_GUTTER if as_rows else \
+        shutil.get_terminal_size().columns - 2 if on_terminal else None
+    for tty, line in render(rows, width):
         if width and len(line) > width:
             line = line[:width - 1] + "…"
-        waiting_heading = on_terminal and line.startswith(SECTIONS[0][0])
-        print(f"{YELLOW}{line}{RESET}" if waiting_heading else line)
+        if (on_terminal or as_rows) and line.startswith(SECTIONS[0][0]):  # fzf --ansi shows the colour too
+            line = f"{YELLOW}{line}{RESET}"
+        print(f"{tty}\t{line}" if as_rows else line)
     return 0
 
 

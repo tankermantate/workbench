@@ -292,21 +292,63 @@ out="$(printf '4\n\nq\n' | WB_NO_FZF=1 FAKE_PS_RC=1 L)"
 assert_contains "tabs row: a failed view says why" "$out" "wb-tabs: can't read the process table"
 assert_eq "tabs row: ... and still comes back" "$(printf '%s\n' "$out" | grep -c '✦ open tabs')" "2"
 assert_contains "tabs row: ... and q leaves a shell" "$out" "AFTER rc=0 PWD=$T/start"
-out="$(WB_TEST_PICK_SPACE='✦ open tabs' L </dev/null)"
-assert_contains "tabs row: fzf path shows the view" "$out" "plain shell"
-assert_contains "tabs row: EOF at the pause leaves a shell rather than looping" "$out" "AFTER rc=0 PWD=$T/start"
-# a fake fzf, as the real one is driven: choose the row, then Esc on the screen that comes back
+# no fzf: a picked tab has nowhere to go, so the numbered menu keeps the printed view
+assert_contains "tabs row: the printed view has no field for fzf" "$(printf '4\n\nq\n' | WB_NO_FZF=1 L)" $'  plain shell\n'
+# with fzf (wb-1nk): the view is a list. A fake fzf, as the real one is driven: screen 1 chooses the
+# row, then each list answers with $T/answers' next line (a pattern to pick, or an exit code)
 mkdir -p "$T/pickbin"
 cat > "$T/pickbin/fzf" <<EOF
-#!/bin/sh
-if [ -e "$T/picked" ]; then exit 130; fi
-: > "$T/picked"
-grep '✦ open tabs'
+#!/bin/bash
+if [ ! -e "$T/picked" ]; then : > "$T/picked"; grep '✦ open tabs'; exit; fi
+case " \$* " in *"--prompt=Tabs"*) ;; *) exit 130 ;; esac
+cat > "$T/list.in"; printf '%s\n' "\$*" > "$T/list.args"; echo call >> "$T/list.calls"
+a=\$(sed -n "\$(wc -l < "$T/list.calls")p" "$T/answers")
+case "\$a" in ''|[0-9]*) exit "\${a:-130}" ;; esac
+grep -F -- "\$a" "$T/list.in" | head -1
 EOF
 chmod +x "$T/pickbin/fzf"
-out="$(printf '\n' | PATH="$T/pickbin:$PATH" L)"
-assert_contains "tabs row: fzf: choosing it shows the view" "$out" "plain shell"
-assert_contains "tabs row: fzf: screen 1 comes back and esc leaves a shell" "$out" "AFTER rc=0 PWD=$T/start"
+# two tabs: a plain shell, and a session stuck on a prompt
+printf '  901     1 ttys901  -zsh\n  911     1 ttys911  -zsh\n  912   911 ttys911  claude\n' > "$FAKE_PS_OUT"
+mkdir -p "$T/fakehome/.claude/sessions"
+printf '{"pid":912,"sessionId":"s9","cwd":"%s","status":"waiting","waitingFor":"input needed"}' "$T/acme" > "$T/fakehome/.claude/sessions/912.json"
+export FAKE_OSA_LOG="$T/osa.log" TERM_PROGRAM=Apple_Terminal
+pick() { rm -f "$T/picked" "$T/list.calls"; : > "$T/list.calls"; : > "$FAKE_OSA_LOG"; printf '%s\n' "${@:2}" > "$T/answers"; out="$(printf "$1" | HOME="$T/fakehome" PATH="$T/pickbin:$PATH" L)"; }
+
+pick '' 'input needed'
+assert_contains "list: the tabs are offered" "$(cat "$T/list.in")" "plain shell"
+assert_contains "list: the tty is hidden from view" "$(cat "$T/list.args")" "--with-nth=2"
+assert_contains "list: starts on a tab, not the heading" "$(cat "$T/list.args")" "load:pos(2)"
+assert_eq "list: picking a row jumps to its tab" "$(cat "$FAKE_OSA_LOG")" "ttys911"
+assert_eq "list: a jump goes back to screen 1, not the list" "$(wc -l < "$T/list.calls" | tr -d ' ')" 1
+assert_contains "list: screen 1 then leaves a shell" "$out" "AFTER rc=0 PWD=$T/start"
+
+pick '' 130
+assert_eq "list: esc jumps nowhere" "$(cat "$FAKE_OSA_LOG")" ""
+assert_contains "list: esc is back at screen 1, then a shell" "$out" "AFTER rc=0 PWD=$T/start"
+
+pick '' 'WAITING ON YOU' 130
+assert_eq "list: a heading jumps nowhere" "$(cat "$FAKE_OSA_LOG")" ""
+assert_eq "list: a heading stays on the list" "$(wc -l < "$T/list.calls" | tr -d ' ')" 2
+
+export FAKE_OSA_OUT=gone
+pick '\n' 'input needed' 130
+assert_contains "list: a failed jump says why" "$out" "has closed"
+assert_contains "list: ... and waits to be read" "$out" "Press Enter to go back"
+assert_eq "list: ... and returns to the list" "$(wc -l < "$T/list.calls" | tr -d ' ')" 2
+pick '' 'input needed' 130
+assert_contains "list: EOF at that pause leaves a shell rather than looping" "$out" "AFTER rc=0 PWD=$T/start"
+assert_eq "list: ... after one try" "$(wc -l < "$FAKE_OSA_LOG" | tr -d ' ')" 1
+unset FAKE_OSA_OUT
+
+FAKE_PS_RC=1 pick '\n' 130
+assert_contains "list: an unreadable process table says why" "$out" "can't read the process table"
+assert_contains "list: ... without offering an empty list" "$out" "Press Enter to go back"
+assert_eq "list: ... or calling fzf" "$(wc -l < "$T/list.calls" | tr -d ' ')" 0
+
+pick '\n' 2
+assert_contains "list: fzf itself failing falls back to the printed view" "$out" "plain shell"
+assert_contains "list: ... which waits" "$out" "Press Enter to go back"
+unset FAKE_OSA_LOG TERM_PROGRAM
 rm -f "$T/picked"; unset FAKE_PS_OUT FAKE_PS_LOG
 
 # the yellow count (wb-pmr): from wb-tabs --waiting, on the space's row and the tabs row
