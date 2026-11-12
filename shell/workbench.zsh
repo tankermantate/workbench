@@ -2,7 +2,7 @@
 # Source it at the END of ~/.zshrc. Spec: docs/specs/2026-10-16-launcher-design.md
 #
 # Helpers below read two locals of the caller (_wb_main) through zsh's dynamic
-# scoping: `s` (the chosen space's 13 fields, as printed by wb-spaces) and
+# scoping: `s` (the chosen space's 14 fields, as printed by wb-spaces) and
 # `tmp` (this launch's scratch dir).
 
 typeset -g WORKBENCH_HOME=${${(%):-%x}:A:h:h}

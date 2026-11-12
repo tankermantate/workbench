@@ -42,9 +42,9 @@ root = "$T/does-not-exist"
 EOF
 out="$(WORKBENCH_CONFIG="$T/ok.toml" "$WS" 2>"$T/err")"; rc=$?
 assert_eq "valid config exits 0" "$rc" "0"
-expected="Acme	-	$T/acme	true	1	new-session	acme	$T/home/cfg	docs/PROTOCOL.md	0	-	-	-
-alpha	Side	$T/side/alpha	if-present	0	-	alpha	-	-	1	-	-	-
-my proj	Side	$T/side/my proj	if-present	0	-	my proj	-	-	1	-	-	-"
+expected="Acme	-	$T/acme	true	1	new-session	acme	$T/home/cfg	docs/PROTOCOL.md	0	-	-	-	-
+alpha	Side	$T/side/alpha	if-present	0	-	alpha	-	-	1	-	-	-	-
+my proj	Side	$T/side/my proj	if-present	0	-	my proj	-	-	1	-	-	-	-"
 assert_eq "root + glob rows, sorted, files skipped, missing root skipped" "$out" "$expected"
 assert_contains "missing root warns" "$(cat "$T/err")" "skipping 'Gone'"
 
@@ -84,6 +84,7 @@ space_key = "acme"
 gh_account = "acme-bot"
 on_create = '~/hooks/setup "\$WB_PROJECT"'
 before_end = 'test -f "/m/\$WB_SHA"'
+after_end = 'echo after'
 
 [[space]]
 name = "Side"
@@ -94,8 +95,8 @@ out="$(WORKBENCH_CONFIG="$T/wt.toml" "$WS")"
 row1="$(printf '%s\n' "$out" | head -1)"
 assert_eq "default session_cmd is workbench's own, by absolute path" \
   "$(printf '%s' "$row1" | cut -f6)" "$(cd "$REPO/bin" && pwd -P)/new-session"
-assert_eq "hook columns 11-13" "$(printf '%s' "$row1" | cut -f11-13)" \
-  "acme-bot	~/hooks/setup \"\$WB_PROJECT\"	test -f \"/m/\$WB_SHA\""
+assert_eq "hook columns 11-14" "$(printf '%s' "$row1" | cut -f11-14)" \
+  "acme-bot	~/hooks/setup \"\$WB_PROJECT\"	test -f \"/m/\$WB_SHA\"	echo after"
 assert_eq "glob worktree space: each folder's key is its name" \
   "$(printf '%s\n' "$out" | tail -n +2 | cut -f7 | tr '\n' '|')" "alpha|my proj|"
 
@@ -135,7 +136,7 @@ assert_eq "--judge-env exits 0" "$rc" "0"
 assert_eq "--judge-env: JSON by label; a glob space's folders share it; none is {}" \
   "$(printf '%s' "$out" | python3 -c 'import json, sys; d = json.load(sys.stdin); print(d["A"]["HTTPS_PROXY"], d["A"]["CLAUDE_CODE_USE_BEDROCK"], d["alpha"], d["my proj"], d["B"])')" \
   "http://proxy.acme.test:3128 1 {'AWS_REGION': 'us-east-1'} {'AWS_REGION': 'us-east-1'} {}"
-assert_eq "judge_env leaves the 13 TSV fields alone" "$(WORKBENCH_CONFIG="$T/je.toml" "$WS" | awk -F'\t' '{print NF}' | sort -u)" "13"
+assert_eq "judge_env leaves the 14 TSV fields alone" "$(WORKBENCH_CONFIG="$T/je.toml" "$WS" | awk -F'\t' '{print NF}' | sort -u)" "14"
 je_bad() {  # je_bad NAME TOML-VALUE MESSAGE
   printf '[[space]]\nname = "A"\nroot = "%s"\njudge_env = %s\n' "$T/acme" "$2" > "$T/jebad.toml"
   out="$(WORKBENCH_CONFIG="$T/jebad.toml" "$WS" --judge-env 2>&1)"; rc=$?
@@ -166,7 +167,7 @@ assert_eq "--colors exits 0" "$rc" "0"
 assert_eq "--colors: JSON by label, lower-cased; a glob space's folders share it; none is absent" \
   "$(printf '%s' "$out" | python3 -c 'import json, sys; d = json.load(sys.stdin); print(d["A"], d["alpha"], d["my proj"], "B" in d)')" \
   "purple green green False"
-assert_eq "color leaves the 13 TSV fields alone" "$(WORKBENCH_CONFIG="$T/col.toml" "$WS" | awk -F'\t' '{print NF}' | sort -u)" "13"
+assert_eq "color leaves the 14 TSV fields alone" "$(WORKBENCH_CONFIG="$T/col.toml" "$WS" | awk -F'\t' '{print NF}' | sort -u)" "14"
 printf '[[space]]\nname = "A"\nroot = "%s"\ncolor = "teal"\n' "$T/acme" > "$T/colbad.toml"
 out="$(WORKBENCH_CONFIG="$T/colbad.toml" "$WS" 2>&1)"; rc=$?
 assert_eq "an unknown color is invalid" "$rc" "4"
@@ -190,8 +191,8 @@ assert_eq "folder_colors: named folders get theirs, lower-cased; the rest the sp
   "red blue green"
 err="$(WORKBENCH_CONFIG="$T/fc.toml" "$WS" --colors 2>&1 >/dev/null)"
 assert_contains "folder_colors: a folder the glob doesn't list is noted" "$err" "folder_colors names 'nowhere'"
-assert_eq "folder_colors leaves the 13 TSV fields alone" \
-  "$(WORKBENCH_CONFIG="$T/fc.toml" "$WS" 2>/dev/null | awk -F'\t' '{print NF}' | sort -u)" "13"
+assert_eq "folder_colors leaves the 14 TSV fields alone" \
+  "$(WORKBENCH_CONFIG="$T/fc.toml" "$WS" 2>/dev/null | awk -F'\t' '{print NF}' | sort -u)" "14"
 printf '[[space]]\nname = "S"\nglob = "%s/side/*"\nfolder_colors = { alpha = "red" }\n' "$T" > "$T/fc2.toml"
 assert_eq "folder_colors without color: unnamed folders have none" \
   "$(WORKBENCH_CONFIG="$T/fc2.toml" "$WS" --colors | python3 -c 'import json, sys; d = json.load(sys.stdin); print(d["alpha"], "beta" in d)')" \

@@ -173,6 +173,7 @@ never in this repo. `spaces.example.toml` documents every key. In short:
 | `judge_env` | Variables the grooming judge needs beyond its allowlist (a proxy, Bedrock), with their values. |
 | `gh_account` | The `gh` account to switch to before fetching. |
 | `on_create`, `before_end` | Hooks: one-line shell commands, run in the worktree with `WB_SPACE`, `WB_WORKTREE`, `WB_PROJECT`, `WB_SOURCE`, `WB_BRANCH`, `WB_BEAD` set, and `WB_SHA` for `before_end`. Keep private setup scripts in `~/.config/workbench/hooks/`. |
+| `after_end` | Hook run by `end-session` right after the worktree is removed, on every path including `--force`, in the main checkout's project folder (the worktree is gone), with the same variables. For cleanup outside the folder. A failure or a 60 s hang only warns. |
 
 ## Development
 

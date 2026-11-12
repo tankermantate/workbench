@@ -131,10 +131,16 @@ if [ "$FORCE" = 0 ] && [ "$NOTHING" = 0 ] && [ "$HAS_ORIGIN" = 0 ]; then
   echo "→ no origin remote, so there is nothing to push to; skipping the push check (an unmerged branch is kept)"
 fi
 
-if [ "$FOUND" = 1 ] && [ -n "$S_BEFORE_END" ] && [ "$FORCE" = 0 ] && [ "$NOTHING" = 0 ]; then
-  PROJECT="$TARGET${PREFIX:+/$PREFIX}"; [ -d "$PROJECT" ] || PROJECT=$TARGET
+# the hooks' variables. Physical paths, worked out now: after removal the
+# folders are gone and can no longer be resolved.
+if [ "$FOUND" = 1 ]; then
+  PROJECT="$TARGET${PREFIX:+/$PREFIX}"
+  if [ -d "$PROJECT" ]; then PROJECT=$(cd "$PROJECT" && pwd -P); else PROJECT=$TARGET; fi
   export WB_SPACE="$S_KEY" WB_WORKTREE="$TARGET" WB_PROJECT="$PROJECT" \
          WB_SOURCE="$SOURCE" WB_BRANCH="$BRANCH" WB_BEAD="$BEAD"
+fi
+
+if [ "$FOUND" = 1 ] && [ -n "$S_BEFORE_END" ] && [ "$FORCE" = 0 ] && [ "$NOTHING" = 0 ]; then
   WB_SHA=$(git -C "$TARGET" rev-parse HEAD); export WB_SHA
   echo "→ before_end: $S_BEFORE_END"
   ws_run_hook "$S_BEFORE_END" "$PROJECT" \
@@ -152,6 +158,18 @@ echo "→ removing worktree $TARGET"
 cd "$MAIN"   # the worktree may be our own folder
 if [ "$FORCE" = 1 ]; then git -C "$MAIN" worktree remove --force "$TARGET"
 else git -C "$MAIN" worktree remove "$TARGET"; fi
+
+# after_end: cleanup that lives outside the folder (say, local databases keyed
+# on the worktree's path). It runs on every path, --force included, since
+# removal strands such things whatever the reason. The folder is gone, so it
+# runs in the main checkout's project folder. Fail-open: the worktree is
+# already removed, so a failing or hung hook only warns.
+if [ "$FOUND" = 1 ] && [ -n "$S_AFTER_END" ]; then
+  echo "→ after_end: $S_AFTER_END"
+  if ! ws_timeout "${WB_AFTER_END_TIMEOUT:-60}" sh -c 'cd "$1" && sh -c "$2"' sh "$SOURCE" "$S_AFTER_END"; then
+    echo "  warning: after_end failed; the worktree is removed anyway. Clean up by hand if it matters." >&2
+  fi
+fi
 if [ "$FORCE" = 1 ]; then
   note_bead "Session ended (forced): worktree removed; branch $BRANCH kept, unchecked."
   echo "✓ session ended (forced). Branch '$BRANCH' kept — check it by hand."

@@ -172,6 +172,35 @@ out="$("$ES" "$w" 2>&1)"; rc=$?
 assert_eq "stash: still ends" "$rc" "0"
 assert_contains "stash: mentioned" "$out" "1 stash made on feat/stashy is kept in the repo"
 
+# 19 after_end: runs after removal, in the main checkout's project folder, on every path
+mkdir -p "$b/app"; : > "$b/app/keep"; git -C "$b" add app; git -C "$b" commit -q -m app; git -C "$b" push -q origin main
+AFTER="after_end = 'echo \"\$PWD|\$WB_WORKTREE|\$WB_PROJECT|\$(test -e \"\$WB_WORKTREE\" && echo there || echo gone)\" >> \"\$MARKERS/after\"'"
+conf "$b/app" "$AFTER"
+w=$(wt "$b" fix/after-empty)                      # nothing at risk
+"$ES" "$w" >/dev/null 2>&1; assert_eq "after_end, nothing at risk: exits 0" "$?" "0"
+assert_eq "after_end: ran once, in the main project folder, after removal, with physical paths" \
+  "$(cat "$MARKERS/after")" "$b/app|$w|$w/app|gone"
+w=$(wt "$b" feat/after-force); echo d > "$w/dirty.txt"
+"$ES" --force "$w" >/dev/null 2>&1; assert_eq "after_end, --force: exits 0" "$?" "0"
+assert_eq "after_end: ran on --force too" "$(wc -l < "$MARKERS/after" | tr -d ' ')" "2"
+w=$(wt "$b" feat/after-work); commit "$w" aw; git -C "$w" push -q -u origin feat/after-work
+"$ES" "$w" >/dev/null 2>&1; assert_eq "after_end, real work: exits 0" "$?" "0"
+assert_eq "after_end: ran after a checked removal" "$(wc -l < "$MARKERS/after" | tr -d ' ')" "3"
+# a failing hook only warns: the worktree is gone either way
+conf "$b/app" "after_end = 'echo cleanup-broke; exit 3'"
+w=$(wt "$b" fix/after-fail)
+out="$("$ES" "$w" 2>&1)"; rc=$?
+assert_eq "after_end fails: still exits 0" "$rc" "0"; gone "after_end fails: removed" "$w"
+assert_contains "after_end fails: shows its output" "$out" "cleanup-broke"
+assert_contains "after_end fails: warns" "$out" "after_end failed"
+# a hung hook is cut off
+conf "$b/app" "after_end = 'sleep 30'"
+w=$(wt "$b" fix/after-hang)
+start=$(date +%s); out="$(WB_AFTER_END_TIMEOUT=1 "$ES" "$w" 2>&1)"; rc=$?; took=$(( $(date +%s) - start ))
+assert_eq "after_end hangs: still exits 0" "$rc" "0"
+assert_contains "after_end hangs: warns" "$out" "after_end failed"
+if [ "$took" -lt 10 ]; then ok "after_end hangs: cut off by the timeout"; else bad "after_end hangs: took ${took}s"; fi
+
 # 16 refusals
 conf "$h"
 out="$("$ES" "$h" 2>&1)"; rc=$?

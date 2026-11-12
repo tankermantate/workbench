@@ -26,6 +26,7 @@ protocol      = "docs/PROTOCOL.md"  # optional: read first in every session
 # gh_account  = "acme-bot"                                  # gh account to switch to before fetching
 # on_create   = "~/.config/workbench/hooks/acme-setup"      # after the worktree is made
 # before_end  = 'test -f ~/.local/state/acme-ok/$WB_SHA'    # end-session refuses if this fails
+# after_end   = '~/.config/workbench/hooks/acme-cleanup'    # after removal, in WB_SOURCE; a failure only warns
 # session_cmd = "my-session"        # default: workbench's own bin/new-session
 
 # One entry per folder; sessions start in the folder itself.

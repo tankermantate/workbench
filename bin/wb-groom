@@ -244,7 +244,7 @@ def read_spaces():
     rows = []
     for line in p.stdout.splitlines():
         f = [None if v == "-" else v for v in line.split("\t")]
-        if len(f) == 13:
+        if len(f) >= 13:  # columns are only ever appended (after_end is the 14th)
             rows.append({"label": f[0], "root": f[2], "claude_config": f[7], "protocol": f[8],
                          "judge_env": extra.get(f[0], {})})
     return rows

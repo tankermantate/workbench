@@ -126,7 +126,7 @@ Changed:
 
 ## Configuration
 
-Three new optional fields on a `[[space]]`, used only with `worktrees = true`. A personal repo
+Three new optional fields (a fourth, `after_end`, since) on a `[[space]]`, used only with `worktrees = true`. A personal repo
 leaves all three out.
 
 | Field | When | On failure |
@@ -134,6 +134,7 @@ leaves all three out.
 | `gh_account` | before `git fetch`: if `gh auth status --active` shows another account, `gh auth switch --user <it>` | a warning (gh missing or the switch failed); the fetch is still tried, as today |
 | `on_create` | `new-session` step 6, in the new worktree's project folder | `new-session` stops with exit 1 and the hook's output. The worktree stays; the message gives `end-session --force <path>` to remove it. The bead is not claimed. |
 | `before_end` | `end-session`, only when something is at risk and `--force` wasn't given, in the worktree's project folder | `end-session` refuses with exit 1, shows the hook's output, keeps the worktree |
+| `after_end` | `end-session`, right after `git worktree remove`, on every path (`--force` and nothing-at-risk included), in the main checkout's project folder (`WB_SOURCE`), since the worktree is gone. For cleanup that lives outside the folder, such as local databases keyed on the worktree's path. Added by wb-9bo | fail-open: a warning, and `end-session` still exits 0. A hook still running after 60 s (`WB_AFTER_END_TIMEOUT`) is killed, with the same warning |
 
 Hooks are strings run with `sh -c`, so `~/…` and `$VAR` work. They come from the user's own
 private config and are trusted like `~/.zshrc`. **A hook is one line:** `wb-spaces` rejects a hook
@@ -145,7 +146,7 @@ every hook:
 |---|---|
 | `WB_SPACE` | the space key |
 | `WB_WORKTREE` | the worktree's top folder |
-| `WB_PROJECT` | the project folder inside the worktree |
+| `WB_PROJECT` | the project folder inside the worktree. In `end-session` both this and `WB_WORKTREE` are physical paths (`pwd -P`), worked out before removal, so `after_end` gets them though the folders are gone |
 | `WB_SOURCE` | the project folder in the main checkout (where untracked files such as `.env.local` live) |
 | `WB_BRANCH` | the branch |
 | `WB_BEAD` | the bead id; empty for exploratory sessions. In `before_end`, the bead whose claim note names the worktree, or empty if none does |
@@ -161,7 +162,8 @@ Other config changes:
   `glob` space each folder's key is its folder name, unless the space sets `space_key` (then all its
   folders would share one key, which is an error). Duplicate keys are a config error (exit 4).
 - `wb-spaces` prints three more columns at the end of each row: `gh_account`, `on_create`,
-  `before_end` (`-` when unset). Existing columns keep their positions.
+  `before_end` (`-` when unset). Existing columns keep their positions. `after_end` (wb-9bo) is a 14th
+  column after them.
 
 ### This machine's Acme space, after cutover
 

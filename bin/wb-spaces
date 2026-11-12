@@ -4,7 +4,7 @@
   wb-spaces                one TSV line per space (glob spaces: one per folder):
                            label, group, root, beads, worktrees, session_cmd,
                            space_key, claude_config, protocol, safe, gh_account,
-                           on_create, before_end   ('-' = unset)
+                           on_create, before_end, after_end   ('-' = unset)
   wb-spaces --terminals    [launcher].terminals, one per line
   wb-spaces --leak-terms   private words check-leaks.sh greps for
   wb-spaces --judge-env    JSON {label: {NAME: value}}: each space's judge_env, the variables
@@ -34,7 +34,7 @@ def expand(p):
 
 
 DEFAULT_SESSION_CMD = os.path.join(os.path.dirname(os.path.realpath(__file__)), "new-session")
-HOOKS = ("gh_account", "on_create", "before_end")
+HOOKS = ("gh_account", "on_create", "before_end", "after_end")
 # a fixed set: each has a circle emoji, which is all a terminal tab title can show
 COLORS = ("red", "orange", "yellow", "green", "blue", "purple", "brown")
 # judge_env can't move the judge onto another claude (PATH picks the binary) or another account
@@ -143,7 +143,7 @@ def spaces(cfg):
 
 
 ORDER = ("label", "group", "root", "beads", "worktrees", "session_cmd",
-         "space_key", "claude_config", "protocol", "safe", "gh_account", "on_create", "before_end")
+         "space_key", "claude_config", "protocol", "safe", "gh_account", "on_create", "before_end", "after_end")
 
 
 def main(argv):
