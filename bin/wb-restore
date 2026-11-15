@@ -135,7 +135,8 @@ def save(quiet):
         rec = wb_session.load(j["sessionId"]) or {}
         entries.append({"session": j["sessionId"], "cwd": j["cwd"], "config": j["_dir"],
                         "skip_permissions": flags.get(pid, False), "name": str(j.get("name") or ""),
-                        "space_root": rec.get("root"), "bead": rec.get("bead"),
+                        # a done bead's goal would be handed back to the session on resume
+                        "space_root": rec.get("root"), "bead": None if rec.get("done") else rec.get("bead"),
                         "worktree": linked_worktree(j["cwd"])})
     now = time.time()
     old = snapshots()
@@ -217,14 +218,20 @@ def restore():
     if not picked:
         return fail(f"no snapshot to restore from in {sub('snapshots')}. `wb-restore save` makes one.")
     path, snap = picked
-    live = live_sessions() or []
+    live = live_sessions()
+    if live is None:
+        # fail closed: with no way to tell which are open, any of them could be resumed twice
+        return fail("can't read the process table, so can't tell which sessions are still open. Nothing resumed.")
     live_ids = {j["sessionId"] for _, j in live}
+    pending = pending_ids()
     taken = datetime.datetime.fromtimestamp(snap["taken"]).strftime("%a %d %b %H:%M")
     print(f"From the snapshot of {taken}:")
     ready = []
     for e in snap["sessions"]:
         if e.get("session") in live_ids:
             print(f"  skip  {label(e)}: still open in a tab")
+        elif e.get("session") in pending:
+            print(f"  skip  {label(e)}: already queued, a new tab is about to resume it")
         elif not os.path.isdir(e.get("cwd") or ""):
             print(f"  skip  {label(e)}: its folder is gone")
         else:
@@ -256,6 +263,22 @@ def restore():
         return rc
     print(f"opening a Terminal window for each of the {len(chosen)}; each resumes its session.")
     return 0
+
+
+def pending_ids():
+    """Session ids in a queued or claimed ticket young enough to be resumed still."""
+    ids = set()
+    for d in (sub("queue"), sub("claimed")):
+        for name in os.listdir(d) if os.path.isdir(d) else []:
+            p = os.path.join(d, name)
+            try:
+                if os.path.getmtime(p) < time.time() - CLAIM_WINDOW:
+                    continue
+                with open(p) as f:
+                    ids.add(json.load(f).get("session"))
+            except (OSError, ValueError, AttributeError):
+                continue
+    return ids
 
 
 # ---- in each new tab
@@ -293,6 +316,11 @@ def exec_ticket(ticket):
         sid, cwd, config = e["session"], e["cwd"], e["config"]
     except (OSError, ValueError, KeyError, TypeError):
         return fail(f"can't read {ticket}.")
+    live = live_sessions()
+    if live is None or any(j["sessionId"] == sid for _, j in live):
+        # the last check before two processes would share one transcript
+        why = "can't tell whether it's open" if live is None else "it's already open in a tab"
+        return fail(f"not resuming {sid}: {why}.")
     env = dict(os.environ)
     for k in ("WB_SPACE_ROOT", "WB_BEAD", "WB_WORKTREE"):
         env.pop(k, None)

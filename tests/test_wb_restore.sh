@@ -52,10 +52,15 @@ pidfile "$CFG" 203 sid-b "$T/plain"
 # ttys003: a claude -p run is not a session to bring back
 live 303 ttys003 "claude -p hello"
 pidfile "$CFG" 303 sid-p "$T/plain" sdk-cli
+# ttys005: its bead is done, so a resume must not hand the finished goal back
+live 503 ttys005 "claude"
+pidfile "$CFG" 503 sid-done "$T/plain"
+printf '{"bead":"ac-9","title":"t","root":"%s","since":"x","done":true,"named":false}' "$T/acme" \
+  > "$WB_STATE_DIR/sessions/sid-done.json"
 
 out=$("$R" save 2>&1); rc=$?
 assert_eq "save exits 0" "$rc" "0"
-assert_contains "save says how many" "$out" "2 sessions"
+assert_contains "save says how many" "$out" "3 sessions"
 assert_eq "one snapshot written" "$(snaps)" "1"
 S="$WB_RESTORE_DIR/snapshots/$(ls "$WB_RESTORE_DIR/snapshots")"
 assert_eq "account is the pid file's folder" "$(field "$S" sid-a config)" "$ALT"
@@ -67,6 +72,8 @@ assert_eq "bead from the session record" "$(field "$S" sid-a bead)" "ac-1"
 assert_eq "space root from the session record" "$(field "$S" sid-a space_root)" "$T/acme"
 assert_eq "worktree is the cwd's linked worktree" "$(field "$S" sid-a worktree)" "$T/wts/acme-x1y"
 assert_eq "no worktree outside one" "$(field "$S" sid-b worktree)" "None"
+assert_eq "a done bead isn't resumed into" "$(field "$S" sid-done bead)" "None"
+assert_eq "but its space still is" "$(field "$S" sid-done space_root)" "$T/acme"
 assert_eq "claude -p is left out" "$(field "$S" sid-p session)" "ABSENT"
 assert_not_contains "argv itself is never kept" "$(cat "$S")" "SECRET OPENING PROMPT"
 
@@ -115,6 +122,15 @@ assert_eq "yes exits 0" "$rc" "0"
 assert_eq "two sessions queued" "$(ls "$WB_RESTORE_DIR/queue" | wc -l | tr -d ' ')" "2"
 assert_eq "one osascript call asks for 2 new tabs" "$(cat "$T/osa.log")" "2"
 
+out=$(echo y | "$R" 2>&1); rc=$?
+assert_contains "a second run before the tabs start: already queued, so skipped" "$out" "already queued"
+assert_eq "and nothing is queued twice" "$(ls "$WB_RESTORE_DIR/queue" | wc -l | tr -d ' ')" "2"
+rm -rf "$WB_RESTORE_DIR/queue"
+
+out=$(echo y | FAKE_PS_RC=1 "$R" 2>&1); rc=$?
+assert_eq "ps failing: refuse, since live sessions can't be told apart" "$rc" "1"
+[ -d "$WB_RESTORE_DIR/queue" ] && [ -n "$(ls "$WB_RESTORE_DIR/queue")" ] && bad "ps failing queues nothing" || ok "ps failing queues nothing"
+
 out=$(echo y | FAKE_OSA_RC=1 FAKE_OSA_ERR="Not authorized to send Apple events to Terminal. (-1743)" \
   FAKE_OSA_LOG=/dev/null "$R" 2>&1); rc=$?
 assert_eq "Terminal refusing is a failure" "$rc" "1"
@@ -157,6 +173,10 @@ out=$(WORKBENCH_DRY_RUN=1 "$R" exec "$b")
 assert_contains "the default account unsets CLAUDE_CONFIG_DIR" "$out" "-u CLAUDE_CONFIG_DIR"
 assert_not_contains "no skip-permissions when it wasn't there" "$out" "dangerously"
 assert_not_contains "no bead when unbound" "$out" "WB_BEAD"
+printf '{"session":"sid-c","cwd":"%s","config":"%s","skip_permissions":false}' "$T/plain" "$CFG" > "$T/live.json"
+out=$("$R" exec "$T/live.json" 2>&1); rc=$?
+assert_eq "exec of a session that is live refuses" "$rc" "1"
+assert_contains "and says so" "$out" "already open"
 "$R" exec "$T/nope.json" >/dev/null 2>&1; rc=$?
 assert_eq "exec of a missing ticket fails" "$rc" "1"
 
