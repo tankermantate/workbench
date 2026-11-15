@@ -42,4 +42,16 @@ assert_contains "new tab inside a repo launches too" "$(pty "$T/repo")" "LAUNCHE
 # which the terminal's echo of the typed line (LAUNCHED-$((1+1))) does not match.
 out="$(pty "$T/plain" "source '$REPO/shell/workbench.zsh'; launch() { print LAUNCHED-\$((1+1)) }" true)"
 assert_eq "re-sourcing .zshrc does not launch again" "$(printf '%s' "$out" | tr -d '\r' | grep -c -E 'LAUNCHED-(STUB|2)$')" "1"
+
+# A tab wb-restore opened: its first prompt resumes the queued session instead of launching.
+mkdir -p "$T/restore/queue" "$T/resumed"
+printf '{"session":"sid-q","cwd":"%s","config":"%s","skip_permissions":false,"name":"q"}' \
+  "$T/resumed" "$T/zdot/.claude-alt" > "$T/restore/queue/1-000.json"
+out="$(export WB_RESTORE_DIR="$T/restore" WORKBENCH_DRY_RUN=1; pty "$T/plain" 'print PWD-IS-$PWD')"
+assert_contains "a queued session is resumed in the new tab" "$out" "--resume sid-q"
+assert_not_contains "and the launcher doesn't start" "$out" "LAUNCHED-STUB"
+assert_contains "the tab is left in the session's folder" "$out" "PWD-IS-$T/resumed"
+[ -e "$T/restore/queue/1-000.json" ] && bad "the entry was claimed" || ok "the entry was claimed"
+out="$(export WB_RESTORE_DIR="$T/restore"; pty "$T/plain")"
+assert_contains "with the queue empty, the next tab launches as usual" "$out" "LAUNCHED-STUB"
 finish

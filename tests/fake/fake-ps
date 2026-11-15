@@ -2,6 +2,7 @@
 # Fake ps for wb-tabs, picked with WB_PS (never named `ps`: tests/fake is on every suite's PATH).
 #   FAKE_PS_OUT   file printed for the process table
 #   FAKE_PS_ENV   file printed for `ps -E`: "<pid> <command and environment>" lines
+#   FAKE_PS_ARGS  file printed for `ps -o pid=,command=`: "<pid> <argv>" lines (wb-restore)
 #   FAKE_PS_RC    exit code of the process table read (default 0)
 # FAKE_PS_LOG: every call's args are appended to it.
 [ -n "${FAKE_PS_LOG:-}" ] && echo "$*" >> "$FAKE_PS_LOG"
@@ -9,5 +10,6 @@ if [ "${1:-}" = -E ]; then
   cat "${FAKE_PS_ENV:-/dev/null}"
   exit 0
 fi
+case " $* " in *command=*) cat "${FAKE_PS_ARGS:-/dev/null}"; exit 0 ;; esac
 cat "${FAKE_PS_OUT:-/dev/null}"
 exit "${FAKE_PS_RC:-0}"

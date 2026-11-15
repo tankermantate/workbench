@@ -1,0 +1,352 @@
+#!/usr/bin/env python3
+"""wb-restore — bring every Claude session back after a restart.
+
+  wb-restore save         snapshot every live interactive session (cheap: ps and files, never bd)
+  wb-restore              offer the sessions from the newest snapshot taken before this boot,
+                          queue the chosen ones and open one Terminal window for each
+  wb-restore claim        (the launcher, at a new tab's first prompt) take the oldest queued
+                          session: prints <folder><TAB><ticket>; exit 1 when there is none
+  wb-restore exec TICKET  replace this process with `claude --resume` for that session
+
+WB_RESTORE_DIR (default ~/.local/state/workbench/restore) holds snapshots/, queue/ and claimed/.
+WORKBENCH_DRY_RUN prints instead of queueing, opening or exec'ing. WB_BOOTTIME fakes the boot time.
+Spec: docs/specs/2026-11-15-restore-sessions-design.md
+"""
+import datetime
+import json
+import os
+import re
+import shlex
+import shutil
+import subprocess
+import sys
+import time
+
+ME = os.path.realpath(__file__)
+sys.path.insert(0, os.path.join(os.path.dirname(ME), "..", "lib"))
+import wb_live  # noqa: E402  (lives in lib/; realpath, since install.sh links bin/ elsewhere)
+import wb_session  # noqa: E402
+import wb_space  # noqa: E402
+
+OSASCRIPT = os.environ.get("WB_OSASCRIPT", "osascript")
+SKIP = "--dangerously-skip-permissions"
+KEEP_DAYS = 7
+CLAIM_WINDOW = 300  # seconds: a queued session nobody claimed by then is not resumed by surprise later
+OPEN_TIMEOUT = 60  # the first run waits on macOS's permission dialog
+# the count goes in as an argument, never into the script's text
+OPEN_SCRIPT = """on run argv
+  tell application "Terminal"
+    repeat (item 1 of argv as integer) times
+      do script ""
+    end repeat
+    activate
+  end tell
+end run"""
+
+
+def home_dir():
+    return os.environ.get("WB_RESTORE_DIR") or os.path.expanduser("~/.local/state/workbench/restore")
+
+
+def sub(name):
+    return os.path.join(home_dir(), name)
+
+
+def dry():
+    return bool(os.environ.get("WORKBENCH_DRY_RUN"))
+
+
+def fail(message):
+    print(f"wb-restore: {message}", file=sys.stderr)
+    return 1
+
+
+# ---- save
+
+def skip_flags(pids):
+    """{pid: whether its argv has --dangerously-skip-permissions}. Only that one flag is kept:
+    argv also holds the launcher's opening prompt, which a resume must not send again."""
+    if not pids:
+        return {}
+    try:
+        out = subprocess.run([wb_live.PS, "-o", "pid=,command=", "-p", ",".join(map(str, pids))],
+                             capture_output=True, text=True, timeout=5).stdout
+    except (OSError, subprocess.SubprocessError):
+        return {}
+    found = {}
+    for line in out.splitlines():
+        f = line.split(None, 1)
+        if f and f[0].isdigit():
+            found[int(f[0])] = SKIP in (f[1].split() if len(f) > 1 else [])
+    return found
+
+
+def linked_worktree(cwd):
+    """The git top level of cwd when it is a linked worktree, not a main checkout; else None."""
+    try:
+        p = subprocess.run(["git", "-C", cwd, "rev-parse", "--path-format=absolute", "--show-toplevel",
+                            "--git-common-dir"], capture_output=True, text=True, timeout=5)
+    except (OSError, subprocess.SubprocessError):
+        return None
+    lines = p.stdout.split("\n")
+    if p.returncode or len(lines) < 2:
+        return None
+    top, common = lines[0], lines[1]
+    return top if os.path.dirname(os.path.realpath(common)) != os.path.realpath(top) else None
+
+
+def live_sessions():
+    """[(pid, Claude's pid file)] for each tab's outermost claude, or None when ps fails."""
+    procs = wb_live.processes()
+    if procs is None:
+        return None
+    dirs = wb_live.config_dirs(wb_space.rows())
+    found = []
+    for pid in sorted(p for p in wb_live.tabs(procs).values() if p):
+        j = wb_live.pid_file(pid, dirs)
+        if j:
+            found.append((pid, j))
+    return found
+
+
+def snapshots():
+    """[(path, snapshot)], oldest first. Unreadable ones are skipped."""
+    d = sub("snapshots")
+    found = []
+    for name in sorted(os.listdir(d)) if os.path.isdir(d) else []:
+        try:
+            with open(os.path.join(d, name)) as f:
+                s = json.load(f)
+        except (OSError, ValueError):
+            continue
+        if isinstance(s, dict) and isinstance(s.get("sessions"), list) and isinstance(s.get("taken"), (int, float)):
+            found.append((os.path.join(d, name), s))
+    return found
+
+
+def save(quiet):
+    live = live_sessions()
+    if live is None:
+        return fail("can't read the process table, so can't say which sessions are live.")
+    live = [(pid, j) for pid, j in live if j.get("kind", "interactive") == "interactive" and isinstance(j.get("cwd"), str)]
+    flags = skip_flags([pid for pid, _ in live])
+    entries = []
+    for pid, j in live:
+        rec = wb_session.load(j["sessionId"]) or {}
+        entries.append({"session": j["sessionId"], "cwd": j["cwd"], "config": j["_dir"],
+                        "skip_permissions": flags.get(pid, False), "name": str(j.get("name") or ""),
+                        "space_root": rec.get("root"), "bead": rec.get("bead"),
+                        "worktree": linked_worktree(j["cwd"])})
+    now = time.time()
+    old = snapshots()
+    os.makedirs(sub("snapshots"), exist_ok=True)
+    if old and old[-1][1]["sessions"] == entries:
+        written = False
+    else:
+        stamp = datetime.datetime.fromtimestamp(now, datetime.timezone.utc).strftime("%Y%m%dT%H%M%S%fZ")
+        path = os.path.join(sub("snapshots"), stamp + ".json")
+        with open(path + ".part", "w") as f:
+            json.dump({"taken": now, "sessions": entries}, f, ensure_ascii=False)
+        os.replace(path + ".part", path)
+        old.append((path, None))
+        written = True
+    # prune, but the newest always stays: it's the one a restore will want
+    for path, s in old[:-1]:
+        if s and s["taken"] < now - KEEP_DAYS * 86400:
+            os.remove(path)
+    if not quiet:
+        print(f"{len(entries)} sessions {'saved' if written else 'unchanged since the last snapshot'}"
+              f" ({sub('snapshots')})")
+    return 0
+
+
+# ---- restore
+
+def boot_time():
+    if os.environ.get("WB_BOOTTIME"):
+        return float(os.environ["WB_BOOTTIME"])
+    try:
+        out = subprocess.run(["sysctl", "-n", "kern.boottime"], capture_output=True, text=True, timeout=5).stdout
+        return float(re.search(r"sec = (\d+)", out).group(1))
+    except (OSError, subprocess.SubprocessError, AttributeError):
+        return None
+
+
+def pick_snapshot():
+    found = snapshots()
+    if not found:
+        return None
+    boot = boot_time()
+    before = [x for x in found if boot is not None and x[1]["taken"] < boot]
+    return (before or found)[-1]
+
+
+def label(e):
+    return f"{e.get('name') or e['session']}  ({e['cwd'].replace(os.path.expanduser('~'), '~', 1)})"
+
+
+def choose(entries):
+    """The entries the user wants back: fzf with all selected on a terminal, else one yes/no."""
+    if sys.stdin.isatty() and shutil.which("fzf"):
+        lines = "\n".join(f"{i}\t{label(e)}" for i, e in enumerate(entries))
+        p = subprocess.run(["fzf", "--multi", "--bind", "load:select-all", "--with-nth", "2..", "--delimiter", "\t",
+                            "--header", "Enter resumes the ticked sessions · Tab unticks · Esc resumes none"],
+                           input=lines, capture_output=True, text=True)
+        picked = {int(x.split("\t", 1)[0]) for x in p.stdout.splitlines() if x.split("\t", 1)[0].isdigit()}
+        return [e for i, e in enumerate(entries) if i in picked]
+    print(f"Resume these {len(entries)}? [y/N] ", end="", flush=True)
+    answer = sys.stdin.readline().strip().lower()
+    return entries if answer in ("y", "yes") else []
+
+
+def open_tabs(n):
+    try:
+        p = subprocess.run([OSASCRIPT, "-e", OPEN_SCRIPT, str(n)], capture_output=True, text=True, timeout=OPEN_TIMEOUT)
+    except (OSError, subprocess.SubprocessError) as e:
+        return fail(f"couldn't ask Terminal to open the new tabs ({e}).")
+    if p.returncode:
+        if "-1743" in p.stderr or "Not authorized" in p.stderr:
+            return fail("Terminal isn't allowed to open them. Allow it in System Settings > "
+                        "Privacy & Security > Automation, then run wb-restore again.")
+        return fail(f"couldn't open the new tabs: {p.stderr.strip()}")
+    return 0
+
+
+def restore():
+    picked = pick_snapshot()
+    if not picked:
+        return fail(f"no snapshot to restore from in {sub('snapshots')}. `wb-restore save` makes one.")
+    path, snap = picked
+    live = live_sessions() or []
+    live_ids = {j["sessionId"] for _, j in live}
+    taken = datetime.datetime.fromtimestamp(snap["taken"]).strftime("%a %d %b %H:%M")
+    print(f"From the snapshot of {taken}:")
+    ready = []
+    for e in snap["sessions"]:
+        if e.get("session") in live_ids:
+            print(f"  skip  {label(e)}: still open in a tab")
+        elif not os.path.isdir(e.get("cwd") or ""):
+            print(f"  skip  {label(e)}: its folder is gone")
+        else:
+            ready.append(e)
+    for e in ready:
+        print(f"  ready {label(e)}")
+    if not ready:
+        print("nothing to resume.")
+        return 0
+    if dry():
+        print(f"DRY-RUN: would open a Terminal window for each of the {len(ready)} ready sessions")
+        return 0
+    chosen = choose(ready)
+    if not chosen:
+        print("nothing resumed.")
+        return 0
+    os.makedirs(sub("queue"), exist_ok=True)
+    stamp = time.time_ns()
+    for i, e in enumerate(chosen):
+        q = os.path.join(sub("queue"), f"{stamp}-{i:03d}.json")
+        with open(q + ".part", "w") as f:
+            json.dump(e, f, ensure_ascii=False)
+        os.replace(q + ".part", q)
+    rc = open_tabs(len(chosen))
+    if rc:
+        for name in os.listdir(sub("queue")):  # no tab will come for them
+            if name.startswith(f"{stamp}-"):
+                os.remove(os.path.join(sub("queue"), name))
+        return rc
+    print(f"opening a Terminal window for each of the {len(chosen)}; each resumes its session.")
+    return 0
+
+
+# ---- in each new tab
+
+def claim():
+    q = sub("queue")
+    os.makedirs(sub("claimed"), exist_ok=True)
+    for name in sorted(os.listdir(q)) if os.path.isdir(q) else []:
+        src = os.path.join(q, name)
+        if not name.endswith(".json"):
+            continue
+        try:
+            stale = os.path.getmtime(src) < time.time() - CLAIM_WINDOW
+            if stale:
+                os.remove(src)
+                continue
+            dst = os.path.join(sub("claimed"), name)
+            os.rename(src, dst)  # atomic: of two tabs starting together, one wins
+        except OSError:
+            continue  # another tab took it
+        try:
+            with open(dst) as f:
+                e = json.load(f)
+        except (OSError, ValueError):
+            continue
+        print(f"{e['cwd']}\t{dst}")
+        return 0
+    return 1
+
+
+def exec_ticket(ticket):
+    try:
+        with open(ticket) as f:
+            e = json.load(f)
+        sid, cwd, config = e["session"], e["cwd"], e["config"]
+    except (OSError, ValueError, KeyError, TypeError):
+        return fail(f"can't read {ticket}.")
+    env = dict(os.environ)
+    for k in ("WB_SPACE_ROOT", "WB_BEAD", "WB_WORKTREE"):
+        env.pop(k, None)
+    shown = []
+    if os.path.realpath(config) == os.path.realpath(os.path.expanduser("~/.claude")):
+        env.pop("CLAUDE_CONFIG_DIR", None)
+        shown += ["-u", "CLAUDE_CONFIG_DIR"]
+    else:
+        env["CLAUDE_CONFIG_DIR"] = config
+        shown.append(f"CLAUDE_CONFIG_DIR={config}")
+    for k, v in (("WB_SPACE_ROOT", e.get("space_root")), ("WB_BEAD", e.get("bead")), ("WB_WORKTREE", e.get("worktree"))):
+        if v:
+            env[k] = v
+            shown.append(f"{k}={v}")
+    cmd = ["claude"]
+    # without the hooks the session still resumes; it just won't follow its bead
+    hook = os.path.join(os.path.dirname(ME), "wb-session-hook")
+    try:
+        p = subprocess.run([hook, "settings-file"], capture_output=True, text=True, timeout=10)
+        if p.returncode == 0 and p.stdout.strip():
+            cmd += ["--settings", p.stdout.strip()]
+    except (OSError, subprocess.SubprocessError):
+        pass
+    if e.get("skip_permissions"):
+        cmd.append(SKIP)
+    cmd += ["--resume", sid]
+    try:
+        os.remove(ticket)
+    except OSError:
+        pass
+    if dry():
+        print("DRY-RUN: cd " + shlex.quote(cwd) + " && env " + " ".join(shlex.quote(x) for x in shown + cmd))
+        return 0
+    try:
+        os.chdir(cwd)
+        os.execvpe("claude", cmd, env)
+    except OSError as err:
+        return fail(f"couldn't resume {sid} in {cwd} ({err}).")
+
+
+def main(argv):
+    if argv[:1] == ["save"]:
+        return save("--quiet" in argv)
+    if argv[:1] == ["claim"]:
+        return claim()
+    if argv[:1] == ["exec"]:
+        return exec_ticket(argv[1]) if len(argv) > 1 else fail("exec needs a ticket.")
+    if argv and argv[0] in ("-h", "--help"):
+        print(__doc__.strip())
+        return 0
+    if argv:
+        return fail(f"unknown command: {argv[0]} (see wb-restore --help)")
+    return restore()
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv[1:]))

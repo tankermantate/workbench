@@ -360,7 +360,23 @@ _wb_autolaunch_blockers() {
 _wb_first_prompt() {
   emulate -L zsh
   add-zsh-hook -d precmd _wb_first_prompt
-  _wb_autolaunch_blockers && launch
+  _wb_autolaunch_blockers && { _wb_restore_claimed || launch }
+}
+
+# A tab wb-restore opened takes one queued session and resumes it, here rather
+# than by typing a command in, which the launcher's screen would swallow.
+# Returns 1, so the launcher starts, when nothing is queued for it.
+_wb_restore_claimed() {
+  emulate -L zsh
+  local line
+  # glob first: no python at every new tab while the queue is empty
+  local -a queued=(${WB_RESTORE_DIR:-$HOME/.local/state/workbench/restore}/queue/*.json(N[1]))
+  (( $#queued )) || return 1
+  line=$($WORKBENCH_HOME/bin/wb-restore claim 2>/dev/null) || return 1
+  cd -- ${line%%$'\t'*} || return 1
+  (( $+functions[update_terminal_cwd] )) && update_terminal_cwd
+  $WORKBENCH_HOME/bin/wb-restore exec ${line#*$'\t'}
+  return 0
 }
 if (( ! ${+_WB_HOOK_ARMED} )); then
   typeset -g _WB_HOOK_ARMED=1

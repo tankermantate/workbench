@@ -115,6 +115,14 @@ A session the launcher (or `new-session`) starts knows which bead it's on:
 - **A bell on the tab that needs you:** add `"preferredNotifChannel": "terminal_bell"` to
   `settings.json` in each Claude config dir. Claude Code then rings the terminal bell when a session
   finishes or pauses for permission while you're away, and Apple Terminal shows it on that tab.
+- **Restarting without losing your tabs.** `wb-restore save` records every open Claude session
+  (its folder, account and session id, and its space and bead). After the restart, run
+  `wb-restore`: it takes the newest snapshot from before the boot, leaves out sessions still open and
+  folders that are gone, lets you untick any you're done with, then opens one Terminal window per
+  session. Each new window resumes its session (`claude --resume`) on the same account and bead,
+  instead of showing the launcher. Allow Terminal under System Settings > Privacy & Security >
+  Automation the first time. Snapshots older than 7 days are pruned; they live in
+  `~/.local/state/workbench/restore/`.
 - **`wb-focus`** prints this session's bead. Inside Claude, `wb-focus <id>` moves the session to
   another bead, and `wb-focus --clear` drops it.
 
