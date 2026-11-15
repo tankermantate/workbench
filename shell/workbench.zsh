@@ -136,7 +136,7 @@ _wb_show_tabs() {
   while true; do
     rows=$(COLUMNS=$COLUMNS $wb --rows) || { _wb_tabs_pause; return }
     line=$(print -r -- $rows | _wb_fzf "" --delimiter=$'\t' --with-nth=2 --no-sort --exact --ignore-case \
-      --layout=reverse --ansi --prompt='Tabs? › ' --header='enter or double-click: go to tab · ctrl-r: re-read · esc: back' \
+      --layout=reverse --ansi --prompt='Tabs? › ' --header="$(_wb_header 'enter or double-click: go to tab · ctrl-r: re-read · esc: back')" \
       --bind 'load:pos(2)' --bind "ctrl-r:reload(COLUMNS=$COLUMNS ${(q)wb} --rows)"); rc=$?
     (( rc == 1 || rc == 130 )) && return 0
     (( rc == 0 )) || { _wb_print_tabs; return }
@@ -230,18 +230,27 @@ _wb_menu() {
   print -r -- $pickable[ans]
 }
 
+# $1 the keys line. Prints an fzf header: the keys, then wb-health's line when it has one,
+# so a Mac that's due a restart says so on every screen.
+_wb_header() {
+  local health
+  health=$($WORKBENCH_HOME/bin/wb-health --color 2>/dev/null)
+  print -r -- $1${health:+$'\n'$health}
+}
+
 # Screen 1. Prints the chosen space's index; returns 1 to leave.
 _wb_screen_spaces() {
   local ui=$WORKBENCH_HOME/bin/wb-ui line rc
   if [[ -n ${WB_TEST_PICK_SPACE-} ]] || _wb_use_fzf; then
     line=$("$ui" render-spaces $tmp | _wb_fzf "${WB_TEST_PICK_SPACE-}" \
       --listen=0 --delimiter=$'\t' --with-nth=2,3 --nth=1 --exact --ignore-case --no-sort --track \
-      --layout=reverse --ansi --prompt='Space? › ' --header='enter: choose · esc: plain shell' \
+      --layout=reverse --ansi --prompt='Space? › ' --header="$(_wb_header 'enter: choose · esc: plain shell')" \
       --bind "start:execute-silent(${(q)ui} fill-counts ${(q)tmp} >/dev/null 2>&1 &)") || return 1
   else
     while true; do
       "$ui" fill-counts $tmp          # no fzf: wait for the counts (bounded by the bd timeout)
       "$ui" render-spaces $tmp > $tmp/spaces.menu
+      $WORKBENCH_HOME/bin/wb-health >&2
       line=$(_wb_menu $tmp/spaces.menu "Space?" 2); rc=$?
       (( rc == 2 )) && continue
       (( rc == 0 )) || return 1

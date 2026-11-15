@@ -125,6 +125,9 @@ A session the launcher (or `new-session`) starts knows which bead it's on:
   instead of showing the launcher. Allow Terminal under System Settings > Privacy & Security >
   Automation the first time. Snapshots older than 7 days are pruned; they live in
   `~/.local/state/workbench/restore/`.
+- **When to restart.** The launcher's screens show `up 162 days · swap 41 GB on 32 GB RAM`, in
+  yellow with `restart soon` once the Mac has been up 30 days or swap reaches half of RAM, which
+  is when it starts to grind. `wb-health` prints the same line.
 - **`wb-focus`** prints this session's bead. Inside Claude, `wb-focus <id>` moves the session to
   another bead, and `wb-focus --clear` drops it.
 

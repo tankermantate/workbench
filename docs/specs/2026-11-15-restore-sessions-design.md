@@ -64,3 +64,14 @@ there and runs `wb-restore exec <entry>`, which replaces itself with:
 When Claude exits, the tab is a shell in the session's folder, as after a launch. With nothing
 queued, the launcher starts as usual. An entry older than 5 minutes is deleted unclaimed, so a
 tab opened tomorrow never resumes something by surprise.
+
+## Saying when a restart is due
+
+`wb-health` prints one line, such as `up 162 days · swap 41 GB on 32 GB RAM`, and adds
+`restart soon: wb-restore brings your tabs back` at 30 days up or when swap in use reaches half
+of RAM. Swap is measured against RAM, not against its own total: macOS grows the swap files to
+fit, so used/total sits near 100% whether the machine is struggling or not (measured 2026-11-15:
+41.6 of 43 GB). The launcher puts the line under the keys in its space and tabs screens' fzf
+headers, yellow when due, and above the numbered menu without fzf. It reads three sysctls,
+never fails and never waits: what it can't read it leaves out. `WB_BOOTTIME`, `WB_SWAPUSAGE`
+and `WB_MEMSIZE` fake them.
