@@ -95,8 +95,9 @@ def linked_worktree(cwd):
     return top if os.path.dirname(os.path.realpath(common)) != os.path.realpath(top) else None
 
 
-def live_sessions():
-    """[(pid, Claude's pid file)] for each tab's outermost claude, or None when ps fails."""
+def live_sessions(unknown=None):
+    """[(pid, Claude's pid file)] for each tab's outermost claude, or None when ps fails. The pids
+    of claudes with no pid file in any known config dir are appended to `unknown`, if given."""
     procs = wb_live.processes()
     if procs is None:
         return None
@@ -106,6 +107,8 @@ def live_sessions():
         j = wb_live.pid_file(pid, dirs)
         if j:
             found.append((pid, j))
+        elif unknown is not None:
+            unknown.append(pid)
     return found
 
 
@@ -125,9 +128,14 @@ def snapshots():
 
 
 def save(quiet):
-    live = live_sessions()
+    unknown = []
+    live = live_sessions(unknown)
     if live is None:
         return fail("can't read the process table, so can't say which sessions are live.")
+    if unknown:
+        # a snapshot missing a session would become the one a restore uses; keep the last whole one
+        return fail(f"{len(unknown)} open Claude session(s) have no record in any known config dir "
+                    f"(pids {', '.join(map(str, unknown))}); is wb-spaces reading spaces.toml? No snapshot written.")
     live = [(pid, j) for pid, j in live if j.get("kind", "interactive") == "interactive" and isinstance(j.get("cwd"), str)]
     flags = skip_flags([pid for pid, _ in live])
     entries = []

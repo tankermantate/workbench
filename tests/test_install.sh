@@ -3,7 +3,7 @@ source "$(dirname "$0")/lib.sh"
 T="$(newtmp)"; trap 'rm -rf "$T"' EXIT
 mkdir -p "$T/bin" "$T/z"
 # install.sh also installs a launch agent: never the real one, never a real launchctl.
-export WORKBENCH_DRY_RUN=1 WB_LAUNCH_AGENTS_DIR="$T/agents" WB_GROOM_DIR="$T/groom"
+export WORKBENCH_DRY_RUN=1 WB_LAUNCH_AGENTS_DIR="$T/agents" WB_GROOM_DIR="$T/groom" WB_RESTORE_DIR="$T/restore"
 echo "not ours" > "$T/bin/wb-ui"
 # python leaves bin/__pycache__ (gitignored) behind; an earlier install linked it, and a command
 # since removed from bin/ left a dangling link
@@ -75,6 +75,27 @@ assert_eq "install.sh has no \${v//pat/rep}: bash 5.2 rewrites & in the replacem
   "$(grep -cE '\$\{[A-Za-z_][A-Za-z0-9_]*//' "$REPO/install.sh")" "0"
 if command -v plutil >/dev/null; then assert_eq "schedule: plist with env is valid" "$(plutil -lint "$PL" >/dev/null 2>&1; echo $?)" "0"; fi
 rm -f "$PL"
+
+# the restore snapshot, every 10 minutes, so a crash or forced restart can be restored too
+RL="$T/agents/workbench.restore-save.plist"; rm -f "$RL"
+out="$(WB_BIN_DIR="$T/bin" ZDOTDIR="$T/z" WB_RESTORE_DIR="$T/restore" WB_STATE_DIR="$T/state" bash "$REPO/install.sh" 2>&1)"
+if [ -f "$RL" ]; then ok "save agent: plist written"; else bad "save agent: no plist at $RL"; fi
+rl="$(cat "$RL" 2>/dev/null)"
+assert_contains "save agent: says it wrote it" "$out" "workbench.restore-save.plist"
+assert_contains "save agent: label" "$rl" "<string>workbench.restore-save</string>"
+assert_contains "save agent: every 600s" "$rl" $'<key>StartInterval</key>\n\t<integer>600</integer>'
+assert_contains "save agent: runs wb-restore save --quiet from the bin dir" "$rl" $'<string>'"$T/bin/wb-restore"$'</string>\n\t\t<string>save</string>\n\t\t<string>--quiet</string>'
+assert_contains "save agent: logs in the restore dir" "$rl" "<string>$T/restore/launchd.log</string>"
+assert_contains "save agent: WB_RESTORE_DIR passed on" "$rl" $'<key>WB_RESTORE_DIR</key>\n\t\t<string>'"$T/restore</string>"
+assert_contains "save agent: WB_STATE_DIR passed on" "$rl" $'<key>WB_STATE_DIR</key>\n\t\t<string>'"$T/state</string>"
+assert_not_contains "save agent: no placeholder left" "$rl" "@"
+if command -v plutil >/dev/null; then assert_eq "save agent: plist is valid" "$(plutil -lint "$RL" >/dev/null 2>&1; echo $?)" "0"; fi
+assert_contains "save agent: dry run prints its bootstrap" "$out" "launchctl bootstrap gui/$(id -u) $RL"
+assert_contains "save agent: ... after replacing any earlier one" "$out" "launchctl bootout gui/$(id -u)/workbench.restore-save"
+assert_eq "save agent: the restore dir exists for the log" "$([ -d "$T/restore" ] && echo yes)" "yes"
+rm -f "$RL"
+WB_BIN_DIR="$T/bin" ZDOTDIR="$T/z" bash "$REPO/install.sh" --no-schedule >/dev/null 2>&1
+if [ ! -e "$RL" ]; then ok "save agent: --no-schedule skips it too"; else bad "save agent: --no-schedule wrote it"; fi
 
 assert_eq "example config parses" "$(WORKBENCH_CONFIG="$REPO/spaces.example.toml" "$REPO/bin/wb-spaces" >/dev/null 2>&1; echo $?)" "0"
 

@@ -77,7 +77,7 @@ This protocol applies when ending a Beads implementation workflow. It is subordi
 
 ```bash
 tests/run.sh               # all tests (plain bash; fakes for bd/new-session/claude)
-./install.sh               # link bin/* into ~/.local/bin, schedule weekly grooming (--no-schedule skips), print the ~/.zshrc line
+./install.sh               # link bin/* into ~/.local/bin, schedule weekly grooming and the 10-minute session snapshot (--no-schedule skips), print the ~/.zshrc line
 scripts/check-leaks.sh     # before any push: no private names in tracked files, history or the bead db
 new-session <bead-id>|<space-key> [topic]   # worktree session for a worktrees = true space
 end-session [<worktree>]                    # remove it once the work is merged/pushed/verified
@@ -92,7 +92,7 @@ User guide: `README.md`. Designs: `docs/specs/` (launcher, session scripts, sess
 - `bin/wb-backlog`, `bin/wb-ui` (python) — a space's beads through `bd`, and the fzf screen helpers. `lib/wb_touched.py` gives a claim's idle age with grooming's own writes walked back (wb-backlog and the grooming judge both use it).
 - `bin/wb-session-hook`, `bin/wb-focus`, `bin/wb-statusline-bead` (python) with `lib/wb_session.py` — keep a launched Claude session on its bead: hooks passed with `claude --settings`, the session→bead record in `~/.cache/workbench/sessions/`, and the status line segment. `bin/wb-statusline-space` is the one naming the session's space (and whether it's a worktree), from `wb-spaces`.
 - `bin/wb-tabs` (python) lists every open terminal tab with its space, bead, goal and status, joining `ps`, Claude's `sessions/<pid>.json` and the session records, with one `bd list` per store and never `bd show`; `lib/wb_space.py` is the folder-to-space logic it shares with the status line.
-- `bin/wb-restore` (python) saves every live session and, after a restart, queues them; each new tab's launcher claims one and resumes it with `claude --resume`. `lib/wb_live.py` is the live-session lookup (ps and Claude's pid files) it shares with `wb-tabs`.
+- `bin/wb-restore` (python) saves every live session and, after a restart, queues them; each new tab's launcher claims one and resumes it with `claude --resume`. `lib/launchd/workbench.restore-save.plist.in` saves every 10 minutes. `lib/wb_live.py` is the live-session lookup (ps and Claude's pid files) it shares with `wb-tabs`.
 - `bin/new-session`, `bin/end-session` (bash) with `lib/session.sh` — worktree sessions for `worktrees = true` spaces; the space's private setup runs as `on_create` / `before_end` hooks from `spaces.toml`.
 - `bin/wb-groom` (python) with `lib/wb_groom.py` and `lib/wb_judge_bd.py` — planning rituals: weekly grooming (a read-only `claude -p` judge, then policy-checked apply through `bd` with an exact undo record), and the review and strategy sessions the launcher offers. Each space's plan is private, in `~/.config/workbench/plans/<space>/` (templates in `lib/plan-templates/`); runs are kept in `~/.local/state/workbench/groom/`. `lib/launchd/workbench.groom.plist.in` is the Saturday 06:00 agent `install.sh` writes.
 - `prompts/*.txt` — the opening prompts handed to Claude (`groom.txt`, `review.txt` and `strategy.txt` for the rituals).

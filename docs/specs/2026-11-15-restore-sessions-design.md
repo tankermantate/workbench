@@ -27,8 +27,14 @@ Measured on 2026-11-15, with 18 sessions open over two Claude accounts.
 `space_root` and `bead` come from the workbench session record; `worktree` is the `cwd`'s git
 top level when that is a linked worktree. Nothing comes from a process's environment. It reads
 `ps`, the pid files and the session records, and never `bd`, so it is cheap enough to run on a
-schedule. A snapshot with the same sessions as the newest one isn't written again, and snapshots
-older than 7 days are pruned (the newest is always kept).
+schedule: `install.sh` loads a launch agent (`workbench.restore-save`) that runs
+`wb-restore save --quiet` every 10 minutes, so a crash or a forced restart is covered without
+anyone remembering to save. A snapshot with the same sessions as the newest one isn't written
+again, and snapshots older than 7 days are pruned (the newest is always kept).
+
+A live claude with no pid file in any known config dir means the snapshot would miss a session,
+most likely because `wb-spaces` couldn't read the spaces and so their accounts aren't known.
+Save then writes nothing and exits 1: the last whole snapshot stays the one a restore uses.
 
 ## Restoring
 

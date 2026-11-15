@@ -6,7 +6,7 @@
 	<string>@LABEL@</string>
 	<key>ProgramArguments</key>
 	<array>
-		<string>@WB_GROOM@</string>
+		<string>@BIN@/wb-groom</string>
 		<string>run</string>
 		<string>--all</string>
 	</array>

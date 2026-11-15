@@ -17,8 +17,9 @@ Needs macOS with zsh, `python3` 3.11 or later, `git`, and [bd](https://github.co
 [fzf](https://github.com/junegunn/fzf) is optional; without it the launcher shows a numbered menu.
 
 ```bash
-./install.sh                     # links bin/* into ~/.local/bin, schedules weekly grooming; prints the ~/.zshrc line
-./install.sh --no-schedule       # the same, without the launch agent
+./install.sh                     # links bin/* into ~/.local/bin, schedules weekly grooming and a session
+                                 # snapshot every 10 minutes; prints the ~/.zshrc line
+./install.sh --no-schedule       # the same, without the launch agents
 cp spaces.example.toml ~/.config/workbench/spaces.toml   # then edit it
 ```
 
@@ -116,7 +117,8 @@ A session the launcher (or `new-session`) starts knows which bead it's on:
   `settings.json` in each Claude config dir. Claude Code then rings the terminal bell when a session
   finishes or pauses for permission while you're away, and Apple Terminal shows it on that tab.
 - **Restarting without losing your tabs.** `wb-restore save` records every open Claude session
-  (its folder, account and session id, and its space and bead). After the restart, run
+  (its folder, account and session id, and its space and bead); `install.sh` also runs it every 10
+  minutes, so a crash is covered too. After the restart, run
   `wb-restore`: it takes the newest snapshot from before the boot, leaves out sessions still open and
   folders that are gone, lets you untick any you're done with, then opens one Terminal window per
   session. Each new window resumes its session (`claude --resume`) on the same account and bead,

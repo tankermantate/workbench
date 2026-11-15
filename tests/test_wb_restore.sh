@@ -80,6 +80,15 @@ assert_not_contains "argv itself is never kept" "$(cat "$S")" "SECRET OPENING PR
 "$R" save >/dev/null 2>&1
 assert_eq "same sessions again: no new snapshot" "$(snaps)" "1"
 
+# a live claude whose pid file can't be found (its account unknown, say, when wb-spaces failed):
+# a snapshot without it would become the one a restore uses, so none is written
+live 603 ttys006 "claude"
+out=$("$R" save 2>&1); rc=$?
+assert_eq "an unidentified session: save refuses" "$rc" "1"
+assert_contains "and says why" "$out" "1 open Claude session"
+assert_eq "no snapshot written" "$(snaps)" "1"
+grep -v '^60[123] ' "$T/ps.out" > "$T/ps.tmp"; mv "$T/ps.tmp" "$T/ps.out"
+
 old="$WB_RESTORE_DIR/snapshots/20200101T000000Z.json"
 echo '{"taken": 1577836800, "sessions": []}' > "$old"
 live 403 ttys004 "claude"; pidfile "$CFG" 403 sid-c "$T/plain"
