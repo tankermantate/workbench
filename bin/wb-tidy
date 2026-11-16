@@ -1,13 +1,15 @@
 #!/usr/bin/env python3
 """wb-tidy — end the worktrees whose work is finished, after asking.
 
-  wb-tidy     list every worktree with whether it's offered and why not, then end the ticked
-              ones with end-session, one at a time, stopping at the first refusal
+  wb-tidy [--no-bead]   list every worktree with whether it's offered and why not, then end the
+                        ticked ones with end-session, one at a time, stopping at the first refusal
 
 Offered only when all hold: its space is known, its branch is merged into the repo's default
 branch, it has no uncommitted changes, no Claude session is open in it, and the bead whose claim
-note names it is closed (a worktree no bead names is offered on the other four alone: every
-commit in it is already on the default branch). end-session still makes its own checks.
+note names it is closed. A closed bead is the only sign the work is done: merged and clean only
+say no code would be lost, and a worktree's conversation goes with its folder. So a worktree no
+bead names is kept, unless --no-bead offers it on the other four (a bead whose claim note doesn't
+name its worktree also reads as none). end-session still makes its own checks.
 
 Fails closed: when ps fails or a live claude's folder can't be told, nothing is offered; when a
 space's beads can't be read, nothing in that space is.
@@ -106,7 +108,7 @@ def space_of(path, spaces):
     return (keyed or spaces)[0]
 
 
-def survey():
+def survey(no_bead=False):
     """([(path, space name, branch, offered, why)], error). error is set when nothing can be offered."""
     rows = wb_space.rows()
     unknown = []
@@ -150,6 +152,8 @@ def survey():
             bead = bead_for(path, beads or [])
             if not why and bead and bead.get("status") != "closed":
                 why = f"its bead {bead.get('id')} is {bead.get('status')}"
+            if not why and not bead and not no_bead:
+                why = "merged and clean, but no bead names it; wb-tidy --no-bead offers these too"
             note = (f"bead {bead.get('id')} {bead.get('status')}" if bead else "no bead") + f" · merged · clean"
             found.append((path, space["name"], branch or "-", not why, why or note))
 
@@ -182,9 +186,10 @@ def main(argv):
     if argv and argv[0] in ("-h", "--help"):
         print(__doc__.strip())
         return 0
-    if argv:
-        return fail(f"unknown argument: {argv[0]} (see wb-tidy --help)")
-    found, error = survey()
+    no_bead = argv[:1] == ["--no-bead"]
+    if argv[no_bead:]:
+        return fail(f"unknown argument: {argv[no_bead]} (see wb-tidy --help)")
+    found, error = survey(no_bead)
     if error:
         return fail(error)
     home = os.path.expanduser("~")

@@ -131,8 +131,9 @@ A session the launcher (or `new-session`) starts knows which bead it's on:
   is when it starts to grind. `wb-health` prints the same line.
 - **Tidying finished worktrees.** `wb-tidy` lists every worktree with whether it's finished:
   merged into the default branch, nothing uncommitted, no Claude session open in it, and its bead
-  closed (or no bead at all). It offers only those, all ticked; Enter runs `end-session` on each,
-  one at a time, stopping at the first refusal. Anything else is listed with why it stays.
+  closed. It offers only those, all ticked; Enter runs `end-session` on each, one at a time,
+  stopping at the first refusal. Anything else is listed with why it stays. A worktree no bead
+  names stays too; `wb-tidy --no-bead` offers those as well, when merged and clean.
 - **`wb-focus`** prints this session's bead. Inside Claude, `wb-focus <id>` moves the session to
   another bead, and `wb-focus --clear` drops it.
 

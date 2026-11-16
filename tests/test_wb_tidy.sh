@@ -29,7 +29,7 @@ space_key = "acme"
 EOF
 wt() { git -C "$T/acme" worktree add -q -b "$2" "$T/wts/$1" 2>/dev/null; }
 wt acme-done feat/done          # bead closed, merged, clean: offered
-wt acme-nobead explore/x        # no bead, merged, clean: offered
+wt acme-nobead explore/x        # no bead, merged, clean: kept unless --no-bead
 wt acme-open feat/open          # its bead is still open
 wt acme-unmerged feat/unmerged  # a commit main doesn't have
 git -C "$T/wts/acme-unmerged" -c user.email=t@example.com -c user.name=t commit -q --allow-empty -m wip
@@ -60,7 +60,8 @@ out=$(WORKBENCH_DRY_RUN=1 "$W" </dev/null 2>&1); rc=$?
 assert_eq "dry run exits 0" "$rc" "0"
 assert_contains "a closed bead's merged, clean worktree is offered" "$(line "$out" acme-done)" "offer"
 assert_contains "with its bead" "$(line "$out" acme-done)" "ac-1 closed"
-assert_contains "a merged, clean worktree with no bead is offered" "$(line "$out" acme-nobead)" "offer"
+assert_contains "no bead names it: kept, since done can't be told" "$(line "$out" acme-nobead)" "keep"
+assert_contains "and says how to include it" "$(line "$out" acme-nobead)" "no bead names it; wb-tidy --no-bead"
 assert_contains "an open bead keeps it" "$(line "$out" acme-open)" "keep"
 assert_contains "and says so" "$(line "$out" acme-open)" "ac-2 is in_progress"
 assert_contains "an unmerged branch keeps it" "$(line "$out" acme-unmerged)" "not merged into main"
@@ -68,7 +69,12 @@ assert_contains "uncommitted changes keep it" "$(line "$out" acme-dirty)" "uncom
 assert_contains "a live session keeps it" "$(line "$out" acme-live)" "a Claude session is open in it"
 assert_contains "a folder no space claims is listed" "$(line "$out" stray)" "keep"
 assert_contains "and never offered" "$(line "$out" stray)" "not a worktree of any space"
-assert_contains "dry run says what it would end" "$out" "DRY-RUN: would end 2"
+assert_contains "dry run says what it would end" "$out" "DRY-RUN: would end 1"
+out=$(WORKBENCH_DRY_RUN=1 "$W" --no-bead </dev/null 2>&1)
+assert_contains "--no-bead: a merged, clean worktree with no bead is offered" "$(line "$out" acme-nobead)" "offer"
+assert_contains "--no-bead: said as such" "$(line "$out" acme-nobead)" "no bead · merged · clean"
+assert_contains "--no-bead: an open bead still keeps one" "$(line "$out" acme-open)" "keep"
+assert_contains "--no-bead: would end 2" "$out" "DRY-RUN: would end 2"
 [ -s "$T/end.log" ] && bad "dry run ends nothing" || ok "dry run ends nothing"
 
 # ---- asking
@@ -81,14 +87,14 @@ out=$(echo n | "$W" 2>&1); rc=$?
 assert_contains "no: nothing ended" "$out" "nothing ended"
 [ -s "$T/end.log" ] && bad "no: end-session never ran" || ok "no: end-session never ran"
 
-out=$(echo y | "$W" 2>&1); rc=$?
+out=$(echo y | "$W" --no-bead 2>&1); rc=$?
 assert_eq "yes exits 0" "$rc" "0"
 assert_eq "end-session ran on each offered worktree, one at a time" "$(cat "$T/end.log")" "$T/wts/acme-done
 $T/wts/acme-nobead"
 assert_contains "and its output is shown" "$out" "session ended"
 rm -f "$T/end.log"
 
-out=$(echo y | FAIL_FOR=acme-done "$W" 2>&1); rc=$?
+out=$(echo y | FAIL_FOR=acme-done "$W" --no-bead 2>&1); rc=$?
 assert_eq "a refusal: exits 1" "$rc" "1"
 assert_eq "and stops there" "$(cat "$T/end.log")" "$T/wts/acme-done"
 assert_contains "saying which refused" "$out" "end-session refused acme-done"
@@ -108,7 +114,7 @@ assert_eq "a claude whose folder can't be told: refuses" "$rc" "1"
 assert_contains "and says why" "$out" "1 open Claude session"
 printf '101 1 ttys001 login\n102 101 ttys001 -zsh\n103 102 ttys001 claude\n' > "$T/ps.out"
 
-out=$(WORKBENCH_DRY_RUN=1 WB_BD=false "$W" </dev/null 2>&1); rc=$?
+out=$(WORKBENCH_DRY_RUN=1 WB_BD=false "$W" --no-bead </dev/null 2>&1); rc=$?
 assert_contains "beads unreadable: nothing in that space is offered" "$(line "$out" acme-nobead)" "keep"
 assert_contains "and says why" "$(line "$out" acme-nobead)" "couldn't read Acme's beads"
 assert_not_contains "nothing would be ended" "$out" "would end"
