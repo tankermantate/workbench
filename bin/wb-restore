@@ -2,8 +2,9 @@
 """wb-restore — bring every Claude session back after a restart.
 
   wb-restore save         snapshot every live interactive session (cheap: ps and files, never bd)
-  wb-restore              offer the sessions from the newest snapshot taken before this boot,
+  wb-restore [--yes]      offer the sessions from the newest snapshot taken before this boot,
                           queue the chosen ones and open one Terminal window for each
+                          (--yes: all of them, without asking; for when there's no terminal)
   wb-restore count        how many sessions from before this boot are ready to come back (0 once declined)
   wb-restore decline      don't offer them again until the next restart
   wb-restore claim        (the launcher, at a new tab's first prompt) take the oldest queued
@@ -214,8 +215,10 @@ def choose(entries):
         picked = {int(x.split("\t", 1)[0]) for x in p.stdout.splitlines() if x.split("\t", 1)[0].isdigit()}
         return [e for i, e in enumerate(entries) if i in picked]
     print(f"Resume these {len(entries)}? [y/N] ", end="", flush=True)
-    answer = sys.stdin.readline().strip().lower()
-    return entries if answer in ("y", "yes") else []
+    line = sys.stdin.readline()
+    if not line:
+        return None  # end of input before any answer: nobody was there to ask
+    return entries if line.strip().lower() in ("y", "yes") else []
 
 
 def open_tabs(n):
@@ -283,7 +286,7 @@ def decline():
     return 0
 
 
-def restore():
+def restore(yes=False):
     picked = pick_snapshot()
     if not picked:
         return fail(f"no snapshot to restore from in {sub('snapshots')}. `wb-restore save` makes one.")
@@ -305,7 +308,11 @@ def restore():
     if dry():
         print(f"DRY-RUN: would open a Terminal window for each of the {len(ready)} ready sessions")
         return 0
-    chosen = choose(ready)
+    chosen = ready if yes else choose(ready)
+    if chosen is None:
+        print()
+        return fail("couldn't ask which to resume: there's no terminal to answer on. "
+                    "Run `wb-restore --yes` to resume them all, or run wb-restore in a terminal.")
     if not chosen:
         print("nothing resumed.")
         return 0
@@ -436,6 +443,8 @@ def main(argv):
     if argv and argv[0] in ("-h", "--help"):
         print(__doc__.strip())
         return 0
+    if argv == ["--yes"]:
+        return restore(yes=True)
     if argv:
         return fail(f"unknown command: {argv[0]} (see wb-restore --help)")
     return restore()

@@ -51,6 +51,8 @@ Save then writes nothing and exits 1: the last whole snapshot stays the one a re
 - sessions whose folder is gone, listed as skipped with the reason.
 
 What's left is offered in fzf, all selected (Tab unticks); without fzf, a yes/no for all of them.
+With no terminal to answer on (input ends before any answer, as from a Claude `!` prompt) it
+resumes nothing, exits 1 and says to rerun with `--yes`, which takes all of them without asking.
 The chosen sessions go into `$WB_RESTORE_DIR/queue/` as one file each, then one osascript call
 asks Terminal for one new window per session (macOS's "prefer tabs" setting decides whether they
 arrive as tabs). `WORKBENCH_DRY_RUN` prints what it would queue and open instead.

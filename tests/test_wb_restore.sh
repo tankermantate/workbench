@@ -136,6 +136,14 @@ out=$(echo n | "$R" 2>&1)
 assert_contains "no: nothing is queued" "$out" "nothing resumed"
 [ -s "$T/osa.log" ] && bad "no: no window opened" || ok "no: no window opened"
 
+# no terminal to answer on (a Claude ! prompt, say): an empty stdin is not a no
+out=$("$R" </dev/null 2>&1); rc=$?
+assert_eq "can't ask: exits 1" "$rc" "1"
+assert_contains "and says it couldn't ask" "$out" "couldn't ask"
+assert_contains "and how to go on" "$out" "wb-restore --yes"
+assert_not_contains "not 'nothing resumed', which reads as nothing to resume" "$out" "nothing resumed"
+[ -s "$T/osa.log" ] && bad "can't ask: no window opened" || ok "can't ask: no window opened"
+
 out=$(echo y | "$R" 2>&1); rc=$?
 assert_eq "yes exits 0" "$rc" "0"
 assert_eq "two sessions queued" "$(ls "$WB_RESTORE_DIR/queue" | wc -l | tr -d ' ')" "2"
@@ -146,6 +154,12 @@ out=$(echo y | "$R" 2>&1); rc=$?
 assert_contains "a second run before the tabs start: already queued, so skipped" "$out" "already queued"
 assert_eq "and nothing is queued twice" "$(ls "$WB_RESTORE_DIR/queue" | wc -l | tr -d ' ')" "2"
 rm -rf "$WB_RESTORE_DIR/queue"
+
+out=$("$R" --yes </dev/null 2>&1); rc=$?
+assert_eq "--yes exits 0 without a terminal" "$rc" "0"
+assert_eq "--yes queues every ready session without asking" "$(ls "$WB_RESTORE_DIR/queue" | wc -l | tr -d ' ')" "2"
+assert_not_contains "--yes doesn't ask" "$out" "[y/N]"
+rm -rf "$WB_RESTORE_DIR/queue"; : > "$T/osa.log"
 
 out=$(echo y | FAKE_PS_RC=1 "$R" 2>&1); rc=$?
 assert_eq "ps failing: refuse, since live sessions can't be told apart" "$rc" "1"
