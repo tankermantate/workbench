@@ -369,7 +369,23 @@ _wb_autolaunch_blockers() {
 _wb_first_prompt() {
   emulate -L zsh
   add-zsh-hook -d precmd _wb_first_prompt
-  _wb_autolaunch_blockers && { _wb_restore_claimed || launch }
+  _wb_autolaunch_blockers && { _wb_restore_claimed || { _wb_restore_offer; launch } }
+}
+
+# After a restart, offers to bring back the sessions that were open before it.
+# Enter means yes; a no lasts until the next restart, so new tabs stop asking.
+_wb_restore_offer() {
+  emulate -L zsh
+  local n answer
+  n=$($WORKBENCH_HOME/bin/wb-restore count 2>/dev/null) || return 0
+  [[ $n == <-> ]] && (( n > 0 )) || return 0
+  print -n "$n session$( (( n == 1 )) && print -n ' was' || print -n 's were') open before the restart. Bring them back? [Y/n] "
+  read -r answer
+  if [[ $answer == [nN]* ]]; then
+    $WORKBENCH_HOME/bin/wb-restore decline
+  else
+    $WORKBENCH_HOME/bin/wb-restore
+  fi
 }
 
 # A tab wb-restore opened takes one queued session and resumes it, here rather

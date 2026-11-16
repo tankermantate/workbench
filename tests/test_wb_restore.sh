@@ -110,6 +110,16 @@ snap 20261115T110000Z $((NOW - 60)) "$(ent sid-c "$T/plain" "$CFG" false "Still 
 live 403 ttys004 "claude"; pidfile "$CFG" 403 sid-c "$T/plain"
 export WB_BOOTTIME=$BOOT
 
+# ---- count: what the launcher offers after a restart
+assert_eq "count: the ready ones only (not open, not gone)" "$("$R" count)" "2"
+assert_eq "count: no snapshot from before this boot, nothing to offer" "$(WB_BOOTTIME=$((BEFORE - 7200)) "$R" count)" "0"
+"$R" decline; rc=$?
+assert_eq "decline exits 0" "$rc" "0"
+assert_eq "count: 0 once declined" "$("$R" count)" "0"
+WB_BOOTTIME=$((BOOT - 100)) "$R" decline   # declined at the boot before this one
+assert_eq "count: a decline lasts only until the next restart" "$("$R" count)" "2"
+rm -f "$WB_RESTORE_DIR/declined"
+
 out=$(WORKBENCH_DRY_RUN=1 "$R" </dev/null 2>&1); rc=$?
 assert_eq "dry run exits 0" "$rc" "0"
 assert_contains "uses the snapshot from before the boot" "$out" "Resend the email"
@@ -129,6 +139,7 @@ assert_contains "no: nothing is queued" "$out" "nothing resumed"
 out=$(echo y | "$R" 2>&1); rc=$?
 assert_eq "yes exits 0" "$rc" "0"
 assert_eq "two sessions queued" "$(ls "$WB_RESTORE_DIR/queue" | wc -l | tr -d ' ')" "2"
+assert_eq "count: 0 once they're queued" "$("$R" count)" "0"
 assert_eq "one osascript call asks for 2 new tabs" "$(cat "$T/osa.log")" "2"
 
 out=$(echo y | "$R" 2>&1); rc=$?

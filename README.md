@@ -118,8 +118,9 @@ A session the launcher (or `new-session`) starts knows which bead it's on:
   finishes or pauses for permission while you're away, and Apple Terminal shows it on that tab.
 - **Restarting without losing your tabs.** `wb-restore save` records every open Claude session
   (its folder, account and session id, and its space and bead); `install.sh` also runs it every 10
-  minutes, so a crash is covered too. After the restart, run
-  `wb-restore`: it takes the newest snapshot from before the boot, leaves out sessions still open and
+  minutes, so a crash is covered too. After the restart, the first new tab asks
+  `11 sessions were open before the restart. Bring them back? [Y/n]` (answer no and it doesn't ask
+  again until the next restart), or run `wb-restore` yourself: it takes the newest snapshot from before the boot, leaves out sessions still open and
   folders that are gone, lets you untick any you're done with, then opens one Terminal window per
   session. Each new window resumes its session (`claude --resume`) on the same account and bead,
   instead of showing the launcher. Allow Terminal under System Settings > Privacy & Security >

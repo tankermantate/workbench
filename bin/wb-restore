@@ -4,6 +4,8 @@
   wb-restore save         snapshot every live interactive session (cheap: ps and files, never bd)
   wb-restore              offer the sessions from the newest snapshot taken before this boot,
                           queue the chosen ones and open one Terminal window for each
+  wb-restore count        how many sessions from before this boot are ready to come back (0 once declined)
+  wb-restore decline      don't offer them again until the next restart
   wb-restore claim        (the launcher, at a new tab's first prompt) take the oldest queued
                           session: prints <folder><TAB><ticket>; exit 1 when there is none
   wb-restore exec TICKET  replace this process with `claude --resume` for that session
@@ -229,6 +231,58 @@ def open_tabs(n):
     return 0
 
 
+def sort_out(snap, live):
+    """(ready entries, [(entry, why skipped)]) for a snapshot, given the live sessions."""
+    live_ids = {j["sessionId"] for _, j in live}
+    pending = pending_ids()
+    ready, skipped = [], []
+    for e in snap["sessions"]:
+        if e.get("session") in live_ids:
+            skipped.append((e, "still open in a tab"))
+        elif e.get("session") in pending:
+            skipped.append((e, "already queued, a new tab is about to resume it"))
+        elif not os.path.isdir(e.get("cwd") or ""):
+            skipped.append((e, "its folder is gone"))
+        else:
+            ready.append(e)
+    return ready, skipped
+
+
+def declined_path():
+    return sub("declined")
+
+
+def count():
+    """How many sessions from before this boot could come back, for the launcher's offer.
+    0 when unsure: an offer at every new tab is worse than none."""
+    boot = boot_time()
+    picked = pick_snapshot()
+    if boot is None or not picked or picked[1]["taken"] >= boot:
+        print(0)
+        return 0
+    try:
+        with open(declined_path()) as f:
+            if float(f.read().strip()) == boot:
+                print(0)
+                return 0
+    except (OSError, ValueError):
+        pass
+    live = live_sessions()
+    print(0 if live is None else len(sort_out(picked[1], live)[0]))
+    return 0
+
+
+def decline():
+    """Not this time: no offer again until the next restart."""
+    boot = boot_time()
+    if boot is None:
+        return fail("can't read the boot time, so can't remember the answer.")
+    os.makedirs(home_dir(), exist_ok=True)
+    with open(declined_path(), "w") as f:
+        f.write(f"{boot}\n")
+    return 0
+
+
 def restore():
     picked = pick_snapshot()
     if not picked:
@@ -238,20 +292,11 @@ def restore():
     if live is None:
         # fail closed: with no way to tell which are open, any of them could be resumed twice
         return fail("can't read the process table, so can't tell which sessions are still open. Nothing resumed.")
-    live_ids = {j["sessionId"] for _, j in live}
-    pending = pending_ids()
     taken = datetime.datetime.fromtimestamp(snap["taken"]).strftime("%a %d %b %H:%M")
     print(f"From the snapshot of {taken}:")
-    ready = []
-    for e in snap["sessions"]:
-        if e.get("session") in live_ids:
-            print(f"  skip  {label(e)}: still open in a tab")
-        elif e.get("session") in pending:
-            print(f"  skip  {label(e)}: already queued, a new tab is about to resume it")
-        elif not os.path.isdir(e.get("cwd") or ""):
-            print(f"  skip  {label(e)}: its folder is gone")
-        else:
-            ready.append(e)
+    ready, skipped = sort_out(snap, live)
+    for e, why in skipped:
+        print(f"  skip  {label(e)}: {why}")
     for e in ready:
         print(f"  ready {label(e)}")
     if not ready:
@@ -380,6 +425,10 @@ def exec_ticket(ticket):
 def main(argv):
     if argv[:1] == ["save"]:
         return save("--quiet" in argv)
+    if argv[:1] == ["count"]:
+        return count()
+    if argv[:1] == ["decline"]:
+        return decline()
     if argv[:1] == ["claim"]:
         return claim()
     if argv[:1] == ["exec"]:

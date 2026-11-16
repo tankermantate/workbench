@@ -55,6 +55,17 @@ The chosen sessions go into `$WB_RESTORE_DIR/queue/` as one file each, then one 
 asks Terminal for one new window per session (macOS's "prefer tabs" setting decides whether they
 arrive as tabs). `WORKBENCH_DRY_RUN` prints what it would queue and open instead.
 
+## Offering it, after a restart
+
+A tab's first prompt, when nothing is queued for it to claim, runs `wb-restore count` before the
+launcher: the number of sessions in the snapshot from before this boot that would be ready (not
+open, not queued, folder still there). It prints 0 when there is no snapshot from before the boot,
+when the boot time can't be read, or when the offer was declined since this boot. Above 0, the tab
+asks `N sessions were open before the restart. Bring them back? [Y/n]`. Enter runs `wb-restore`
+(its picker, then a new tab per session) and the launcher follows; `n` runs `wb-restore decline`, which
+writes this boot's time to `$WB_RESTORE_DIR/declined`, so later tabs don't ask until the next
+restart. Once they are all open or queued the count is 0 and the question stops by itself.
+
 ## Claiming, in each new tab
 
 At the first prompt, after every auto-start guard has passed, the launcher runs

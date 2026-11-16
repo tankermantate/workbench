@@ -4,6 +4,8 @@ T="$(newtmp)"; trap 'rm -rf "$T"' EXIT
 mkdir -p "$T/plain" "$T/repo" "$T/zdot"; git -C "$T/repo" init -q
 printf '[launcher]\nterminals = ["WezTerm"]\n[[space]]\nname = "X"\nroot = "%s"\n' "$T/plain" > "$T/spaces.toml"
 export WORKBENCH_CONFIG="$T/spaces.toml"
+# never the real snapshots: an offer to restore from them would answer every pty test
+export WB_RESTORE_DIR="$T/restore"
 # blockers [env assignments…]: guard names from a non-interactive zsh in $T/plain
 blockers() { (cd "$T/plain" && env -u CLAUDECODE -u WORKBENCH_NO_LAUNCH TERM_PROGRAM=Apple_Terminal SHLVL=0 "$@" \
   zsh -f -c "source '$REPO/shell/workbench.zsh'; _wb_autolaunch_blockers; print -l -- \$reply"); }
@@ -47,11 +49,29 @@ assert_eq "re-sourcing .zshrc does not launch again" "$(printf '%s' "$out" | tr 
 mkdir -p "$T/restore/queue" "$T/resumed"
 printf '{"session":"sid-q","cwd":"%s","config":"%s","skip_permissions":false,"name":"q"}' \
   "$T/resumed" "$T/zdot/.claude-alt" > "$T/restore/queue/1-000.json"
-out="$(export WB_RESTORE_DIR="$T/restore" WORKBENCH_DRY_RUN=1; pty "$T/plain" 'print PWD-IS-$PWD')"
+out="$(export WORKBENCH_DRY_RUN=1; pty "$T/plain" 'print PWD-IS-$PWD')"
 assert_contains "a queued session is resumed in the new tab" "$out" "--resume sid-q"
 assert_not_contains "and the launcher doesn't start" "$out" "LAUNCHED-STUB"
 assert_contains "the tab is left in the session's folder" "$out" "PWD-IS-$T/resumed"
 [ -e "$T/restore/queue/1-000.json" ] && bad "the entry was claimed" || ok "the entry was claimed"
-out="$(export WB_RESTORE_DIR="$T/restore"; pty "$T/plain")"
+out="$(pty "$T/plain")"
 assert_contains "with the queue empty, the next tab launches as usual" "$out" "LAUNCHED-STUB"
+
+# After a restart, the first tab's launcher offers to bring the sessions back, once.
+rm -rf "$T/restore"; mkdir -p "$T/restore/snapshots"
+NOW=$(date +%s)
+printf '{"taken": %s, "sessions": [{"session":"sid-old","cwd":"%s","config":"%s","skip_permissions":false,"name":"Old one"}]}' \
+  $((NOW - 7200)) "$T/resumed" "$T/zdot/.claude" > "$T/restore/snapshots/20261115T090000Z.json"
+export WB_BOOTTIME=$((NOW - 3600))
+out="$(export WORKBENCH_DRY_RUN=1; pty "$T/plain" '')"
+assert_contains "the offer names how many" "$out" "1 session was open before the restart"
+assert_contains "enter (yes) runs the restore" "$out" "DRY-RUN: would open"
+assert_contains "then the launcher starts" "$out" "LAUNCHED-STUB"
+out="$(pty "$T/plain" n)"
+assert_contains "asked again while not answered no" "$out" "before the restart"
+assert_contains "no: the launcher starts" "$out" "LAUNCHED-STUB"
+out="$(pty "$T/plain")"
+assert_not_contains "no is remembered: not asked again this boot" "$out" "before the restart"
+assert_contains "and the launcher starts" "$out" "LAUNCHED-STUB"
+unset WB_BOOTTIME
 finish
