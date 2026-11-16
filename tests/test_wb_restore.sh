@@ -189,4 +189,20 @@ assert_contains "and says so" "$out" "already open"
 "$R" exec "$T/nope.json" >/dev/null 2>&1; rc=$?
 assert_eq "exec of a missing ticket fails" "$rc" "1"
 
+# ---- two restarts in a row: nothing is reopened after the first, so the save between them
+# finds no sessions. It must not hide the last real snapshot from the restore after the second.
+rm -rf "$WB_RESTORE_DIR"; mkdir -p "$WB_RESTORE_DIR/snapshots"
+: > "$T/ps.out"; : > "$T/ps.args"; rm -f "$CFG"/sessions/* "$ALT"/sessions/*
+snap 20261115T090000Z $BEFORE "$(ent sid-b "$T/plain" "$CFG" false "Plain one" null null null)"
+out=$("$R" save 2>&1); rc=$?
+assert_eq "empty save before any restore exits 0" "$rc" "0"
+assert_eq "and writes no snapshot" "$(snaps)" "1"
+assert_contains "it says why" "$out" "before this restart"
+out=$(WB_BOOTTIME=$((NOW + 60)) WORKBENCH_DRY_RUN=1 "$R" </dev/null 2>&1)
+assert_contains "the restore after a second restart still offers them" "$out" "Plain one"
+# once a snapshot from after the restart exists, closing everything on purpose is recorded
+snap 20261115T110000Z $((NOW - 60)) "$(ent sid-b "$T/plain" "$CFG" false "Plain one" null null null)"
+"$R" save >/dev/null 2>&1
+assert_eq "an empty save after this boot's own snapshot is written" "$(snaps)" "3"
+
 finish

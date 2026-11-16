@@ -148,6 +148,14 @@ def save(quiet):
                         "worktree": linked_worktree(j["cwd"])})
     now = time.time()
     old = snapshots()
+    boot = boot_time()
+    if not entries and old and boot is not None and old[-1][1]["taken"] < boot:
+        # nothing reopened since the restart yet: an empty snapshot now would hide the real one
+        # from the restore after the next restart, and there is nothing new to record
+        if not quiet:
+            print("0 sessions open and none saved since before this restart; "
+                  "keeping the last snapshot for wb-restore")
+        return 0
     os.makedirs(sub("snapshots"), exist_ok=True)
     if old and old[-1][1]["sessions"] == entries:
         written = False

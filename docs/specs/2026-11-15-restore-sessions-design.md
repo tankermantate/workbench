@@ -30,7 +30,11 @@ top level when that is a linked worktree. Nothing comes from a process's environ
 schedule: `install.sh` loads a launch agent (`workbench.restore-save`) that runs
 `wb-restore save --quiet` every 10 minutes, so a crash or a forced restart is covered without
 anyone remembering to save. A snapshot with the same sessions as the newest one isn't written
-again, and snapshots older than 7 days are pruned (the newest is always kept).
+again, and snapshots older than 7 days are pruned (the newest is always kept). A save that finds
+no sessions open while the newest snapshot is from before this boot writes nothing: nothing has
+been reopened since the restart, and an empty snapshot would otherwise be the one the restore
+after a second restart picks. Closing everything on purpose is still recorded once a snapshot
+from this boot exists.
 
 A live claude with no pid file in any known config dir means the snapshot would miss a session,
 most likely because `wb-spaces` couldn't read the spaces and so their accounts aren't known.
