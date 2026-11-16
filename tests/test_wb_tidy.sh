@@ -36,12 +36,15 @@ git -C "$T/wts/acme-unmerged" -c user.email=t@example.com -c user.name=t commit 
 wt acme-dirty feat/dirty        # an uncommitted file
 : > "$T/wts/acme-dirty/notes.txt"
 wt acme-live explore/live       # a Claude session is open inside it
+wt acme-rewritten feat/rewritten  # its bead's notes were replaced; the link is in its metadata
 mkdir -p "$T/wts/acme-live/sub" "$T/wts/stray"   # stray: no space's repo has it as a worktree
 note() { printf 'Claimed by new-session (worktree at %s)' "$T/wts/$1"; }
-python3 - "$T/acme/.beads/fake.json" "$(note acme-done)" "$(note acme-open)" "$(note acme-unmerged)" <<'PY'
+python3 - "$T/acme/.beads/fake.json" "$(note acme-done)" "$(note acme-open)" "$(note acme-unmerged)" "$T/wts/acme-rewritten" <<'PY'
 import json, sys
-p, done, opn, unm = sys.argv[1:]
+p, done, opn, unm, rew = sys.argv[1:]
 json.dump([
+  {"id": "ac-4", "title": "Rewritten one", "status": "closed", "notes": "Branch: feat/rewritten. Notes since replaced.",
+   "metadata": {"wb_worktree": rew}, "updated_at": "2026-11-10T00:00:00Z"},
   {"id": "ac-1", "title": "Done one", "status": "closed", "notes": done, "updated_at": "2026-11-10T00:00:00Z"},
   {"id": "ac-2", "title": "Open one", "status": "in_progress", "notes": opn, "updated_at": "2026-11-10T00:00:00Z"},
   {"id": "ac-3", "title": "Unmerged one", "status": "closed", "notes": unm, "updated_at": "2026-11-10T00:00:00Z"},
@@ -60,6 +63,8 @@ out=$(WORKBENCH_DRY_RUN=1 "$W" </dev/null 2>&1); rc=$?
 assert_eq "dry run exits 0" "$rc" "0"
 assert_contains "a closed bead's merged, clean worktree is offered" "$(line "$out" acme-done)" "offer"
 assert_contains "with its bead" "$(line "$out" acme-done)" "ac-1 closed"
+assert_contains "a bead whose notes were replaced still names its worktree" "$(line "$out" acme-rewritten)" "  offer  acme-rewritten"
+assert_contains "through its metadata" "$(line "$out" acme-rewritten)" "ac-4 closed"
 assert_contains "no bead names it: kept, since done can't be told" "$(line "$out" acme-nobead)" "keep"
 assert_contains "and says how to include it" "$(line "$out" acme-nobead)" "no bead names it; wb-tidy --no-bead"
 assert_contains "an open bead keeps it" "$(line "$out" acme-open)" "keep"
@@ -69,12 +74,12 @@ assert_contains "uncommitted changes keep it" "$(line "$out" acme-dirty)" "uncom
 assert_contains "a live session keeps it" "$(line "$out" acme-live)" "a Claude session is open in it"
 assert_contains "a folder no space claims is listed" "$(line "$out" stray)" "keep"
 assert_contains "and never offered" "$(line "$out" stray)" "not a worktree of any space"
-assert_contains "dry run says what it would end" "$out" "DRY-RUN: would end 1"
+assert_contains "dry run says what it would end" "$out" "DRY-RUN: would end 2"
 out=$(WORKBENCH_DRY_RUN=1 "$W" --no-bead </dev/null 2>&1)
 assert_contains "--no-bead: a merged, clean worktree with no bead is offered" "$(line "$out" acme-nobead)" "offer"
 assert_contains "--no-bead: said as such" "$(line "$out" acme-nobead)" "no bead · merged · clean"
 assert_contains "--no-bead: an open bead still keeps one" "$(line "$out" acme-open)" "keep"
-assert_contains "--no-bead: would end 2" "$out" "DRY-RUN: would end 2"
+assert_contains "--no-bead: would end 3" "$out" "DRY-RUN: would end 3"
 [ -s "$T/end.log" ] && bad "dry run ends nothing" || ok "dry run ends nothing"
 
 # ---- asking
@@ -90,7 +95,8 @@ assert_contains "no: nothing ended" "$out" "nothing ended"
 out=$(echo y | "$W" --no-bead 2>&1); rc=$?
 assert_eq "yes exits 0" "$rc" "0"
 assert_eq "end-session ran on each offered worktree, one at a time" "$(cat "$T/end.log")" "$T/wts/acme-done
-$T/wts/acme-nobead"
+$T/wts/acme-nobead
+$T/wts/acme-rewritten"
 assert_contains "and its output is shown" "$out" "session ended"
 rm -f "$T/end.log"
 
@@ -98,7 +104,7 @@ out=$(echo y | FAIL_FOR=acme-done "$W" --no-bead 2>&1); rc=$?
 assert_eq "a refusal: exits 1" "$rc" "1"
 assert_eq "and stops there" "$(cat "$T/end.log")" "$T/wts/acme-done"
 assert_contains "saying which refused" "$out" "end-session refused acme-done"
-assert_contains "and what's left untouched" "$out" "1 left as it was"
+assert_contains "and what's left untouched" "$out" "2 left as it was"
 assert_contains "end-session's own reason shows" "$out" "uncommitted changes"
 rm -f "$T/end.log"
 

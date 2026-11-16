@@ -202,11 +202,13 @@ reading the hook JSON on stdin.
 
 It errors out of a Claude session, like `tabname`.
 
-**Claim notes stay in step.** In a worktree session, `end-session` finds the bead from the claim
-note naming the worktree (`wb-backlog claimed`). So whenever a session is bound to a bead that has
-no claim note naming this worktree (the hook's pickup in a "something new" session, or `wb-focus`),
-it appends one in the `new-session` form: `Branch: <branch> (worktree at <path>)`. `wb-backlog
-claimed` then has to prefer, among the beads whose current note names the worktree, the one
+**Claim links stay in step.** In a worktree session, `end-session` finds the bead linked to the
+worktree (`wb-backlog claimed`: the `wb_worktree` metadata, else the last claim note). So whenever a
+session is bound to a bead not linked to this worktree (the hook's pickup in a "something new"
+session, or `wb-focus`), it links it in the `new-session` form: the claim note `Branch: <branch>
+(worktree at <path>)` when no note names the worktree, and the metadata link. A bead with only the
+note (claimed before the link, or its link lost) gains the link this way. `wb-backlog
+claimed` then has to prefer, among the beads linked to the worktree, the one
 updated most recently (`updated_at`), not the first one listed. After "continue here" both the old
 and the new bead name the worktree, and the new one has just been noted. The old bead is
 left as it is (still in progress), and you decide about it. A failed note write is reported in the

@@ -164,7 +164,16 @@ assert_contains "bead: merged close-out names the commit" "$(cat "$T/bd8.log")" 
   "update acme-8 --append-notes Session ended: worktree removed; branch feat/noted merged into main at ${sha:0:10} and deleted."
 w=$(wt "$b" feat/orphan)
 out="$("$ES" "$w" 2>&1)"; rc=$?
-assert_eq "no bead: still ends" "$rc" "0"; assert_contains "no bead: says so" "$out" "no bead's claim note names this worktree"
+assert_eq "no bead: still ends" "$rc" "0"; assert_contains "no bead: says so" "$out" "no bead names this worktree"
+
+# 17b the usual end: the bead is closed and its notes were rewritten since new-session; the
+# metadata still links it (bd list leaves closed beads out without --all; the fake too, so told)
+w=$(wt "$b" feat/rewritten); commit "$w" r; git -C "$w" push -q -u origin feat/rewritten
+git -C "$b" merge -q --ff-only feat/rewritten; git -C "$b" push -q origin main
+printf '[{"id":"acme-9","title":"Rewritten","status":"closed","notes":"Branch: feat/rewritten. Replaced.","metadata":{"wb_worktree":"%s"}}]\n' "$w" > "$b/.beads/fake.json"
+out="$(FAKE_BD_HIDE_CLOSED=1 FAKE_BD_LOG="$T/bd9.log" "$ES" "$w" 2>&1)"
+assert_contains "closed bead, notes rewritten: found" "$out" "→ bead: acme-9"
+assert_contains "closed bead, notes rewritten: close-out noted" "$(cat "$T/bd9.log")" "update acme-9 --append-notes Session ended"
 
 # 18 stashes made on the branch are mentioned (they outlive the worktree)
 w=$(wt "$b" feat/stashy); echo wip > "$w/wip.txt"; git -C "$w" add wip.txt; git -C "$w" stash -q

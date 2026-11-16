@@ -152,6 +152,21 @@ cat > "$FAKE_BD_DIR/stdout" <<'EOF'
 EOF
 assert_eq "claimed: two beads name the worktree, the newest update wins" "$("$WB" claimed "$T/store" /x/wt)" "bee-new"
 
+# new-session's link also rides in the bead's metadata, which a notes rewrite (bd update --notes) can't drop
+reset_bd
+cat > "$FAKE_BD_DIR/stdout" <<'EOF'
+[{"id":"bee-m","title":"Rewritten","status":"in_progress","priority":1,
+  "notes":"Branch: feat/m. All rewritten since.","metadata":{"wb_worktree":"/x/meta wt"}},
+ {"id":"bee-both","title":"Moved on","status":"in_progress","priority":2,
+  "notes":"Branch: feat/a (worktree at /x/stale)","metadata":{"wb_worktree":"/x/current"}}]
+EOF
+assert_eq "claimed: from the metadata when the notes were rewritten" "$("$WB" claimed "$T/store" "/x/meta wt")" "bee-m"
+assert_eq "list: the worktree from the metadata" "$("$WB" list "$T/store" | cut -f8 | head -1)" "/x/meta wt"
+assert_eq "claimed: the metadata wins over an older notes line" "$("$WB" claimed "$T/store" /x/current)" "bee-both"
+"$WB" claimed "$T/store" /x/stale >/dev/null; assert_eq "claimed: the superseded notes line no longer resolves" "$?" "1"
+FAKE_BD_LOG="$T/claimed.log" "$WB" claimed "$T/store" /x/current >/dev/null
+assert_contains "claimed: reads closed beads too (a finished worktree's bead is closed)" "$(cat "$T/claimed.log")" "list -n 0 --json --all"
+
 # grooming's own writes (an attention flag on a claim) don't count as touching it: the
 # stamp a grooming apply or undo left walks back to the one before, through the run records
 reset_bd; python3 - "$FAKE_BD_DIR/stdout" "$WB_GROOM_DIR" "$T/store" <<'EOF'

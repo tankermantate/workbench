@@ -14,9 +14,10 @@
 #             FAKE_BD_SLEEP sleeps first, FAKE_BD_WARN prints a Warning line first
 #             (FAKE_BD_WARN=bracket: a '[warn] …' line, which looks like JSON)
 #   update    sleeps $FAKE_BD_UPDATE_SLEEP, exits $FAKE_BD_UPDATE_RC (default 0)
+#   list      with FAKE_BD_HIDE_CLOSED set, leaves out closed beads unless --all, as bd does
 # FAKE_BD_STATEFUL=1 makes writes real against that same .beads/fake.json (wb-groom's apply and
 # undo read back what they wrote): `update` handles --add-label, --remove-label, --append-notes,
-# --notes, -p/--priority, -s/--status and --defer, `close ID --reason R` sets status closed with
+# --notes, --set-metadata K=V, -p/--priority, -s/--status and --defer, `close ID --reason R` sets status closed with
 # closed_at and close_reason and `undefer ID` opens it and drops defer_until; each bumps the
 # bead's updated_at to a new second. As in bd (checked on a scratch store), a status other than
 # closed drops closed_at and close_reason, and --defer D sets defer_until and status deferred
@@ -86,6 +87,8 @@ while i < len(rest):
             b.pop("defer_until", None)
             if b.get("status") == "deferred": b["status"] = "open"
     elif flag == "--reason": b["close_reason"] = val()
+    elif flag == "--set-metadata":
+        k, _, v = val().partition("="); b.setdefault("metadata", {})[k] = v
     else:
         print(f"fake bd: unsupported flag {a}", file=sys.stderr); sys.exit(2)
     i += 1
@@ -124,7 +127,11 @@ PY
   case " $* " in
     *" --closed-after "*) if [ -f .beads/fake-closed.json ]; then cat .beads/fake-closed.json; else echo '[]'; fi; exit 0 ;;
   esac
-  [ -f .beads/fake.json ] && cat .beads/fake.json
+  [ -f .beads/fake.json ] || exit 0
+  case "${FAKE_BD_HIDE_CLOSED:+hide} $* " in
+    "hide "*" --all "*|"hide "*" --status "*|"hide "*" -s "*|" "*) cat .beads/fake.json ;;
+    *) python3 -c 'import json,sys; print(json.dumps([b for b in json.load(open(sys.argv[1])) if b.get("status") != "closed"]))' .beads/fake.json ;;
+  esac
   exit 0
 fi
 d="$FAKE_BD_DIR"

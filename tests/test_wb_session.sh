@@ -9,7 +9,8 @@ cat > "$S/.beads/fake.json" <<EOF
 [{"id":"acme-x1y","title":"Fix fabric PO search","status":"in_progress","notes":""},
  {"id":"acme-q9z","title":"A title that is well over forty characters long","status":"in_progress",
   "notes":"Branch: feat/old (worktree at $T/elsewhere)"},
- {"id":"acme-n0t","title":"Noted already","status":"in_progress","notes":"Branch: feat/x (worktree at $T/wt)"}]
+ {"id":"acme-n0t","title":"Noted already","status":"in_progress","notes":"Branch: feat/x (worktree at $T/wt)"},
+ {"id":"acme-m3t","title":"Linked already","status":"in_progress","notes":"rewritten","metadata":{"wb_worktree":"$T/wt"}}]
 EOF
 mkdir -p "$T/wt"; git -C "$T/wt" init -q -b feat/x
 bindfile() { printf '%s' "$2" > "$WB_STATE_DIR/sessions/$1.json"; }
@@ -52,8 +53,12 @@ assert_not_contains "focus: no worktree, no claim note" "$(cat "$FAKE_BD_LOG" 2>
 
 : > "$FAKE_BD_LOG"
 WB_WORKTREE="$T/wt" "$FOCUS" acme-q9z >/dev/null
-assert_contains "focus: claim note in a worktree" "$(cat "$FAKE_BD_LOG")" "update acme-q9z --append-notes Branch: feat/x (worktree at $T/wt)"
+assert_contains "focus: claim note in a worktree" "$(cat "$FAKE_BD_LOG")" "update acme-q9z --append-notes Branch: feat/x (worktree at $T/wt) --set-metadata wb_worktree=$T/wt"
 : > "$FAKE_BD_LOG"
 WB_WORKTREE="$T/wt" "$FOCUS" acme-n0t >/dev/null
-assert_not_contains "focus: no duplicate claim note" "$(cat "$FAKE_BD_LOG")" "update"
+assert_not_contains "focus: no duplicate claim note" "$(cat "$FAKE_BD_LOG")" "append-notes"
+assert_contains "focus: an old claim note gains the metadata link" "$(cat "$FAKE_BD_LOG")" "update acme-n0t --set-metadata wb_worktree=$T/wt"
+: > "$FAKE_BD_LOG"
+WB_WORKTREE="$T/wt" "$FOCUS" acme-m3t >/dev/null
+assert_not_contains "focus: linked by metadata, notes rewritten: nothing to add" "$(cat "$FAKE_BD_LOG")" "update"
 finish

@@ -143,12 +143,14 @@ if [ -n "$S_ON_CREATE" ]; then
   fi
 fi
 
-# ---- claim (append: --notes would replace the bead's notes)
+# ---- claim (append: --notes would replace the bead's notes). The metadata link is the one
+# a later notes rewrite can't drop; end-session and wb-tidy read it first.
 if [ -n "$BEAD" ]; then
   echo "→ claiming $BEAD"
   # Bounded: a bd stuck behind a lock must not hold up the session.
   (cd "$SOURCE" && ws_timeout "${WB_BD_WRITE_TIMEOUT:-30}" "${WB_BD:-bd}" update "$BEAD" --claim \
-     --append-notes "Branch: $BRANCH (worktree at $WORKTREE)" </dev/null >/dev/null) \
+     --append-notes "Branch: $BRANCH (worktree at $WORKTREE)" --set-metadata "wb_worktree=$WORKTREE" \
+     </dev/null >/dev/null) \
     || echo "  warning: couldn't claim $BEAD; the session starts anyway." >&2
 fi
 

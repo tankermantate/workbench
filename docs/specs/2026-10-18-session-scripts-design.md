@@ -73,9 +73,11 @@ listing the space keys.
    path convention. Without it, bd in the worktree sees no database.
 6. **`on_create`**, if set (below).
 7. **Claim**, bead shape only: `bd update <id> --claim --append-notes "Branch: <branch> (worktree at
-   <path>)"`. That note format is what the launcher reads to offer resuming a claimed bead. Append, not
-   replace: `--notes` would erase the bead's existing notes. A failed claim is a warning; the session
-   still starts.
+   <path>)" --set-metadata "wb_worktree=<path>"`. Append, not replace: `--notes` would erase the
+   bead's existing notes. The metadata link is what survives a later session that does replace them
+   (`bd update --notes`), so readers (`lib/wb_session.py` `worktree_of`: the launcher's resume offer,
+   `end-session`, `wb-tidy`) take it first and fall back to the last claim note, for beads claimed
+   before it existed. A failed claim is a warning; the session still starts.
 8. **Banner**: space, worktree, branch, project folder, bead.
 9. **`--no-launch`**: the last line is `WORKTREE_DIR=<worktree>/<project folder>`, and it exits 0.
    That is the launcher's contract today.
@@ -115,8 +117,8 @@ Changed:
   `master` repo's branches are recognised as merged.
 - **No `origin`**: no fetch and no unpushed check, and it says so in one line. "Nothing at risk"
   means every commit is on local `<base>`. An unmerged branch is kept, so no work is lost.
-- **Its bead** is the one whose claim note (`new-session` step 7: `… (worktree at <path>)`) names
-  this worktree, found with `wb-backlog claimed`. It is passed to `before_end` as `WB_BEAD`, and after
+- **Its bead** is the one `new-session` step 7 linked to this worktree (its `wb_worktree` metadata,
+  else its claim note), closed or not, found with `wb-backlog claimed`. It is passed to `before_end` as `WB_BEAD`, and after
   removal a note is appended to it: merged into `<base>` at `<sha>` and deleted, kept unmerged, or
   forced. The bead is never closed: merged isn't the same as done. No bead found is a line of
   output, not a refusal.
@@ -149,7 +151,7 @@ every hook:
 | `WB_PROJECT` | the project folder inside the worktree. In `end-session` both this and `WB_WORKTREE` are physical paths (`pwd -P`), worked out before removal, so `after_end` gets them though the folders are gone |
 | `WB_SOURCE` | the project folder in the main checkout (where untracked files such as `.env.local` live) |
 | `WB_BRANCH` | the branch |
-| `WB_BEAD` | the bead id; empty for exploratory sessions. In `before_end`, the bead whose claim note names the worktree, or empty if none does |
+| `WB_BEAD` | the bead id; empty for exploratory sessions. In `before_end`, the bead linked to the worktree (step 7), or empty if none is |
 | `WB_SHA` | `before_end` only: the worktree's `HEAD` |
 
 Other config changes:

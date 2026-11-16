@@ -20,14 +20,16 @@ A worktree is offered when all of these hold:
 - `git status --porcelain` is empty;
 - no live Claude session's folder is inside it (`lib/wb_live.py`, as `wb-tabs` and `wb-restore`
   find them; no `lsof`);
-- the bead whose current claim note names it is closed.
+- the bead linked to it is closed (`wb_worktree` metadata, else the last claim note; as `end-session`).
 
 A worktree no bead names is kept, saying `wb-tidy --no-bead` offers it on the rest alone. A closed
 bead is the only sign the work is done: merged and clean only say no code would be lost, and for
 an `explore/` worktree the value is often the conversation, which can't be resumed once its folder
 is gone. "No bead" is also not always true: a bead whose claim note doesn't name its worktree
-reads as none (two of the first real run's ten were such, both closed). Decided 2026-11-16, after
-a first cut that offered them by default.
+reads as none (two of the first real run's ten were such, both closed, their notes replaced by a
+later `bd update --notes`). Decided 2026-11-16, after a first cut that offered them by default.
+Since then new-session also links the bead in its metadata, which a notes rewrite can't drop; beads
+claimed before that and since rewritten still read as none.
 
 Everything else is listed as `keep` with the first reason that holds. Folders in
 `WB_WORKTREES_DIR` that no space's repo has as a worktree are listed and never offered.

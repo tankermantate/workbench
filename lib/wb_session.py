@@ -21,7 +21,10 @@ BD = os.environ.get("WB_BD", "bd")
 READ_TIMEOUT = float(os.environ.get("WB_BD_TIMEOUT", "10"))  # a big store's bd show takes ~2s idle, more while claude starts
 WRITE_TIMEOUT = float(os.environ.get("WB_BD_WRITE_TIMEOUT", "30"))
 SAFE_ID = re.compile(r"[A-Za-z0-9-]{1,64}")
-WORKTREE_RE = re.compile(r"worktree at (/[^)\n]+)\)")  # as in wb-backlog
+WORKTREE_RE = re.compile(r"worktree at (/[^)\n]+)\)")  # the claim note's path; may contain spaces
+# The claim's link also goes in the bead's metadata: a session that rewrites the notes
+# (bd update --notes) drops the claim note, and with it end-session's and wb-tidy's way back.
+WORKTREE_KEY = "wb_worktree"
 TITLE_MAX = 40
 
 
@@ -209,21 +212,45 @@ def bind(sid, bead, root):
     return b
 
 
+def linked_worktree(bead):
+    """The worktree the bead's metadata links it to, or None."""
+    meta = bead.get("metadata")
+    if isinstance(meta, str):  # in case a bd hands it back as a JSON string
+        try:
+            meta = json.loads(meta)
+        except ValueError:
+            meta = None
+    w = meta.get(WORKTREE_KEY) if isinstance(meta, dict) else None
+    return w if isinstance(w, str) and w.startswith("/") else None
+
+
+def worktree_of(bead):
+    """The worktree the bead is claimed in, or None: its metadata link, else its last claim
+    note (notes are appended to, so the last is current), for beads claimed before the link."""
+    found = WORKTREE_RE.findall(bead.get("notes") or "")
+    return linked_worktree(bead) or (found[-1] if found else None)
+
+
 def note_claim(root, bead, worktree):
-    """Append new-session's claim note when none names this worktree, so
-    end-session (wb-backlog claimed) finds the bead the session is on."""
+    """Link the bead to this worktree as new-session does, when it isn't already: the claim
+    note (when none names it) and the metadata link, so end-session (wb-backlog claimed) and
+    wb-tidy find the bead the session is on. A bead with only the note gains the link."""
     if not worktree:
         return None
     want = os.path.realpath(worktree)
-    if any(os.path.realpath(w) == want for w in WORKTREE_RE.findall(bead.get("notes") or "")):
+    linked = linked_worktree(bead)
+    if linked and os.path.realpath(linked) == want:
         return None
-    try:
-        branch = subprocess.run(["git", "-C", worktree, "branch", "--show-current"],
-                                capture_output=True, text=True, timeout=5).stdout.strip()
-    except (OSError, subprocess.SubprocessError):
-        branch = ""
-    note = f"Branch: {branch or '?'} (worktree at {worktree})"
-    rc, _ = run_bd(root, ["update", bead["id"], "--append-notes", note], WRITE_TIMEOUT)
+    args = ["update", bead["id"]]
+    if not any(os.path.realpath(w) == want for w in WORKTREE_RE.findall(bead.get("notes") or "")):
+        try:
+            branch = subprocess.run(["git", "-C", worktree, "branch", "--show-current"],
+                                    capture_output=True, text=True, timeout=5).stdout.strip()
+        except (OSError, subprocess.SubprocessError):
+            branch = ""
+        args += ["--append-notes", f"Branch: {branch or '?'} (worktree at {worktree})"]
+    args += ["--set-metadata", f"{WORKTREE_KEY}={worktree}"]
+    rc, _ = run_bd(root, args, WRITE_TIMEOUT)
     if rc != 0:
         return "bd timed out" if rc is None else f"bd exited {rc}"
     return None

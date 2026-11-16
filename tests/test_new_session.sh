@@ -58,7 +58,7 @@ assert_eq "bead: exits 0" "$rc" "0"
 assert_eq "bead: last line is the project folder" "$(printf '%s\n' "$out" | tail -1)" "WORKTREE_DIR=$WT/app"
 assert_eq "bead: bug → fix/ branch from the title" "$(git -C "$WT" rev-parse --abbrev-ref HEAD)" "fix/fix-the-login-page"
 assert_contains "bead: claimed, appending to notes" "$(cat "$FAKE_BD_LOG")" \
-  "update acme-a1 --claim --append-notes Branch: fix/fix-the-login-page (worktree at $WT)"
+  "update acme-a1 --claim --append-notes Branch: fix/fix-the-login-page (worktree at $WT) --set-metadata wb_worktree=$WT"
 assert_eq "beads: redirect points at the real store" "$(cat "$WT/.beads/redirect")" \
   "$(perl -MFile::Spec -e 'print File::Spec->abs2rel($ARGV[0],$ARGV[1])' "$A/.beads" "$WT")"
 assert_eq "beads: the redirect doesn't dirty the worktree" "$(git -C "$WT" status --porcelain)" ""

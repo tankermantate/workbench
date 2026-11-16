@@ -130,7 +130,7 @@ assert_eq "pick up: notice" "$(printf '%s' "$out" | msg)" "→ this session is n
 assert_contains "pick up: binds" "$(binding p1)" '"bead": "acme-x1y"'
 mkdir -p "$T/wt"; git -C "$T/wt" init -q -b feat/x; : > "$FAKE_BD_LOG"
 WB_WORKTREE="$T/wt" ptu p2 'bd update acme-x1y --claim' >/dev/null
-assert_contains "pick up: claim note in a worktree" "$(cat "$FAKE_BD_LOG")" "update acme-x1y --append-notes Branch: feat/x (worktree at $T/wt)"
+assert_contains "pick up: claim note in a worktree" "$(cat "$FAKE_BD_LOG")" "update acme-x1y --append-notes Branch: feat/x (worktree at $T/wt) --set-metadata wb_worktree=$T/wt"
 ptu p3 'bd create --silent --claim --title "Picked up"' 'acme-q9z' >/dev/null
 assert_contains "pick up: from create --claim (--silent)" "$(binding p3)" '"bead": "acme-q9z"'
 ptu p4 'bd create --claim --title "Picked up"' '✓ Created issue: acme-q9z' >/dev/null

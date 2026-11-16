@@ -5,11 +5,12 @@
                         ticked ones with end-session, one at a time, stopping at the first refusal
 
 Offered only when all hold: its space is known, its branch is merged into the repo's default
-branch, it has no uncommitted changes, no Claude session is open in it, and the bead whose claim
-note names it is closed. A closed bead is the only sign the work is done: merged and clean only
-say no code would be lost, and a worktree's conversation goes with its folder. So a worktree no
-bead names is kept, unless --no-bead offers it on the other four (a bead whose claim note doesn't
-name its worktree also reads as none). end-session still makes its own checks.
+branch, it has no uncommitted changes, no Claude session is open in it, and the bead claimed in it
+is closed (new-session's wb_worktree metadata link names it, else the bead's last claim note). A
+closed bead is the only sign the work is done: merged and clean only say no code would be lost, and
+a worktree's conversation goes with its folder. So a worktree no bead names is kept, unless
+--no-bead offers it on the other four (a bead claimed before the metadata link, whose notes were
+since replaced, also reads as none). end-session still makes its own checks.
 
 Fails closed: when ps fails or a live claude's folder can't be told, nothing is offered; when a
 space's beads can't be read, nothing in that space is.
@@ -19,7 +20,6 @@ WB_END_SESSION and WB_BD are test seams; WORKBENCH_DRY_RUN lists without asking 
 """
 import json
 import os
-import re
 import shutil
 import subprocess
 import sys
@@ -27,12 +27,12 @@ import sys
 ME = os.path.realpath(__file__)
 sys.path.insert(0, os.path.join(os.path.dirname(ME), "..", "lib"))
 import wb_live  # noqa: E402  (lives in lib/; realpath, since install.sh links bin/ elsewhere)
+import wb_session  # noqa: E402
 import wb_space  # noqa: E402
 
 BD = os.environ.get("WB_BD", "bd")
 BD_TIMEOUT = 30
 END_SESSION = os.environ.get("WB_END_SESSION") or os.path.join(os.path.dirname(ME), "end-session")
-WORKTREE_RE = re.compile(r"worktree at (/[^)\n]+)\)")  # new-session's claim note; as in wb-backlog
 
 
 def fail(message):
@@ -93,12 +93,9 @@ def read_beads(root):
 
 
 def bead_for(path, beads):
-    """The bead whose current claim note names the worktree, the one updated last when several do."""
-    hits = []
-    for b in beads:
-        found = WORKTREE_RE.findall(b.get("notes") or "")
-        if found and real(found[-1]) == path:  # notes are appended to, so the last claim is current
-            hits.append(b)
+    """The bead claimed in the worktree (wb_session.worktree_of: its metadata link, else its
+    last claim note), the one updated last when several are."""
+    hits = [b for b in beads if (w := wb_session.worktree_of(b)) and real(w) == path]
     return max(hits, key=lambda b: str(b.get("updated_at") or ""), default=None)
 
 

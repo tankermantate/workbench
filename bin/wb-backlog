@@ -13,9 +13,10 @@
       nothing when the closed beads can't be read.
       Exits non-zero when there is nothing to list; the code says why (STATES).
   wb-backlog summary ROOT      one line of counts for screen 1; always exits 0
-  wb-backlog claimed ROOT PATH the bead whose current claim note names the
-      worktree at PATH (end-session's way back to the bead), the one updated
-      last (grooming's writes aside) when several do; exits 1 if none
+  wb-backlog claimed ROOT PATH the bead, closed ones too, claimed in the worktree
+      at PATH (end-session's way back to the bead): its wb_worktree metadata, else
+      its last claim note (lib/wb_session.py worktree_of). The one updated last
+      (grooming's writes aside) when several are; exits 1 if none
   wb-backlog preview FILE ID [QUERY]
       the preview pane for one bead, from a snapshot, with QUERY's words
       highlighted in the title and description (lib/wb_search.py)
@@ -50,7 +51,6 @@ PICKS = 3  # start here: few enough to choose from at a glance
 FLOW_DAYS = 30
 GROOMED = {}  # grooming's own writes to this root's beads; read() fills it (lib/wb_touched.py)
 DONE_RE = re.compile(r"^[\s>*#-]*(?:\*\*)?\s*done when\b", re.I | re.M)  # the "Done when …" line beads use
-WORKTREE_RE = re.compile(r"worktree at (/[^)\n]+)\)")  # paths may contain spaces
 # state -> (list exit code, summary text)
 STATES = {
     "no-bd": (20, "(bd not installed)"),
@@ -106,16 +106,16 @@ def has_store(root):
     return wb_session.store_root(root) is not None
 
 
-def read(root):
+def read(root, *extra):
     """(state, every bead bd returned). state is 'ok' or a key of STATES."""
     if shutil.which(BD) is None:
         return "no-bd", []
     if not has_store(root):
         return "no-store", []
     try:
-        data = run_bd(root)
+        data = run_bd(root, *extra)
         if not data:  # a locked store has answered [] with exit 0; look once more
-            data = run_bd(root)
+            data = run_bd(root, *extra)
     except BdError as e:
         return e.state, []
     global GROOMED
@@ -275,8 +275,7 @@ def clean(v):
 
 
 def worktree(b):
-    found = WORKTREE_RE.findall(b.get("notes") or "")
-    return found[-1] if found else "-"  # notes are appended to, so the last claim is current
+    return wb_session.worktree_of(b) or "-"
 
 
 def cmd_list(root, snapshot=None, flow=None):
@@ -313,7 +312,7 @@ def cmd_list(root, snapshot=None, flow=None):
 
 
 def cmd_claimed(root, path):
-    state, data = read(root)
+    state, data = read(root, "--all")  # closed too: a finished worktree's bead is closed
     want = os.path.realpath(path)
     hits = [b for b in data or [] if worktree(b) != "-" and os.path.realpath(worktree(b)) == want]
     if not hits:

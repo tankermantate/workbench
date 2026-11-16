@@ -89,10 +89,10 @@ PREFIX=""
 if [ "$FOUND" = 1 ]; then PREFIX=$(git -C "$S_ROOT" rev-parse --show-prefix); PREFIX=${PREFIX%/}; fi
 SOURCE="$MAIN${PREFIX:+/$PREFIX}"
 
-# ---- its bead: the one whose claim note (new-session's) names this worktree
+# ---- its bead, closed or not: the one new-session linked to this worktree (metadata, else claim note)
 BEAD=$("$WB_HOME/bin/wb-backlog" claimed "$SOURCE" "$TARGET" 2>/dev/null) || BEAD=""
 if [ -n "$BEAD" ]; then echo "→ bead: $BEAD"
-else echo "→ no bead's claim note names this worktree; nothing will be noted."; fi
+else echo "→ no bead names this worktree; nothing will be noted."; fi
 note_bead() {   # append, never replace: the notes hold the claim
   [ -n "$BEAD" ] || return 0
   (cd "$SOURCE" && ws_timeout "${WB_BD_WRITE_TIMEOUT:-30}" "${WB_BD:-bd}" update "$BEAD" \
