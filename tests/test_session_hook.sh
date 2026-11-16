@@ -4,6 +4,12 @@ T="$(newtmp)"; trap 'rm -rf "$T"' EXIT
 HOOK="$REPO/bin/wb-session-hook"
 export WB_STATE_DIR="$T/state" FAKE_BD_LOG="$T/bd.log"
 unset WB_SPACE_ROOT WB_WORKTREE WB_BEAD CLAUDE_CODE_SESSION_ID
+# never the real wb-restore: a session start or end saves the snapshot in the background
+printf '#!/bin/sh\necho "$*" >> "%s/saves.log"\n' "$T" > "$T/fake-restore"; chmod +x "$T/fake-restore"
+export WB_RESTORE_CMD="$T/fake-restore" WB_SAVE_DELAY=0
+# saves_after N: wait (up to 5s) for the background saves to log more than N lines, then print the log
+saves_after() { local i=0; while [ "$(cat "$T/saves.log" 2>/dev/null | wc -l)" -le "$1" ] && [ $i -lt 50 ]; do
+  sleep 0.1; i=$((i + 1)); done; cat "$T/saves.log" 2>/dev/null; }
 S="$T/store"; mkstore "$S"
 python3 - "$S/.beads/fake.json" <<'EOF'
 import json, sys
@@ -48,7 +54,7 @@ assert_eq "parse: junk quoting" "$(parse 'bd close "unterminated')" "[]"
 # --- settings
 mkdir -p "$T/wb home"; cp -R "$REPO/bin" "$REPO/lib" "$T/wb home/"
 out="$("$T/wb home/bin/wb-session-hook" settings)"
-assert_eq "settings: valid JSON with three events" "$(printf '%s' "$out" | j 'sorted(d["hooks"])')" "['PostToolUse', 'SessionStart', 'UserPromptSubmit']"
+assert_eq "settings: valid JSON with four events" "$(printf '%s' "$out" | j 'sorted(d["hooks"])')" "['PostToolUse', 'SessionEnd', 'SessionStart', 'UserPromptSubmit']"
 assert_eq "settings: no statusLine" "$(printf '%s' "$out" | j '"statusLine" in d')" "False"
 assert_eq "settings: PostToolUse is for Bash" "$(printf '%s' "$out" | j 'd["hooks"]["PostToolUse"][0]["matcher"]')" "Bash"
 assert_eq "settings: commands survive a space in the path" \
@@ -276,7 +282,19 @@ start=$SECONDS; out="$(FAKE_BD_SLEEP=5 ptu p8 'bd update acme-x1y --claim')"; rc
 assert_eq "post: bd hangs → silent, exit 0" "$out:$rc" ":0"
 if [ "$took" -lt 3 ]; then ok "post: hang cut off (${took}s)"; else bad "post: hang took ${took}s"; fi
 
-for sub in session-start user-prompt-submit post-tool-use; do
+# --- the restore snapshot follows sessions opening and closing, not only the 10-minute save
+rm -f "$T/saves.log"
+out="$(printf '{"session_id":"sid-new","source":"startup"}' | "$HOOK" session-start)"; rc=$?
+assert_eq "session start, unbound: still exit 0" "$rc" "0"
+assert_eq "session start saves the snapshot" "$(saves_after 0)" "save --quiet"
+out="$(printf '{"session_id":"sid-new","reason":"prompt_input_exit"}' | "$HOOK" session-end)"; rc=$?
+assert_eq "session end: silent, exit 0" "$out:$rc" ":0"
+assert_eq "session end saves, leaving the ending session out (it is still running)" \
+  "$(saves_after 1 | tail -1)" "save --quiet --without sid-new"
+out="$(printf '{"session_id":"sid-new"}' | WB_RESTORE_CMD="$T/missing" "$HOOK" session-end 2>&1)"; rc=$?
+assert_eq "a save that can't run never troubles the session" "$out:$rc" ":0"
+
+for sub in session-start user-prompt-submit post-tool-use session-end; do
   out="$(printf 'not json' | "$HOOK" $sub 2>&1)"; rc=$?
   assert_eq "junk stdin: $sub is silent, exit 0" "$out:$rc" ":0"
 done

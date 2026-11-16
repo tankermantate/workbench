@@ -1,7 +1,9 @@
 #!/usr/bin/env python3
 """wb-restore — bring every Claude session back after a restart.
 
-  wb-restore save         snapshot every live interactive session (cheap: ps and files, never bd)
+  wb-restore save [--quiet] [--without SID]
+                          snapshot every live interactive session (cheap: ps and files, never bd),
+                          but SID: the session hook saves as a session ends, while it still runs
   wb-restore [--yes]      offer the sessions from the newest snapshot taken before this boot,
                           queue the chosen ones and open one Terminal window for each
                           (--yes: all of them, without asking; for when there's no terminal)
@@ -130,7 +132,7 @@ def snapshots():
     return found
 
 
-def save(quiet):
+def save(quiet, without=None):
     unknown = []
     live = live_sessions(unknown)
     if live is None:
@@ -139,7 +141,8 @@ def save(quiet):
         # a snapshot missing a session would become the one a restore uses; keep the last whole one
         return fail(f"{len(unknown)} open Claude session(s) have no record in any known config dir "
                     f"(pids {', '.join(map(str, unknown))}); is wb-spaces reading spaces.toml? No snapshot written.")
-    live = [(pid, j) for pid, j in live if j.get("kind", "interactive") == "interactive" and isinstance(j.get("cwd"), str)]
+    live = [(pid, j) for pid, j in live if j.get("kind", "interactive") == "interactive" and isinstance(j.get("cwd"), str)
+            and j.get("sessionId") != without]  # a session ending still runs while its hook saves
     flags = skip_flags([pid for pid, _ in live])
     entries = []
     for pid, j in live:
@@ -431,7 +434,8 @@ def exec_ticket(ticket):
 
 def main(argv):
     if argv[:1] == ["save"]:
-        return save("--quiet" in argv)
+        i = argv.index("--without") if "--without" in argv else -1
+        return save("--quiet" in argv, argv[i + 1] if 0 <= i < len(argv) - 1 else None)
     if argv[:1] == ["count"]:
         return count()
     if argv[:1] == ["decline"]:

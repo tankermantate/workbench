@@ -79,6 +79,10 @@ assert_not_contains "argv itself is never kept" "$(cat "$S")" "SECRET OPENING PR
 
 "$R" save >/dev/null 2>&1
 assert_eq "same sessions again: no new snapshot" "$(snaps)" "1"
+out=$("$R" save --without sid-b 2>&1)
+assert_contains "--without: the ending session is left out" "$out" "2 sessions saved"
+assert_eq "--without: in a snapshot of its own" "$(snaps)" "2"
+rm "$WB_RESTORE_DIR/snapshots/$(ls "$WB_RESTORE_DIR/snapshots" | tail -1)"
 
 # a live claude whose pid file can't be found (its account unknown, say, when wb-spaces failed):
 # a snapshot without it would become the one a restore uses, so none is written

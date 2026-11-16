@@ -29,7 +29,11 @@ top level when that is a linked worktree. Nothing comes from a process's environ
 `ps`, the pid files and the session records, and never `bd`, so it is cheap enough to run on a
 schedule: `install.sh` loads a launch agent (`workbench.restore-save`) that runs
 `wb-restore save --quiet` every 10 minutes, so a crash or a forced restart is covered without
-anyone remembering to save. A snapshot with the same sessions as the newest one isn't written
+anyone remembering to save. Sessions the launcher starts also save at their start and end:
+`wb-session-hook` runs `wb-restore save --quiet` in the background, a few seconds after
+`SessionStart` (so the new session's pid file is there) and after `SessionEnd` with
+`--without <its id>` (it is still running while its hook does). A session opened or closed since
+the last 10-minute save is then still right after a crash. A snapshot with the same sessions as the newest one isn't written
 again, and snapshots older than 7 days are pruned (the newest is always kept). A save that finds
 no sessions open while the newest snapshot is from before this boot writes nothing: nothing has
 been reopened since the restart, and an empty snapshot would otherwise be the one the restore

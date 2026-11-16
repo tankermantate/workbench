@@ -7,6 +7,11 @@ Spec: docs/specs/2026-10-21-session-bead-design.md
   wb-session-hook session-start       bind from WB_BEAD; hand Claude the bead's goal again
   wb-session-hook post-tool-use       a bd claim or close in a Bash command
   wb-session-hook user-prompt-submit  rename the session when its bead changed
+  wb-session-hook session-end         save the restore snapshot without this session
+
+session-start and session-end both save the restore snapshot (wb-restore save) in the background,
+so a session opened or closed since the last 10-minute save is still right after a crash.
+WB_RESTORE_CMD and WB_SAVE_DELAY (seconds, default 3) are test seams.
 
 Hooks read the hook JSON on stdin. They guard nothing, so they fail silent: on
 any error, exit 0 with no output, and the session carries on as if they weren't there.
@@ -15,6 +20,7 @@ import json
 import os
 import re
 import shlex
+import subprocess
 import sys
 
 ME = os.path.realpath(__file__)
@@ -37,7 +43,28 @@ def settings():
         "SessionStart": [{"hooks": hook("session-start")}],
         "PostToolUse": [{"matcher": "Bash", "hooks": hook("post-tool-use")}],
         "UserPromptSubmit": [{"hooks": hook("user-prompt-submit")}],
+        "SessionEnd": [{"hooks": hook("session-end")}],
     }}
+
+
+def save_snapshot(without=None):
+    """wb-restore save, detached and a few seconds on: the hook returns at once, and by then a
+    starting session's pid file is written. Errors are ignored; the 10-minute save is the backstop."""
+    cmd = os.environ.get("WB_RESTORE_CMD") or os.path.join(os.path.dirname(ME), "wb-restore")
+    args = [cmd, "save", "--quiet"] + (["--without", without] if without else [])
+    delay = os.environ.get("WB_SAVE_DELAY", "3")
+    try:
+        subprocess.Popen(["/bin/sh", "-c", 'sleep "$0"; exec "$@"', delay] + args,
+                         stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+                         stderr=subprocess.DEVNULL, start_new_session=True)
+    except OSError:
+        pass
+
+
+def session_end(h):
+    sid = h.get("session_id")
+    if isinstance(sid, str) and sid:
+        save_snapshot(without=sid)
 
 
 def title_of(b):
@@ -59,6 +86,7 @@ def out(event=None, context=None, message=None, title=None):
 
 
 def session_start(h):
+    save_snapshot()  # first: an unbound session returns early below
     ws.prune()
     sid = h.get("session_id")
     b = ws.load(sid)
@@ -270,7 +298,7 @@ def main(argv):
         print(p)
         return 0
     run = {"session-start": session_start, "post-tool-use": post_tool_use,
-           "user-prompt-submit": user_prompt_submit}.get(sub)
+           "user-prompt-submit": user_prompt_submit, "session-end": session_end}.get(sub)
     if not run:
         print(__doc__, file=sys.stderr)
         return 2

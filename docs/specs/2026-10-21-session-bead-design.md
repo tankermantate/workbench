@@ -144,6 +144,9 @@ For a resume of a claimed bead (`_wb_claude continue`), `WB_BEAD` is that bead.
 All hooks are python, in one script with a subcommand per event (`bin/wb-session-hook <event>`),
 reading the hook JSON on stdin.
 
+- **SessionStart and SessionEnd: the restore snapshot.** Both start `wb-restore save` in the
+  background (see `2026-11-15-restore-sessions-design.md`); SessionEnd leaves its own session out.
+  This is the only thing SessionEnd does.
 - **SessionStart, any source.**
   - If the binding is new or its bead changed, also return `sessionTitle: "<short id> <title>"`.
   - If there's no binding for this session and `WB_BEAD` is set, bind it, reading the title with
