@@ -332,6 +332,18 @@ OUT=$("$TABS" 2>&1)
 assert_contains "unknown status: shown as it is" "$(section "NOTHING PENDING")" "compacting · 1m"
 session "$CFG" 103 sid-a "$T/wts/acme-x1y" idle 18000
 
+# two sessions in one worktree, at different depths of it: both are flagged, nothing is closed.
+# Two in a space's main checkout (ttys003, ttys004 in acme) are normal and not flagged.
+mkdir -p "$T/wts/acme-x1y/sub"
+ps_row 901 1 ttys009 login; ps_row 902 901 ttys009 -zsh; ps_row 903 902 ttys009 claude
+session "$CFG" 903 sid-twin "$T/wts/acme-x1y/sub" idle 600
+OUT=$("$TABS" 2>&1)
+assert_contains "two in one worktree: the first is flagged" "$(tab "Resend the order")" "2 tabs in this worktree"
+assert_contains "and so is the second, in a subfolder of it" "$(grep -F ttys009 <<<"$(COLUMNS=300 "$TABS" --rows)")" "2 tabs in this worktree"
+assert_not_contains "two in a main checkout: not flagged" "$OUT" "Trim the footer  closed · 2h · 2 tabs"
+assert_eq "only the two in the worktree are flagged" "$(grep -c "tabs in this worktree" <<<"$OUT")" "2"
+grep -v '^90[123] ' "$T/ps.out" > "$T/ps.tmp"; mv "$T/ps.tmp" "$T/ps.out"; rm -f "$CFG/sessions/903.json"
+
 # ps failing: nothing to say what's live, so say that
 OUT=$(FAKE_PS_RC=1 "$TABS" 2>&1); RC=$?
 assert_eq "ps failing: exits 1" "$RC" 1

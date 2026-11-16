@@ -35,6 +35,11 @@ Neither survived measuring.
   `cwd` that says nothing, so its record's root names the space instead.
 - **Idle time** is `statusUpdatedAt`, which matched each session's last assistant message. A
   transcript's mtime would not do: it moves about every minute, even in an idle session.
+- **Two tabs in one worktree** tread on each other's files, so both rows add
+  `· 2 tabs in this worktree` to their status. Sessions are grouped by the linked worktree's top
+  folder (from the same lookup as the space), so two at different depths of one worktree match,
+  and sessions in a main checkout, where several at once are normal, never do. It only flags:
+  nothing closes a session.
 - **Beads** are read once per store, with the store resolved from the record's root, so two
   spaces in one repo don't make two contending calls.
 

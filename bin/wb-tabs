@@ -162,7 +162,8 @@ def tab_row(pid, session, record, located, beads, launched):
     group, state = standing(session, record, bead, store)
     row = {"group": group, "plain": False, "place": place_name(located), "state": state, "details": [],
            "id": wb_session.short(record["bead"]) if record else "",
-           "space": located[0] if located and located[1] else None}
+           "space": located[0] if located and located[1] else None,
+           "worktree": located[2] if located else None}
     if record:
         row["title"] = (bead or {}).get("title") or record.get("title") or ""
     else:
@@ -253,6 +254,15 @@ def main(argv):
     rows = [dict(tab_row(live[tty], sessions.get(live[tty]), records.get(live[tty]), places.get(live[tty]),
                          beads, launched), tty=tty)
             for tty in sorted(live)]
+    # two sessions in one linked worktree tread on each other's files; flag both, close neither.
+    # Several in a main checkout are normal, and locate() gives those no worktree.
+    shared = {}
+    for r in rows:
+        if r.get("worktree"):
+            shared[r["worktree"]] = shared.get(r["worktree"], 0) + 1
+    for r in rows:
+        if shared.get(r.get("worktree"), 0) > 1:
+            r["state"] = f"{r['state']} · {shared[r['worktree']]} tabs in this worktree"
     if only_waiting:
         waiting = [r for r in rows if r["group"] in (BLOCKED, YOUR_TURN)]
         counts = {}
