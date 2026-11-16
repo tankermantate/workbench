@@ -129,6 +129,10 @@ A session the launcher (or `new-session`) starts knows which bead it's on:
 - **When to restart.** The launcher's screens show `up 162 days · swap 41 GB on 32 GB RAM`, in
   yellow with `restart soon` once the Mac has been up 30 days or swap reaches half of RAM, which
   is when it starts to grind. `wb-health` prints the same line.
+- **Tidying finished worktrees.** `wb-tidy` lists every worktree with whether it's finished:
+  merged into the default branch, nothing uncommitted, no Claude session open in it, and its bead
+  closed (or no bead at all). It offers only those, all ticked; Enter runs `end-session` on each,
+  one at a time, stopping at the first refusal. Anything else is listed with why it stays.
 - **`wb-focus`** prints this session's bead. Inside Claude, `wb-focus <id>` moves the session to
   another bead, and `wb-focus --clear` drops it.
 

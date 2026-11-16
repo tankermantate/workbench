@@ -105,20 +105,7 @@ def linked_worktree(cwd):
 
 
 def live_sessions(unknown=None):
-    """[(pid, Claude's pid file)] for each tab's outermost claude, or None when ps fails. The pids
-    of claudes with no pid file in any known config dir are appended to `unknown`, if given."""
-    procs = wb_live.processes()
-    if procs is None:
-        return None
-    dirs = wb_live.config_dirs(wb_space.rows())
-    found = []
-    for pid in sorted(p for p in wb_live.tabs(procs).values() if p):
-        j = wb_live.pid_file(pid, dirs)
-        if j:
-            found.append((pid, j))
-        elif unknown is not None:
-            unknown.append(pid)
-    return found
+    return wb_live.sessions(wb_space.rows(), unknown)
 
 
 def snapshots():

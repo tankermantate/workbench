@@ -1,5 +1,5 @@
-"""Which Claude sessions are live, and Claude's own record of each: shared by wb-tabs and
-wb-restore. Reads ps (WB_PS fakes it) and <claude config>/sessions/<pid>.json, nothing else.
+"""Which Claude sessions are live, and Claude's own record of each: shared by wb-tabs,
+wb-restore and wb-tidy. Reads ps (WB_PS fakes it) and <claude config>/sessions/<pid>.json, nothing else.
 Spec: docs/specs/2026-11-05-tabs-view-design.md
 """
 import json
@@ -58,3 +58,20 @@ def pid_file(pid, dirs):
             found.append(dict(j, _dir=d))
     return max(found, key=lambda j: j.get("startedAt") if isinstance(j.get("startedAt"), (int, float)) else 0,
                default=None)
+
+
+def sessions(space_rows, unknown=None):
+    """[(pid, Claude's pid file)] for each tab's outermost claude, or None when ps fails. The pids
+    of claudes with no pid file in any known config dir are appended to `unknown`, if given."""
+    procs = processes()
+    if procs is None:
+        return None
+    dirs = config_dirs(space_rows)
+    found = []
+    for pid in sorted(p for p in tabs(procs).values() if p):
+        j = pid_file(pid, dirs)
+        if j:
+            found.append((pid, j))
+        elif unknown is not None:
+            unknown.append(pid)
+    return found

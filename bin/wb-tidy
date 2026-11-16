@@ -1,0 +1,219 @@
+#!/usr/bin/env python3
+"""wb-tidy — end the worktrees whose work is finished, after asking.
+
+  wb-tidy     list every worktree with whether it's offered and why not, then end the ticked
+              ones with end-session, one at a time, stopping at the first refusal
+
+Offered only when all hold: its space is known, its branch is merged into the repo's default
+branch, it has no uncommitted changes, no Claude session is open in it, and the bead whose claim
+note names it is closed (a worktree no bead names is offered on the other four alone: every
+commit in it is already on the default branch). end-session still makes its own checks.
+
+Fails closed: when ps fails or a live claude's folder can't be told, nothing is offered; when a
+space's beads can't be read, nothing in that space is.
+
+WB_WORKTREES_DIR (default ~/.worktrees) is also scanned, to list folders no space claims.
+WB_END_SESSION and WB_BD are test seams; WORKBENCH_DRY_RUN lists without asking or ending.
+"""
+import json
+import os
+import re
+import shutil
+import subprocess
+import sys
+
+ME = os.path.realpath(__file__)
+sys.path.insert(0, os.path.join(os.path.dirname(ME), "..", "lib"))
+import wb_live  # noqa: E402  (lives in lib/; realpath, since install.sh links bin/ elsewhere)
+import wb_space  # noqa: E402
+
+BD = os.environ.get("WB_BD", "bd")
+BD_TIMEOUT = 30
+END_SESSION = os.environ.get("WB_END_SESSION") or os.path.join(os.path.dirname(ME), "end-session")
+WORKTREE_RE = re.compile(r"worktree at (/[^)\n]+)\)")  # new-session's claim note; as in wb-backlog
+
+
+def fail(message):
+    print(f"wb-tidy: {message}", file=sys.stderr)
+    return 1
+
+
+def git(*args, cwd):
+    try:
+        p = subprocess.run(["git", "-C", cwd, *args], capture_output=True, text=True, timeout=20)
+    except (OSError, subprocess.SubprocessError):
+        return 1, ""
+    return p.returncode, p.stdout.strip()
+
+
+def real(p):
+    return os.path.realpath(p)
+
+
+def default_branch(main):
+    """As lib/session.sh's ws_default_branch: origin's HEAD, else main or master."""
+    rc, b = git("symbolic-ref", "--quiet", "--short", "refs/remotes/origin/HEAD", cwd=main)
+    if not rc and b:
+        return b.split("/", 1)[1]
+    for b in ("main", "master"):
+        if not git("show-ref", "--verify", "--quiet", f"refs/heads/{b}", cwd=main)[0]:
+            return b
+    return "main"
+
+
+def worktrees(main):
+    """[(path, branch or None)] for each linked worktree of the repo at main."""
+    rc, out = git("worktree", "list", "--porcelain", cwd=main)
+    if rc:
+        return []
+    found, path, branch = [], None, None
+    for line in out.splitlines() + [""]:
+        if line.startswith("worktree "):
+            path, branch = line[len("worktree "):], None
+        elif line.startswith("branch "):
+            branch = line[len("branch "):].removeprefix("refs/heads/")
+        elif not line and path:
+            if real(path) != real(main):
+                found.append((real(path), branch))
+            path = None
+    return found
+
+
+def read_beads(root):
+    """Every bead in the space's store, closed ones too; None when bd can't say."""
+    try:
+        p = subprocess.run([BD, "list", "--all", "-n", "0", "--json"], cwd=root, capture_output=True,
+                           text=True, timeout=BD_TIMEOUT)
+        data = json.loads(p.stdout) if not p.returncode else None
+    except (OSError, subprocess.SubprocessError, ValueError):
+        return None
+    return data if isinstance(data, list) else None
+
+
+def bead_for(path, beads):
+    """The bead whose current claim note names the worktree, the one updated last when several do."""
+    hits = []
+    for b in beads:
+        found = WORKTREE_RE.findall(b.get("notes") or "")
+        if found and real(found[-1]) == path:  # notes are appended to, so the last claim is current
+            hits.append(b)
+    return max(hits, key=lambda b: str(b.get("updated_at") or ""), default=None)
+
+
+def space_of(path, spaces):
+    """As end-session: of the spaces on this repo, the one whose key names the folder, else the first."""
+    keyed = [s for s in spaces if os.path.basename(path).startswith(s["key"] + "-")]
+    return (keyed or spaces)[0]
+
+
+def survey():
+    """([(path, space name, branch, offered, why)], error). error is set when nothing can be offered."""
+    rows = wb_space.rows()
+    unknown = []
+    live = wb_live.sessions(rows, unknown)
+    if live is None:
+        return [], "can't read the process table, so can't tell which worktrees have a Claude session open."
+    if unknown:
+        return [], (f"{len(unknown)} open Claude session(s) have no record in any known config dir "
+                    f"(pids {', '.join(map(str, unknown))}), so their folders can't be told apart from "
+                    f"the worktrees'. Nothing offered.")
+    live_cwds = [real(j["cwd"]) for _, j in live if isinstance(j.get("cwd"), str)]
+
+    repos = {}  # main checkout -> the worktree spaces on it
+    for r in rows:
+        if len(r) > 6 and r[4] == "1":
+            top = wb_space.toplevel(r[2])
+            if top:
+                repos.setdefault(real(top), []).append({"name": r[0], "root": r[2], "key": r[6]})
+
+    found, seen, beads_of = [], set(), {}
+    for main, spaces in repos.items():
+        base = default_branch(main)
+        for path, branch in worktrees(main):
+            seen.add(path)
+            space = space_of(path, spaces)
+            if space["root"] not in beads_of:
+                beads_of[space["root"]] = read_beads(space["root"])
+            beads = beads_of[space["root"]]
+            why = None
+            if any(c == path or c.startswith(path + os.sep) for c in live_cwds):
+                why = "a Claude session is open in it"
+            elif branch is None:
+                why = "detached HEAD, so its branch is unknown"
+            elif git("status", "--porcelain", cwd=path)[1]:
+                why = "uncommitted changes"
+            elif not any(not git("merge-base", "--is-ancestor", branch, ref, cwd=main)[0]
+                         for ref in (base, f"origin/{base}")):
+                why = f"not merged into {base}"
+            elif beads is None:
+                why = f"couldn't read {space['name']}'s beads, so its bead is unknown"
+            bead = bead_for(path, beads or [])
+            if not why and bead and bead.get("status") != "closed":
+                why = f"its bead {bead.get('id')} is {bead.get('status')}"
+            note = (f"bead {bead.get('id')} {bead.get('status')}" if bead else "no bead") + f" · merged · clean"
+            found.append((path, space["name"], branch or "-", not why, why or note))
+
+    wdir = os.environ.get("WB_WORKTREES_DIR") or os.path.expanduser("~/.worktrees")
+    for name in sorted(os.listdir(wdir)) if os.path.isdir(wdir) else []:
+        p = real(os.path.join(wdir, name))
+        if os.path.isdir(p) and p not in seen:
+            found.append((p, "?", "-", False, "not a worktree of any space's repo: check it by hand"))
+    return sorted(found, key=lambda f: (not f[3], f[0])), None
+
+
+def choose(offered):
+    """The worktrees to end: fzf with all ticked on a terminal, else one yes/no for all; None when
+    input ends before an answer (nobody there to ask)."""
+    if sys.stdin.isatty() and shutil.which("fzf"):
+        lines = "\n".join(f"{i}\t{os.path.basename(p)}" for i, (p, *_rest) in enumerate(offered))
+        r = subprocess.run(["fzf", "--multi", "--bind", "load:select-all", "--with-nth", "2..", "--delimiter", "\t",
+                            "--header", "Enter ends the ticked worktrees · Tab unticks · Esc ends none"],
+                           input=lines, capture_output=True, text=True)
+        picked = {int(x.split("\t", 1)[0]) for x in r.stdout.splitlines() if x.split("\t", 1)[0].isdigit()}
+        return [o for i, o in enumerate(offered) if i in picked]
+    print(f"End these {len(offered)}? [y/N] ", end="", flush=True)
+    line = sys.stdin.readline()
+    if not line:
+        return None
+    return offered if line.strip().lower() in ("y", "yes") else []
+
+
+def main(argv):
+    if argv and argv[0] in ("-h", "--help"):
+        print(__doc__.strip())
+        return 0
+    if argv:
+        return fail(f"unknown argument: {argv[0]} (see wb-tidy --help)")
+    found, error = survey()
+    if error:
+        return fail(error)
+    home = os.path.expanduser("~")
+    width = max((len(os.path.basename(f[0])) for f in found), default=0)
+    for path, space, branch, offered, why in found:
+        print(f"  {'offer' if offered else 'keep '}  {os.path.basename(path):<{width}}  {space}  {branch}  {why}")
+    offered = [f for f in found if f[3]]
+    if not offered:
+        print("nothing to tidy.")
+        return 0
+    if os.environ.get("WORKBENCH_DRY_RUN"):
+        print(f"DRY-RUN: would end {len(offered)} worktree(s) with end-session")
+        return 0
+    chosen = choose(offered)
+    if chosen is None:
+        print()
+        return fail("couldn't ask which to end: there's no terminal to answer on. Run wb-tidy in a terminal.")
+    if not chosen:
+        print("nothing ended.")
+        return 0
+    for i, (path, *_rest) in enumerate(chosen):
+        print(f"\n== end-session {path.replace(home, '~', 1)}", flush=True)
+        if subprocess.run([END_SESSION, path]).returncode:
+            left = len(chosen) - i - 1
+            return fail(f"end-session refused {os.path.basename(path)} (above); stopped there, "
+                        f"{left} left as it was.")
+    print(f"\nended {len(chosen)} worktree(s).")
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv[1:]))
