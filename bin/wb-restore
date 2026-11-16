@@ -87,17 +87,21 @@ def skip_flags(pids):
 
 
 def linked_worktree(cwd):
-    """The git top level of cwd when it is a linked worktree, not a main checkout; else None."""
+    """(top level, main repo, branch) of cwd when it is a linked worktree, not a main checkout;
+    else None. The repo and branch say, once the folder is gone, whether its work was ended."""
     try:
         p = subprocess.run(["git", "-C", cwd, "rev-parse", "--path-format=absolute", "--show-toplevel",
-                            "--git-common-dir"], capture_output=True, text=True, timeout=5)
+                            "--git-common-dir", "--abbrev-ref", "HEAD"], capture_output=True, text=True, timeout=5)
     except (OSError, subprocess.SubprocessError):
         return None
     lines = p.stdout.split("\n")
-    if p.returncode or len(lines) < 2:
+    if p.returncode or len(lines) < 3:
         return None
-    top, common = lines[0], lines[1]
-    return top if os.path.dirname(os.path.realpath(common)) != os.path.realpath(top) else None
+    top, common, branch = lines[0], lines[1], lines[2]
+    repo = os.path.dirname(os.path.realpath(common))
+    if repo == os.path.realpath(top):
+        return None
+    return top, repo, (branch if branch and branch != "HEAD" else None)
 
 
 def live_sessions(unknown=None):
@@ -147,11 +151,12 @@ def save(quiet, without=None):
     entries = []
     for pid, j in live:
         rec = wb_session.load(j["sessionId"]) or {}
+        wt = linked_worktree(j["cwd"])
         entries.append({"session": j["sessionId"], "cwd": j["cwd"], "config": j["_dir"],
                         "skip_permissions": flags.get(pid, False), "name": str(j.get("name") or ""),
                         # a done bead's goal would be handed back to the session on resume
                         "space_root": rec.get("root"), "bead": None if rec.get("done") else rec.get("bead"),
-                        "worktree": linked_worktree(j["cwd"])})
+                        "worktree": wt and wt[0], "repo": wt and wt[1], "branch": wt and wt[2]})
     now = time.time()
     old = snapshots()
     boot = boot_time()
@@ -248,10 +253,28 @@ def sort_out(snap, live):
         elif e.get("session") in pending:
             skipped.append((e, "already queued, a new tab is about to resume it"))
         elif not os.path.isdir(e.get("cwd") or ""):
-            skipped.append((e, "its folder is gone"))
+            skipped.append((e, gone_why(e)))
         else:
             ready.append(e)
     return ready, skipped
+
+
+def gone_why(e):
+    """Why a session's folder is gone: an ended worktree is done with; one whose branch is left
+    may hold work, and recreating the folder at the same path lets the next restore resume it."""
+    wt, repo, branch = e.get("worktree"), e.get("repo"), e.get("branch")
+    if not (wt and repo and branch and os.path.isdir(repo)):
+        return "its folder is gone"
+    try:
+        p = subprocess.run(["git", "-C", repo, "rev-parse", "--verify", "--quiet", f"refs/heads/{branch}"],
+                           capture_output=True, text=True, timeout=5)
+    except (OSError, subprocess.SubprocessError):
+        return "its folder is gone"
+    if p.returncode:
+        return f"its worktree was ended (branch {branch} is gone)"
+    return (f"its worktree was removed, but branch {branch} is still there. To resume it: "
+            f"git -C {shlex.quote(repo)} worktree add {shlex.quote(wt)} {shlex.quote(branch)}, "
+            f"then wb-restore again")
 
 
 def declined_path():

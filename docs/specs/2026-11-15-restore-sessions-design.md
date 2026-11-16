@@ -22,10 +22,10 @@ Measured on 2026-11-15, with 18 sessions open over two Claude accounts.
 `~/.local/state/workbench/restore`). It holds one entry per live interactive session:
 
     {"session": id, "cwd", "config": the pid file's folder, "skip_permissions": bool,
-     "name": Claude's session name, "space_root", "bead", "worktree"}
+     "name": Claude's session name, "space_root", "bead", "worktree", "repo", "branch"}
 
 `space_root` and `bead` come from the workbench session record; `worktree` is the `cwd`'s git
-top level when that is a linked worktree. Nothing comes from a process's environment. It reads
+top level when that is a linked worktree, with its main repo and branch. Nothing comes from a process's environment. It reads
 `ps`, the pid files and the session records, and never `bd`, so it is cheap enough to run on a
 schedule: `install.sh` loads a launch agent (`workbench.restore-save`) that runs
 `wb-restore save --quiet` every 10 minutes, so a crash or a forced restart is covered without
@@ -52,7 +52,12 @@ Save then writes nothing and exits 1: the last whole snapshot stays the one a re
 - sessions still live: a pid file of a running claude names the same id. Two processes on one
   transcript is the one thing a restore must never cause, and running `wb-restore` twice or
   before the restart would otherwise do it;
-- sessions whose folder is gone, listed as skipped with the reason.
+- sessions whose folder is gone, listed as skipped with the reason. For a worktree the snapshot
+  also keeps its main repo and branch, so the reason can tell an ended worktree (its branch is
+  gone too: the work was finished) from a removed one whose branch is left, which may hold work.
+  For that one it prints the `git worktree add` that brings the folder back at the same path; the
+  next `wb-restore` then resumes the session. It doesn't recreate the folder itself, so the
+  space's `on_create` setup is the user's to run if the worktree needs it.
 
 What's left is offered in fzf, all selected (Tab unticks); without fzf, a yes/no for all of them.
 With no terminal to answer on (input ends before any answer, as from a Claude `!` prompt) it

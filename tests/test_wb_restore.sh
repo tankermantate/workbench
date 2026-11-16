@@ -72,6 +72,9 @@ assert_eq "bead from the session record" "$(field "$S" sid-a bead)" "ac-1"
 assert_eq "space root from the session record" "$(field "$S" sid-a space_root)" "$T/acme"
 assert_eq "worktree is the cwd's linked worktree" "$(field "$S" sid-a worktree)" "$T/wts/acme-x1y"
 assert_eq "no worktree outside one" "$(field "$S" sid-b worktree)" "None"
+assert_eq "a worktree's repo is kept, to find its branch once the folder is gone" "$(field "$S" sid-a repo)" "$T/acme"
+assert_eq "and its branch" "$(field "$S" sid-a branch)" "feat/x"
+assert_eq "no branch outside a worktree" "$(field "$S" sid-b branch)" "None"
 assert_eq "a done bead isn't resumed into" "$(field "$S" sid-done bead)" "None"
 assert_eq "but its space still is" "$(field "$S" sid-done space_root)" "$T/acme"
 assert_eq "claude -p is left out" "$(field "$S" sid-p session)" "ABSENT"
@@ -105,9 +108,13 @@ rm -rf "$WB_RESTORE_DIR"; mkdir -p "$WB_RESTORE_DIR/snapshots"
 snap() {  # snap STAMP EPOCH JSON-SESSIONS
   printf '{"taken": %s, "sessions": [%s]}' "$2" "$3" > "$WB_RESTORE_DIR/snapshots/$1.json"; }
 ent() { printf '{"session":"%s","cwd":"%s","config":"%s","skip_permissions":%s,"name":"%s","space_root":%s,"bead":%s,"worktree":%s}' "$@"; }
+# wt SID WORKTREE NAME BRANCH: a session in a worktree of acme that has since been removed
+wt() { printf '{"session":"%s","cwd":"%s/sub","config":"%s","skip_permissions":false,"name":"%s","space_root":null,"bead":null,"worktree":"%s","repo":"%s","branch":"%s"}' \
+  "$1" "$2" "$CFG" "$3" "$2" "$T/acme" "$4"; }
+git -C "$T/acme" branch -q feat/kept   # its worktree removed, the branch (and maybe its work) left
 BEFORE=$((NOW - 7200)); BOOT=$((NOW - 3600))
 snap 20261115T080000Z $((BEFORE - 600)) "$(ent sid-old "$T/plain" "$CFG" false "Oldest snap" null null null)"
-snap 20261115T090000Z $BEFORE "$(ent sid-a "$T/wts/acme-x1y" "$ALT" true "Resend the email" "\"$T/acme\"" '"ac-1"' "\"$T/wts/acme-x1y\""),$(ent sid-b "$T/plain" "$CFG" false "Plain one" null null null),$(ent sid-gone "$T/wts/removed" "$CFG" false "Gone one" null null null),$(ent sid-c "$T/plain" "$CFG" false "Still open" null null null)"
+snap 20261115T090000Z $BEFORE "$(ent sid-a "$T/wts/acme-x1y" "$ALT" true "Resend the email" "\"$T/acme\"" '"ac-1"' "\"$T/wts/acme-x1y\""),$(ent sid-b "$T/plain" "$CFG" false "Plain one" null null null),$(ent sid-gone "$T/wts/removed" "$CFG" false "Gone one" null null null),$(ent sid-c "$T/plain" "$CFG" false "Still open" null null null),$(wt sid-kept "$T/wts/kept" "Kept branch" feat/kept),$(wt sid-ended "$T/wts/ended" "Ended one" feat/ended)"
 snap 20261115T110000Z $((NOW - 60)) "$(ent sid-c "$T/plain" "$CFG" false "Still open" null null null)"
 # after the boot, only sid-c (pid 403) is running
 : > "$T/ps.out"; : > "$T/ps.args"; rm -f "$CFG"/sessions/* "$ALT"/sessions/*
@@ -133,6 +140,9 @@ assert_contains "it says why" "$out" "still open"
 assert_contains "a gone folder is skipped, with why" "$out" "Gone one"
 assert_contains "and the reason" "$out" "folder is gone"
 assert_contains "dry run says what it would open" "$out" "each of the 2 ready"
+assert_contains "a removed worktree whose branch is left: says so" "$out" "Kept branch  ($T/wts/kept/sub): its worktree was removed, but branch feat/kept is still there"
+assert_contains "and how to bring the folder back" "$out" "git -C $T/acme worktree add $T/wts/kept feat/kept"
+assert_contains "a worktree ended with its branch: says it was ended" "$out" "Ended one  ($T/wts/ended/sub): its worktree was ended (branch feat/ended is gone)"
 [ -d "$WB_RESTORE_DIR/queue" ] && [ -n "$(ls "$WB_RESTORE_DIR/queue")" ] && bad "dry run queues nothing" || ok "dry run queues nothing"
 [ -s "$T/osa.log" ] && bad "dry run opens no window" || ok "dry run opens no window"
 
