@@ -11,19 +11,71 @@ Terminal opens
   → Claude starts there, with an opening prompt
 ```
 
-## Install
+## What you need
 
-Needs macOS with zsh, `python3` 3.11 or later, `git`, and [bd](https://github.com/gastownhall/beads).
-[fzf](https://github.com/junegunn/fzf) is optional; without it the launcher shows a numbered menu.
+workbench is a launcher around tools you install and sign in to yourself. It holds no keys and
+calls no AI service directly: every Claude session it starts is your own `claude`, on your own
+account, using your own plan or API credits.
 
-```bash
-./install.sh                     # links bin/* into ~/.local/bin, schedules weekly grooming and a session
-                                 # snapshot every 10 minutes; prints the ~/.zshrc line
-./install.sh --no-schedule       # the same, without the launch agents
-cp spaces.example.toml ~/.config/workbench/spaces.toml   # then edit it
-```
+| You need | Why | Get it |
+|---|---|---|
+| macOS, with zsh as your shell | The launcher is a zsh script; tab handling uses Apple Terminal (other terminals: see `[launcher].terminals`). | zsh is the macOS default. |
+| [Claude Code](https://docs.claude.com/en/docs/claude-code), signed in | Every session the launcher starts is `claude`. | Install it, run `claude` once and log in. |
+| [bd (beads)](https://github.com/gastownhall/beads) | The issue tracker: each space's backlog, the beads you pick, the beads sessions close. | Install it, then `bd init` in each project you want a backlog for. |
+| `python3` 3.11 or later | The helper commands are Python. | `brew install python` if `python3 --version` is older. |
+| `git` | Worktree sessions, and fetching before they start. | Comes with the Xcode command line tools. |
+| [fzf](https://github.com/junegunn/fzf) (optional) | Searchable screens. Without it, the launcher shows a numbered menu. | `brew install fzf` |
+| [gh](https://cli.github.com) (optional) | Only if a space sets `gh_account`. | `brew install gh` |
 
-Add the line `install.sh` prints to the **end** of `~/.zshrc`. Re-running `install.sh` is safe.
+## Set up
+
+1. **Get the code** and install it. This links the commands into `~/.local/bin` (make sure that's
+   on your `PATH`) and prints a line for your `~/.zshrc`:
+
+   ```bash
+   git clone https://github.com/tankermantate/workbench.git ~/dev/workbench
+   cd ~/dev/workbench
+   ./install.sh                  # or ./install.sh --no-schedule: see "What runs on its own" below
+   ```
+
+   It warns if `bd`, `fzf` or a new enough `python3` is missing. Re-running it is safe.
+2. **Add the printed `source …/workbench.zsh` line to the end of `~/.zshrc`.**
+3. **Describe your spaces.** A space is a project folder (or a folder of projects) the launcher
+   offers. Copy the example and edit it; it documents every key:
+
+   ```bash
+   mkdir -p ~/.config/workbench
+   cp spaces.example.toml ~/.config/workbench/spaces.toml
+   ```
+
+   The least that works is a name and a folder for each space:
+
+   ```toml
+   [[space]]
+   name  = "My app"
+   root  = "~/dev/my-app"
+   beads = true
+   ```
+4. **Give each space a backlog:** `cd` into its folder and run `bd init`, then add work with
+   `bd create`, or let Claude file beads as you go.
+5. **Open a new Terminal window.** The launcher appears: pick a space, then a bead or
+   `✦ something new`, and Claude starts in that folder. If it doesn't appear, run `launch`; if
+   it complains about the config, it says which line.
+
+Optional, once the basics work: a status line showing the session's bead and space, and a bell on
+the tab that needs you (see [While you work](#while-you-work)); planning rituals (see
+[Planning rituals](#planning-rituals)).
+
+### What runs on its own
+
+`./install.sh` adds two macOS launch agents (skip both with `--no-schedule`):
+
+- **A session snapshot every 10 minutes** (`wb-restore save`), so you can bring your sessions back
+  after a restart. It only reads which sessions are open: no Claude usage.
+- **Weekly grooming, Saturdays at 06:00** (`wb-groom run --all`). For each space that has a plan
+  (you create one with `wb-groom strategy <space>`), it runs `claude -p` once to judge that space's
+  backlog. **This uses your Claude account's usage**, on that space's Claude profile. With no plans
+  set up, it grooms nothing and uses nothing.
 
 ## Daily use
 
