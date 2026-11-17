@@ -71,6 +71,8 @@ with me as the product owner instead of the person trying to remember everything
   sessions are waiting on you.
 - **Shipping, not just coding.** Work happens on its own branch with your private setup applied,
   moves through review and CI, and is only cleaned up once it is safely merged.
+- **Always current.** When a new version is out, the launcher says so and tells you what
+  changed; one command updates.
 - **A weekly rhythm.** An unattended review each weekend checks every backlog against your
   goals and proposes changes for you to accept; a monthly strategy session updates the goals.
 
@@ -108,7 +110,8 @@ weekly review, and only for areas where you've set goals; you can turn it off.
 
 **Where does my data live?**
 On your machine, in each project's own task store (beads). Nothing is sent anywhere except to
-Claude, the same way any Claude session does. Workbench has no server and no account. The one
+Claude, the same way any Claude session does, and a once-a-day check with GitHub for a newer
+version, which you can turn off. Workbench has no server and no account. The one
 exception is the optional roadmap view you can open anywhere: it is a page in your own Claude
 account, so it holds a copy of the tasks it shows.
 
@@ -147,7 +150,7 @@ not built yet.
 - **Partly there:** areas exist as *spaces* (with an optional group), and epics and tasks exist as
   beads, but there is no initiative layer or roll-up across spaces. Shaping before code exists,
   but there is no light spec or acceptance-criteria step.
-- **Not built:** planning in Claude (the headline of this release); guided setup; anything after
+- **Not built:** planning in Claude (the headline of this release); guided setup; a new-version notice; anything after
   the commit (pull requests, CI status, release); a single "vibe to strict" setting for how much workbench suggests.
 
 ### For us (internal)
@@ -224,6 +227,7 @@ epic wb-kvx, with the launch post (wb-kvx.13), which waits for gaps 1 and 4.
 | 10 | A weekly rhythm | Weekly grooming, review, monthly strategy | Retro: what shipped this week against the goals | wb-kvx.10 |
 | 11 | Anyone can try it | macOS and Apple Terminal only | Other terminals first; other systems not planned yet | wb-kvx.11 |
 | 12 | Hearing from users | No channel | Issue templates and a short "tell us your setup" form | wb-kvx.12 |
+| 13 | Always on the latest version | Users pull and re-run `install.sh` when they happen to notice | Numbered releases with a changelog, a once-a-day check that says when a new version is out, and a one-step `wb-update` | wb-kvx.14 |
 
 ## Keeping this true
 
