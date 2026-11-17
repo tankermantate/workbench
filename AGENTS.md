@@ -77,20 +77,21 @@ The managed Beads block is task-tracking guidance, not permission to override re
 - **Minimal**: Keep tool instruction files as pointers to `bd prime`; use the same conservative git policy unless active instructions say otherwise.
 - **Team-maintainer**: Only when the repository explicitly opts in, agents may close beads, run quality gates, commit, and push as part of session close. A current "do not commit" or "do not push" instruction still wins.
 
-## This Repository's Profile: Team-maintainer, Never Push
+## This Repository's Profile: Team-maintainer, Push After Each Bead
 
-This repository opts in to the Team-maintainer profile, minus pushing: agents commit finished, tested work when they close a bead, and never push. This is the "repository profile" bd's conservative default defers to, so it overrides `bd prime`'s "Git authority: no git operations" line. A current "do not commit" from the user still wins.
+This repository opts in to the Team-maintainer profile: agents commit finished, tested work when they close a bead, then push it to `origin` (public on GitHub), once the leak check is clean. This is the "repository profile" bd's conservative default defers to, so it overrides `bd prime`'s "Git authority: no git operations" line. A current "do not commit" from the user still wins.
 
 Closing a bead, in order. Stop at the first failure and report it; don't commit around it.
 
 1. `tests/run.sh`: every suite reports 0 failed.
 2. `bd close <id> --reason="<what shipped; what did not>"`, with no private names (bead text stays local, but keep it shareable).
 3. `git status`, then stage by name the files the work touched. Never `git add -A` or `git add .`; leave out anything dirty you didn't change, and say so.
-4. One commit per bead on the current branch (main is fine, everything here is local), message `<type>: <summary> (<bead-id>)` like `git log`, a body saying why, and the co-author trailer.
-5. `scripts/check-leaks.sh`: files + history + commit messages clean (a bead-db warning with no remote doesn't block; mention it). If the new commit leaks, `git reset --soft HEAD~1`, fix it, commit again.
-6. Hand off: the commit hash, test and leak results, what's left open. Suggest the push only when the user asks for it.
+4. One commit per bead on the current branch (main is fine), message `<type>: <summary> (<bead-id>)` like `git log`, a body saying why, and the co-author trailer.
+5. `scripts/check-leaks.sh`: clean, the bead db included (with a remote set, a bead-db finding fails too). If the new commit leaks, `git reset --soft HEAD~1`, fix it, commit again.
+6. `git push origin <branch>`, a plain push. If it's rejected, stop and report it; don't pull, rebase or force. Never push when step 5 found anything.
+7. Hand off: the commit hash, test and leak results, the push, what's left open.
 
-Never: `git push`, `bd dolt push`, amend, rebase or force anything already committed, `--no-verify`, or a commit with failing tests. In a worktree session, commit on its branch; `end-session` still waits for the user's merge or push.
+Never: `bd dolt push` (the bead db stays local; `no-push` is on), a force push, amend, rebase or force anything already committed, `--no-verify`, or a commit with failing tests. In a worktree session, commit on its branch and push that branch; merging to main is still the user's call, and `end-session` waits for it.
 
 ## Session Completion
 
