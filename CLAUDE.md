@@ -39,8 +39,8 @@ This repository opts in to the Team-maintainer profile, minus pushing: agents co
 Closing a bead, in order. Stop at the first failure and report it; don't commit around it.
 
 1. `tests/run.sh`: every suite reports 0 failed.
-2. `bd close <id> --reason="<what shipped; what did not>"`, with no private names (bd exports it to tracked `.beads/interactions.jsonl`).
-3. `git status`, then stage by name the files the work touched plus `.beads/interactions.jsonl`. Never `git add -A` or `git add .`; leave out anything dirty you didn't change, and say so.
+2. `bd close <id> --reason="<what shipped; what did not>"`, with no private names (bead text stays local, but keep it shareable).
+3. `git status`, then stage by name the files the work touched. Never `git add -A` or `git add .`; leave out anything dirty you didn't change, and say so.
 4. One commit per bead on the current branch (main is fine, everything here is local), message `<type>: <summary> (<bead-id>)` like `git log`, a body saying why, and the co-author trailer.
 5. `scripts/check-leaks.sh`: files + history + commit messages clean (a bead-db warning with no remote doesn't block; mention it). If the new commit leaks, `git reset --soft HEAD~1`, fix it, commit again.
 6. Hand off: the commit hash, test and leak results, what's left open. Suggest the push only when the user asks for it.
