@@ -207,23 +207,23 @@ week, and no longer finding forgotten sessions and worktrees.
 
 ## Gaps between this vision and today
 
-Each promise in the press release, what exists, and what closes the gap. Beads are filed once
-this draft is agreed; the Bead column fills in then.
+Each promise in the press release, what exists, and what closes the gap. All of them sit under the
+epic wb-kvx, with the launch post (wb-kvx.13), which waits for gaps 1 and 4.
 
 | # | Promise | Today | Gap | Bead |
 |---|---|---|---|---|
-| 1 | Plan in Claude, against your real tasks | Nothing: tasks are only reachable from the terminal | Connect the Claude Desktop app to every space's beads (via `beads-mcp`), tell Claude what spaces exist, and keep its edits within workbench's rules; one roadmap per persona, showing only that persona's areas | |
-| 2 | See the roadmap visually, anywhere | Nothing | A roadmap view (a published Claude artifact) that reads and writes your tasks | |
-| 3 | Areas → initiatives → epics → tasks | Spaces (with a group), beads with parent epics | An initiative layer and a roll-up view across spaces | |
-| 4 | Ten-minute guided setup | Clone, run a script, hand-edit a config file, `bd init` per project | A guided first run that asks about your projects and writes the config; a health check; a demo space | |
-| 5 | Usable by non-developers | A README written for developers | A plain-language guide, a glossary (space, bead, worktree), screenshots or a short recording | |
-| 6 | Shape before building, with done-when | "Something new" shapes an idea into a bead | A light spec and acceptance-criteria step that stays optional | |
-| 7 | Shipping, not just coding | Worktree per task, gated close-out, merge left to you | Pull request, CI status and merge in the flow; squash-merged branches still read as unmerged (wb-e8p, wb-7pq) | |
-| 8 | Suggests rather than insists | Mostly suggests; strict only where work could be lost | One setting from "vibe" to "strict" that every prompt respects | |
-| 9 | Sessions that keep their place | Restore, `wb-tabs`, `wb-tidy`, status lines, compaction recovery | A morning summary of what's in flight across everything | |
-| 10 | A weekly rhythm | Weekly grooming, review, monthly strategy | Retro: what shipped this week against the goals | |
-| 11 | Anyone can try it | macOS and Apple Terminal only | Other terminals first; other systems not planned yet | |
-| 12 | Hearing from users | No channel | Issue templates and a short "tell us your setup" form | |
+| 1 | Plan in Claude, against your real tasks | Nothing: tasks are only reachable from the terminal | Connect the Claude Desktop app to every space's beads (via `beads-mcp`), tell Claude what spaces exist, and keep its edits within workbench's rules; one roadmap per persona, showing only that persona's areas | wb-kvx.1 |
+| 2 | See the roadmap visually, anywhere | Nothing | A roadmap view (a published Claude artifact) that reads and writes your tasks | wb-kvx.2 |
+| 3 | Areas → initiatives → epics → tasks | Spaces (with a group), beads with parent epics | An initiative layer and a roll-up view across spaces | wb-kvx.3 |
+| 4 | Ten-minute guided setup | Clone, run a script, hand-edit a config file, `bd init` per project | A guided first run that asks about your projects and writes the config; a health check; a demo space | wb-kvx.4 |
+| 5 | Usable by non-developers | A README written for developers | A plain-language guide, a glossary (space, bead, worktree), screenshots or a short recording | wb-kvx.5 |
+| 6 | Shape before building, with done-when | "Something new" shapes an idea into a bead | A light spec and acceptance-criteria step that stays optional | wb-kvx.6 |
+| 7 | Shipping, not just coding | Worktree per task, gated close-out, merge left to you | Pull request, CI status and merge in the flow; squash-merged branches still read as unmerged (wb-e8p, wb-7pq) | wb-kvx.7 |
+| 8 | Suggests rather than insists | Mostly suggests; strict only where work could be lost | One setting from "vibe" to "strict" that every prompt respects | wb-kvx.8 |
+| 9 | Sessions that keep their place | Restore, `wb-tabs`, `wb-tidy`, status lines, compaction recovery | A morning summary of what's in flight across everything | wb-kvx.9 |
+| 10 | A weekly rhythm | Weekly grooming, review, monthly strategy | Retro: what shipped this week against the goals | wb-kvx.10 |
+| 11 | Anyone can try it | macOS and Apple Terminal only | Other terminals first; other systems not planned yet | wb-kvx.11 |
+| 12 | Hearing from users | No channel | Issue templates and a short "tell us your setup" form | wb-kvx.12 |
 
 ## Keeping this true
 
