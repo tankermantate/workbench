@@ -202,3 +202,7 @@ scripts/check-leaks.sh   # before any push: no private names in files, history o
 ```
 
 Designs and plans are in `docs/specs/` and `docs/plans/`.
+
+## License
+
+MIT. See `LICENSE`.
