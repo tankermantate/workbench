@@ -57,6 +57,16 @@ assert_contains "Ctrl-C in new-session: says how to find a half-made worktree" "
 assert_contains "Ctrl-C in new-session: lands in HOME" "$out" "PWD=$HOME"
 assert_not_contains "Ctrl-C in new-session: starts nothing" "$out" "DRY-RUN"
 
+# no conversation ever ran in the worktree (for the space's account): claude --continue would
+# only say "No conversation found to continue", so a fresh session starts on the bead instead
+out="$(printf 'y\n' | z "$WT" "_wb_start_claimed acme-c2 '$T/wt-x'; print \"rc=\$? PWD=\$PWD\"" 2>&1)"
+assert_contains "◐ no conversation in the worktree: says so" "$out" "no earlier conversation"
+assert_contains "◐ no conversation: a fresh session on the bead" "$out" "Work on bead acme-c2 in Acme."
+assert_not_contains "◐ no conversation: not --continue" "$out" "--continue"
+assert_contains "◐ no conversation: still in the worktree's subfolder" "$out" "PWD=$T/wt-x/sub"
+# Claude keeps a folder's conversations under <config>/projects/<its real path, non-alphanumerics as ->
+mkdir -p "$T/cfg/projects/$(cd "$T/wt-x/sub" && pwd -P | sed 's/[^A-Za-z0-9]/-/g')"
+: > "$T/cfg/projects/$(cd "$T/wt-x/sub" && pwd -P | sed 's/[^A-Za-z0-9]/-/g')/s1.jsonl"
 out="$(printf 'y\n' | z "$WT" "_wb_start_claimed acme-c2 '$T/wt-x'; print \"rc=\$? PWD=\$PWD\"" 2>&1)"
 assert_contains "◐ with worktree: resumes with --continue" "$out" " --dangerously-skip-permissions --continue"
 assert_contains "◐ resume: WB_BEAD and WB_WORKTREE" "$out" "WB_BEAD=acme-c2 WB_WORKTREE=$WTXTOP claude --settings "

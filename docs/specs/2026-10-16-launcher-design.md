@@ -85,7 +85,9 @@ you are working before deciding what to do in it.
   - Selecting one in a worktree space doesn't call `new-session`, which refuses with
     `worktree path already exists`.
   - If that bead's worktree exists, the launcher offers **resume there**: `cd` into it, then start
-    Claude with `--continue`.
+    Claude with `--continue`. When Claude has no conversation for that folder on the space's
+    account (`<config>/projects/<real path, non-alphanumerics as ->/*.jsonl`), `--continue` would
+    only fail, so it starts a fresh session on the bead with the work-on-bead prompt and says so.
   - If it doesn't, the claim is stale, and the launcher shows that rather than guessing.
 - **Order:** `wave:1`, then `wave:2`, then everything else, then the icebox; priority within
   each. A space that doesn't use waves is sorted by priority alone, with the icebox still last.

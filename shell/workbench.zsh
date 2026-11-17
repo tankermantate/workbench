@@ -148,6 +148,15 @@ _wb_show_tabs() {
 
 # ◐ beads are probably another session's. $1 id, $2 worktree from the claim
 # notes (or -). Returns 1 to go back to screen 2.
+# Whether Claude has a conversation for $PWD on the space's account: it keeps them in
+# <config>/projects/<the folder's real path, each non-alphanumeric as ->/*.jsonl.
+_wb_has_conversation() {
+  local cfg=$HOME/.claude
+  [[ $s[8] != - ]] && cfg=$s[8]
+  local -a found=($cfg/projects/${${PWD:A}//[^A-Za-z0-9]/-}/*.jsonl(N[1]))
+  (( $#found ))
+}
+
 _wb_start_claimed() {
   local id=$1 wt=$2 ans dir
   if [[ $s[5] != 1 ]]; then
@@ -162,7 +171,14 @@ _wb_start_claimed() {
     read -r "ans?$id is claimed; its worktree is ${dir%/}. Resume there? [Y/n] " || return 1
     [[ $ans == [nN]* ]] && return 1
     cd -- $dir || return 1
-    _wb_claude continue "" $id
+    if _wb_has_conversation; then
+      _wb_claude continue "" $id
+    else
+      # --continue would only say "No conversation found to continue": the worktree was made
+      # here but its session ran elsewhere, or never started
+      print "workbench: no earlier conversation in this folder; starting a fresh session on $id."
+      _wb_claude prompt "$(_wb_prompt work-on-bead $id)" $id
+    fi
     return 0
   fi
   [[ $wt == - ]] && wt="(no worktree recorded)"
