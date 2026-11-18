@@ -4,6 +4,8 @@ What changed for you in each workbench release. Update with `wb-update`.
 
 ## Unreleased
 
+- Tell us how it's going: GitHub issue forms for a bug, an idea, and an opt-in "tell us your
+  setup" (every question optional, nothing collected otherwise). Links are in the README.
 - `wb-setup`: a guided first run. From a fresh clone it checks your tools (offering Homebrew for
   beads, fzf and python), runs `install.sh`, asks about your project folders and writes
   `spaces.toml`, runs `bd init` where you say so, offers a Demo space with sample tasks, adds the

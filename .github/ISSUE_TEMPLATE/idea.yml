@@ -1,0 +1,26 @@
+name: An idea or a missing piece
+description: Something workbench should do, or do differently.
+labels: [enhancement]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        This issue is **public**, so please leave out the names of your spaces, projects,
+        clients, people and accounts.
+  - type: textarea
+    id: trying
+    attributes:
+      label: What were you trying to do?
+      description: The job, not the feature. "Plan next week across two businesses" beats "add a calendar".
+    validations:
+      required: true
+  - type: textarea
+    id: today
+    attributes:
+      label: What do you do today instead?
+      description: The workaround, or what you gave up on.
+  - type: textarea
+    id: help
+    attributes:
+      label: What would help?
+      description: Your idea of a fix, if you have one.

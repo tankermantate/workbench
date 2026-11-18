@@ -203,3 +203,5 @@ in the README.
 - Remove the Demo space when you're done with it: delete its `[[space]]` from `spaces.toml` and
   the folder `~/.local/share/workbench/demo`.
 - See every open session at once with `wb-tabs`, and tidy up finished worktrees with `wb-tidy`.
+- Once you've used it a week or two, [tell us your setup](https://github.com/tankermantate/workbench/issues/new?template=setup.yml): a
+  short, opt-in form, and the only way we hear how workbench is used.
