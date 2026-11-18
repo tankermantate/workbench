@@ -28,9 +28,22 @@ dbs = sorted(os.path.dirname(d) for d in glob.glob(os.path.join(repo, ".beads", 
 if not dbs:
     sys.exit(0)
 
+def no_push():
+    """bd's no-push setting (.beads/config.yaml): bd then never pushes the store to the git
+    remote. A Dolt remote is another matter: `bd dolt push` publishes to it either way."""
+    try:
+        text = open(os.path.join(repo, ".beads", "config.yaml")).read()
+    except OSError:
+        return False
+    return re.search(r"(?m)^no-push:[ \t]*true[ \t]*(#.*)?$", text) is not None
+
+
 remotes = []
 if subprocess.run(["git", "-C", repo, "remote"], capture_output=True, text=True).stdout.strip():
-    remotes.append("git")
+    if no_push():
+        print("note: a git remote is set, but bd's no-push is on, so the bead db is not published to it")
+    else:
+        remotes.append("git")
 for db in dbs:
     # Read from disk, not through dolt, so a missing dolt still knows a remote is set.
     try:

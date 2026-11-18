@@ -61,4 +61,10 @@ assert_contains "focus: an old claim note gains the metadata link" "$(cat "$FAKE
 : > "$FAKE_BD_LOG"
 WB_WORKTREE="$T/wt" "$FOCUS" acme-m3t >/dev/null
 assert_not_contains "focus: linked by metadata, notes rewritten: nothing to add" "$(cat "$FAKE_BD_LOG")" "update"
+: > "$FAKE_BD_LOG"
+HOME="$T" WB_WORKTREE="$T/wt" "$FOCUS" acme-x1y >/dev/null
+assert_contains "focus: under the home folder, the claim records ~, not the login's path" "$(cat "$FAKE_BD_LOG")" \
+  "update acme-x1y --append-notes Branch: feat/x (worktree at ~/wt) --set-metadata wb_worktree=~/wt"
+w="$(HOME="$T" PYTHONPATH="$REPO/lib" python3 -c 'import wb_session as s; print(s.worktree_of({"notes": "Branch: a (worktree at ~/wt)"}), s.worktree_of({"metadata": {"wb_worktree": "~/wt"}}))')"
+assert_eq "worktree_of: ~ in a note or the metadata comes back as a full path" "$w" "$T/wt $T/wt"
 finish
