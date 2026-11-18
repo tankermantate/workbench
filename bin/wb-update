@@ -1,0 +1,226 @@
+#!/usr/bin/env python3
+"""Say when a new workbench release is out, and update to it in one step.
+
+  wb-update                   pull, re-run install.sh, show what's new since your version
+  wb-update --version         the installed version (VERSION in the checkout)
+  wb-update --notice [--color]
+                              'workbench X.Y available: wb-update' when a newer release is
+                              out, else nothing. The launcher's first screen shows it.
+
+A release is a vX.Y tag on the repo you cloned from. --notice answers from a cache and looks
+at most once a day (git ls-remote --tags, in the background, with a short timeout); any
+failure is silent. Turn the look off with `update_check = false` under [launcher] in
+spaces.toml, or WB_UPDATE_CHECK=off. An unreadable config turns it off too: we can't tell
+it's allowed.
+
+Env seams: WB_UPDATE_HOME (the checkout), WB_UPDATE_CACHE, WB_UPDATE_FOREGROUND=1 (look
+inline, for tests), WB_LAUNCH_AGENTS_DIR, WORKBENCH_CONFIG.
+"""
+import json
+import os
+import re
+import subprocess
+import sys
+import time
+
+DAY = 86400
+TIMEOUT = 5
+GIT_ENV = {"GIT_TERMINAL_PROMPT": "0", "GIT_SSH_COMMAND": "ssh -o BatchMode=yes -o ConnectTimeout=5"}
+
+
+def home():
+    return os.environ.get("WB_UPDATE_HOME") or os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
+
+
+def cache_path():
+    return os.environ.get("WB_UPDATE_CACHE") or os.path.expanduser("~/.cache/workbench/update.json")
+
+
+def parse(v):
+    """'0.2' or 'v0.2' -> (0, 2); anything else -> None."""
+    m = re.fullmatch(r"v?(\d+(?:\.\d+)*)", (v or "").strip())
+    return tuple(int(p) for p in m.group(1).split(".")) if m else None
+
+
+def installed(h=None):
+    try:
+        with open(os.path.join(h or home(), "VERSION")) as f:
+            return f.read().strip()
+    except OSError:
+        return None
+
+
+def check_allowed():
+    if os.environ.get("WB_UPDATE_CHECK", "").lower() in ("off", "0", "false", "no"):
+        return False
+    path = os.environ.get("WORKBENCH_CONFIG") or os.path.expanduser("~/.config/workbench/spaces.toml")
+    if not os.path.exists(path):
+        return True
+    try:
+        import tomllib
+        with open(path, "rb") as f:
+            cfg = tomllib.load(f)
+        return cfg.get("launcher", {}).get("update_check", True) is not False
+    except Exception:
+        return False
+
+
+def git(*args, cwd=None, timeout=None, capture=True):
+    return subprocess.run(["git", *args], cwd=cwd or home(), timeout=timeout, text=True,
+                          env={**os.environ, **GIT_ENV}, stdin=subprocess.DEVNULL,
+                          stdout=subprocess.PIPE if capture else None,
+                          stderr=subprocess.PIPE if capture else None)
+
+
+def read_cache():
+    try:
+        with open(cache_path()) as f:
+            d = json.load(f)
+        return d if isinstance(d, dict) and isinstance(d.get("checked"), (int, float)) else {}
+    except (OSError, ValueError):
+        return {}
+
+
+def write_cache(d):
+    p = cache_path()
+    try:
+        os.makedirs(os.path.dirname(p), exist_ok=True)
+        tmp = f"{p}.{os.getpid()}.tmp"
+        with open(tmp, "w") as f:
+            json.dump(d, f)
+        os.replace(tmp, p)  # several tabs can start at once (restore): never a half-written cache
+    except OSError:
+        pass
+
+
+def latest_release():
+    """The highest vX.Y tag on origin, or None when it can't tell."""
+    try:
+        r = git("ls-remote", "--tags", "--refs", "origin", "v*", timeout=TIMEOUT)
+    except (OSError, subprocess.SubprocessError):
+        return None
+    if r.returncode != 0:
+        return None
+    best = None
+    for line in r.stdout.splitlines():
+        tag = line.rpartition("refs/tags/")[2]
+        v = parse(tag)
+        if v and (best is None or v > best):
+            best = v
+    return ".".join(map(str, best)) if best else None
+
+
+def refresh():
+    d = read_cache()
+    latest = latest_release()
+    write_cache({"checked": int(time.time()), "latest": latest or d.get("latest")})
+
+
+def notice(color):
+    if not check_allowed():
+        return
+    d = read_cache()
+    if time.time() - d.get("checked", 0) >= DAY:
+        if os.environ.get("WB_UPDATE_FOREGROUND"):
+            refresh()
+            d = read_cache()
+        else:
+            # Claim today's look first, so tabs opening together don't all spawn one. The look
+            # itself runs detached from our stdout: the launcher reads us through $(...) and
+            # would otherwise wait out the network.
+            write_cache({**d, "checked": int(time.time())})
+            try:
+                subprocess.Popen([sys.executable, os.path.realpath(__file__), "--refresh"],
+                                 stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+                                 stderr=subprocess.DEVNULL, start_new_session=True)
+            except OSError:
+                pass
+    have, latest = parse(installed()), parse(d.get("latest"))
+    if have and latest and latest > have:
+        text = f"workbench {d['latest']} available: wb-update"
+        print(f"\033[33m{text}\033[0m" if color else text)
+
+
+def changes_since(h, old):
+    """CHANGELOG.md's sections for versions newer than old, as written."""
+    try:
+        with open(os.path.join(h, "CHANGELOG.md")) as f:
+            text = f.read()
+    except OSError:
+        return ""
+    have = parse(old)
+    out, keep = [], False
+    for line in text.splitlines():
+        m = re.match(r"## +(\S+)", line)
+        if m:
+            v = parse(m.group(1))
+            keep = bool(v and (have is None or v > have))
+        if keep:
+            out.append(line)
+    return "\n".join(out).strip()
+
+
+def schedule_installed():
+    agents = os.environ.get("WB_LAUNCH_AGENTS_DIR") or os.path.expanduser("~/Library/LaunchAgents")
+    return any(os.path.exists(os.path.join(agents, f"workbench.{n}.plist")) for n in ("groom", "restore-save"))
+
+
+def update():
+    h = home()
+    def refuse(msg):
+        print(f"wb-update: {msg}", file=sys.stderr)
+        return 1
+    r = git("rev-parse", "--is-inside-work-tree", cwd=h) if os.path.isdir(h) else None
+    if not r or r.returncode != 0:
+        return refuse(f"{h} is not a git checkout; update it by hand (git clone, then ./install.sh).")
+    if git("symbolic-ref", "-q", "HEAD", cwd=h).returncode != 0:
+        return refuse(f"{h} is not on a branch (detached HEAD); git checkout main there, then run wb-update again.")
+    dirty = git("status", "--porcelain", "--untracked-files=no", cwd=h).stdout.strip()
+    if dirty:
+        return refuse(f"{h} has local changes; commit or stash them (or git checkout -- <file>), then run wb-update again.\n{dirty}")
+    old, before = installed(h), git("rev-parse", "HEAD", cwd=h).stdout.strip()
+    pull = git("pull", "--ff-only", "--quiet", cwd=h, capture=False)
+    if pull.returncode != 0:
+        return refuse(f"git pull --ff-only failed in {h}; nothing changed. Sort it out there, then run wb-update again.")
+    if git("rev-parse", "HEAD", cwd=h).stdout.strip() == before:
+        print(f"workbench {old or '(unknown version)'} is up to date.")
+        return 0
+    # install.sh re-links new commands; keep the schedule only if it was installed before
+    cmd = [os.path.join(h, "install.sh")] + ([] if schedule_installed() else ["--no-schedule"])
+    if subprocess.run(cmd, cwd=h).returncode != 0:
+        return refuse("install.sh failed (above); the code is pulled. Fix it and re-run ./install.sh.")
+    new = installed(h)
+    print()
+    if new != old:
+        print(f"workbench {old or '?'} → {new}")
+        news = changes_since(h, old)
+        if news:
+            print(f"\nWhat's new:\n\n{news}")
+    else:
+        print(f"workbench {new}: pulled the latest fixes (no new release).")
+    print("\nOpen a new tab to use the new launcher.")
+    return 0
+
+
+def main(argv):
+    if argv[:1] == ["--version"]:
+        print(installed() or "unknown")
+        return 0
+    if argv[:1] == ["--notice"]:
+        try:
+            notice("--color" in argv[1:])
+        except Exception:
+            pass  # the notice must never get in the launcher's way
+        return 0
+    if argv[:1] == ["--refresh"]:
+        if check_allowed():
+            refresh()
+        return 0
+    if argv in ([], ["update"]):
+        return update()
+    print(__doc__.strip().split("\n\n")[1], file=sys.stderr)
+    return 2
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv[1:]))

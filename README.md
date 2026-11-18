@@ -77,6 +77,19 @@ the tab that needs you (see [While you work](#while-you-work)); planning rituals
   backlog. **This uses your Claude account's usage**, on that space's Claude profile. With no plans
   set up, it grooms nothing and uses nothing.
 
+The launcher also looks for **a new version**, at most once a day: in the background it asks the
+repo you cloned from (GitHub) for its release tags (`git ls-remote`), with a 5-second timeout,
+and says nothing if that fails. Nothing about you or your spaces is sent. When a newer release
+is out, its first screen says `workbench 0.2 available: wb-update`. Turn the look off with
+`update_check = false` under `[launcher]` in `spaces.toml`.
+
+### Updating
+
+`wb-update` brings you to the latest version: it pulls (fast-forward only), re-runs
+`install.sh` (keeping the schedule if you installed it) and shows what changed since your
+version, from `CHANGELOG.md`. It refuses, changing nothing, when your checkout has local
+changes or isn't on a branch. `wb-update --version` prints the installed version.
+
 ## Daily use
 
 - **New window or tab:** the launcher opens by itself. Pick a space, then a bead or
@@ -241,6 +254,7 @@ never in this repo. `spaces.example.toml` documents every key. In short:
 | `safe` | Keep Claude's permission prompts on. |
 | `color` | `red`, `orange`, `yellow`, `green`, `blue`, `purple` or `brown`: the space's colour in tab titles and the status line (see `wb-statusline-space`). |
 | `folder_colors` | A glob space only: colours for some of its folders, like `{ alpha = "red" }`; the rest keep its `color`. |
+| `[launcher]` `update_check` | `false`: never look for a new version (see [What runs on its own](#what-runs-on-its-own)). |
 | `judge_env` | Variables the grooming judge needs beyond its allowlist (a proxy, Bedrock), with their values. |
 | `gh_account` | The `gh` account to switch to before fetching. |
 | `on_create`, `before_end` | Hooks: one-line shell commands, run in the worktree with `WB_SPACE`, `WB_WORKTREE`, `WB_PROJECT`, `WB_SOURCE`, `WB_BRANCH`, `WB_BEAD` set, and `WB_SHA` for `before_end`. Keep private setup scripts in `~/.config/workbench/hooks/`. |
@@ -256,6 +270,11 @@ scripts/check-leaks.sh   # before any push: no private names in files, history o
 Changes go through pull requests: work on a branch (the launcher gives each session its own
 worktree), push it and open a pull request. GitHub runs `tests/run.sh` on macOS for every pull
 request, and `main` only takes a merge with green tests.
+
+Releasing: in a pull request, bump `VERSION` (`X.Y`) and add a `## X.Y — <date>` section to the top
+of `CHANGELOG.md` saying what changed for users (a test keeps the two in step). Once it's merged,
+tag the merge and push the tag: `git tag vX.Y <sha> && git push origin vX.Y`. Within a day every
+launcher on an older version shows the notice.
 
 Designs and plans are in `docs/specs/` and `docs/plans/`.
 
