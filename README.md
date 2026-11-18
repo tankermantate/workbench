@@ -11,6 +11,9 @@ Terminal opens
   → Claude starts there, with an opening prompt
 ```
 
+New to workbench? [Getting started](docs/getting-started.md) walks you through the whole loop:
+install, plan in the Claude Desktop app, groom the backlog, then build the top task.
+
 ## What you need
 
 workbench is a launcher around tools you install and sign in to yourself. It holds no keys and

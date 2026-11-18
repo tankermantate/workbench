@@ -224,7 +224,7 @@ wb-kvx.1) closed in November 2026 for the Desktop app and moved to "What works t
 | 2 | See the roadmap visually, anywhere | Nothing | A roadmap view (a published Claude artifact) that reads and writes your tasks | wb-kvx.2 |
 | 3 | Areas → initiatives → epics → tasks | Spaces (with a group), beads with parent epics | An initiative layer and a roll-up view across spaces | wb-kvx.3 |
 | 4 | Ten-minute guided setup | `wb-setup` checks and installs the tools, asks about your projects, writes the config, runs `bd init`, offers a demo space and ends with `wb-doctor` | Its "connect Claude" step now runs `wb-mcp connect` (gap 1 shipped); the ten minutes, for a person, hasn't been timed | wb-kvx.4 |
-| 5 | Usable by non-developers | A README written for developers | A plain-language guide, a glossary (space, bead, worktree), screenshots or a short recording | wb-kvx.5 |
+| 5 | Usable by non-developers | A README written for developers, and a getting-started guide through the plan, groom and build loop (`docs/getting-started.md`) | A glossary (space, bead, worktree), screenshots or a short recording, and the guide tried by someone new to workbench | wb-kvx.5 |
 | 6 | Shape before building, with done-when | "Something new" shapes an idea into a bead | A light spec and acceptance-criteria step that stays optional | wb-kvx.6 |
 | 7 | Shipping, not just coding | Worktree per task, gated close-out, merge left to you | Pull request, CI status and merge in the flow; squash-merged branches still read as unmerged (wb-e8p, wb-7pq) | wb-kvx.7 |
 | 8 | Suggests rather than insists | Mostly suggests; strict only where work could be lost | One setting from "vibe" to "strict" that every prompt respects | wb-kvx.8 |
