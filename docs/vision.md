@@ -110,8 +110,9 @@ weekly review, and only for areas where you've set goals; you can turn it off.
 
 **Where does my data live?**
 On your machine, in each project's own task store (beads). Workbench sends nothing anywhere
-except to Claude, the same way any Claude session does, and a once-a-day check with GitHub for a
-newer version, which you can turn off. Beads itself sends anonymous usage metrics (which
+except to Claude, the same way any Claude session does, a once-a-day check with GitHub for a
+newer version, which you can turn off, and, when you close out a branch that isn't in your main
+branch's history, a question to GitHub through your own `gh` about whether a pull request merged it. Beads itself sends anonymous usage metrics (which
 commands run, never your tasks); `bd metrics off` stops them, and setup says so. Workbench has
 no server and no account. The one exception is the optional roadmap view you can open anywhere: it is a page in your own Claude
 account, so it holds a copy of the tasks it shows.
@@ -232,7 +233,7 @@ part of the newcomer test of the getting-started guide (wb-kvx.21).
 | 3 | Areas → initiatives → epics → tasks | Spaces (with a group), beads with parent epics | An initiative layer and a roll-up view across spaces | wb-kvx.3 |
 | 5 | Usable by non-developers | A README written for developers, and a getting-started guide through the plan, groom and build loop (`docs/getting-started.md`) | A glossary (space, bead, worktree), screenshots or a short recording, and the guide tried by someone new to workbench | wb-kvx.5 |
 | 6 | Shape before building, with done-when | "Something new" shapes an idea into a bead | A light spec and acceptance-criteria step that stays optional | wb-kvx.6 |
-| 7 | Shipping, not just coding | Worktree per task, gated close-out, merge left to you | Pull request, CI status and merge in the flow; squash-merged branches still read as unmerged (wb-e8p, wb-7pq) | wb-kvx.7 |
+| 7 | Shipping, not just coding | Worktree per task, gated close-out that recognises squash merges, merge left to you | Pull request, CI status and merge in the flow | wb-kvx.7 |
 | 8 | Suggests rather than insists | Mostly suggests; strict only where work could be lost | One setting from "vibe" to "strict" that every prompt respects | wb-kvx.8 |
 | 9 | Sessions that keep their place | Restore, `wb-tabs`, `wb-tidy`, status lines, compaction recovery | A morning summary of what's in flight across everything | wb-kvx.9 |
 | 10 | A weekly rhythm | Weekly grooming, review, monthly strategy | Retro: what shipped this week against the goals | wb-kvx.10 |

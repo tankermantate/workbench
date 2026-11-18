@@ -15,8 +15,14 @@ A worktree is offered when all of these hold:
 
 - its repo is a `worktrees = true` space's (the space is picked as `end-session` picks it: the
   one whose key names the folder, else the first on that repo);
-- its branch is merged into the repo's default branch (local or `origin/`), checked by ancestry,
-  so a squash-merged branch reads as unmerged and is kept;
+- its branch is merged into the repo's default branch: an ancestor of it (local or `origin/`),
+  or squash-merged, which ancestry can't see. Squash-merged means `gh` reports a merged pull
+  request from the branch into the default branch whose head is exactly the branch's tip
+  (`lib/wb_merged.py`, shared with `end-session`). That's one `gh pr list` per repo, made only
+  when some branch isn't an ancestor, as the first space on the repo with a `gh_account` (a
+  token for the call, so gh's active account is left alone). The note says `squash-merged by
+  PR #N`. When `gh` can't answer (missing, logged out, slow), the branch stays unmerged and the
+  reason says gh couldn't check;
 - `git status --porcelain` is empty;
 - no live Claude session's folder is inside it (`lib/wb_live.py`, as `wb-tabs` and `wb-restore`
   find them; no `lsof`);

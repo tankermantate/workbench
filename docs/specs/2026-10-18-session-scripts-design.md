@@ -115,6 +115,16 @@ Changed:
     before_end check ran.` on stderr.
 - **`--base`** defaults to the repo's default branch, found exactly as `new-session` finds it, so a
   `master` repo's branches are recognised as merged.
+- **Squash merges** never put the branch's commits on the base, so ancestry alone calls them
+  unmerged forever. A `before_end` that checks a marker for the worktree's SHA then refuses
+  forever, and GitHub may have deleted the remote branch, which fails the push check. So, with
+  an `origin` and commits beyond the base, it asks `gh` (`lib/wb_merged.py`, shared with
+  `wb-tidy`, as the space's `gh_account` through a token for the call, bounded by
+  `WB_GH_TIMEOUT`). If there's a merged pull request from the branch into `<base>` whose head
+  is exactly the worktree's HEAD, the work is on the base: the push check and `before_end` are
+  skipped as for "nothing at risk", and the branch is deleted with the note `squash-merged into
+  <base> by PR #N`. Any commit beyond that PR's head, or `gh` failing, leaves the checks as
+  before.
 - **No `origin`**: no fetch and no unpushed check, and it says so in one line. "Nothing at risk"
   means every commit is on local `<base>`. An unmerged branch is kept, so no work is lost.
 - **Its bead** is the one `new-session` step 7 linked to this worktree (its `wb_worktree` metadata,

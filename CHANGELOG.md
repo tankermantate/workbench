@@ -4,6 +4,12 @@ What changed for you in each workbench release. Update with `wb-update`.
 
 ## Unreleased
 
+- `end-session` and `wb-tidy` recognise a branch squash-merged through a pull request. `gh` is
+  asked (as the space's `gh_account`) for a merged pull request from the branch into the default
+  branch whose head is the worktree's HEAD. When there is one, `wb-tidy` offers the worktree
+  (`squash-merged by PR #N`), and `end-session` deletes the branch without `--force`, skipping
+  the push check (GitHub may have deleted the remote branch) and `before_end` (the code is already
+  on the default branch). Without `gh`, or with a commit beyond the pull request, nothing changes.
 - Tell us how it's going: GitHub issue forms for a bug, an idea, and an opt-in "tell us your
   setup" (every question optional, nothing collected otherwise). Links are in the README.
 - `wb-setup`: a guided first run. From a fresh clone it checks your tools (offering Homebrew for
