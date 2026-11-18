@@ -159,7 +159,12 @@ else becomes a proposal for you to decide. Open a new tab: Demo shows `groomed <
 Pick Demo, then **✦ review <day>'s grooming**. Claude walks you through the summary one group at
 a time (what's due, the new sprint, the proposals) and applies what you accept. To put back
 something grooming applied, tell Claude: it undoes that bead exactly. When you've been through it
-all, Claude marks the run reviewed and the `review` note goes away.
+all, Claude marks the run reviewed.
+
+The first run, from step a, is still waiting for review too, and it comes
+back as `review` once this one is done. It ran before Demo had a plan, so there's nothing in it
+to decide: before you finish, ask Claude to mark it reviewed as well
+("mark the earlier grooming run reviewed too"). Then the `review` note goes away.
 
 From now on, if you said yes to the schedule in `install.sh`, grooming runs on its own every
 Saturday at 06:00 for each space with a plan. You only do step c's review. Once a month, or when
