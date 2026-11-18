@@ -148,9 +148,11 @@ app works, and a guided first run sets it all up.
   (which sessions are waiting on you); session restore after a restart; `wb-tidy` (end the
   finished worktrees); weekly unattended grooming with a review, and a monthly strategy session;
   a "time to restart" hint; a guided first run (`wb-setup`: tools, your projects, the config,
-  `bd init`, a demo space, the `~/.zshrc` line) and a health check (`wb-doctor`); planning in the
-  Claude Desktop app against your real tasks (`wb-mcp connect`), seeing only the signed-in
-  account's spaces and keeping workbench's rules.
+  `bd init`, a demo space, the `~/.zshrc` line, connecting the Claude Desktop app) and a health
+  check (`wb-doctor`); planning in the Claude Desktop app against your real tasks
+  (`wb-mcp connect`), seeing only the signed-in account's spaces and keeping workbench's rules;
+  numbered releases with a changelog, a notice on the launcher's first screen when a new version
+  is out (a once-a-day check you can turn off), and `wb-update` to bring you current in one step.
 - **Partly there:** areas exist as *spaces* (with an optional group), and epics and tasks exist as
   beads, but there is no initiative layer or roll-up across spaces. Shaping before code exists,
   but there is no light spec or acceptance-criteria step.
@@ -216,14 +218,15 @@ week, and no longer finding forgotten sessions and worktrees.
 ## Gaps between this vision and today
 
 Each promise in the press release, what exists, and what closes the gap. All of them sit under the
-epic wb-kvx, with the launch post (wb-kvx.13), which waits for gaps 1 and 4. Gap 1 (plan in Claude,
-wb-kvx.1) closed in November 2026 for the Desktop app and moved to "What works today".
+epic wb-kvx, with the launch post (wb-kvx.13). Gaps 1, 4 and 13 closed in November 2026 and moved
+to "What works today": plan in Claude (wb-kvx.1, for the Desktop app), guided setup (wb-kvx.4) and
+update notices with `wb-update` (wb-kvx.14). Timing setup for a person, which gap 4 left open, is
+part of the newcomer test of the getting-started guide (wb-kvx.21).
 
 | # | Promise | Today | Gap | Bead |
 |---|---|---|---|---|
 | 2 | See the roadmap visually, anywhere | Nothing | A roadmap view (a published Claude artifact) that reads and writes your tasks | wb-kvx.2 |
 | 3 | Areas → initiatives → epics → tasks | Spaces (with a group), beads with parent epics | An initiative layer and a roll-up view across spaces | wb-kvx.3 |
-| 4 | Ten-minute guided setup | `wb-setup` checks and installs the tools, asks about your projects, writes the config, runs `bd init`, offers a demo space and ends with `wb-doctor` | Its "connect Claude" step now runs `wb-mcp connect` (gap 1 shipped); the ten minutes, for a person, hasn't been timed | wb-kvx.4 |
 | 5 | Usable by non-developers | A README written for developers, and a getting-started guide through the plan, groom and build loop (`docs/getting-started.md`) | A glossary (space, bead, worktree), screenshots or a short recording, and the guide tried by someone new to workbench | wb-kvx.5 |
 | 6 | Shape before building, with done-when | "Something new" shapes an idea into a bead | A light spec and acceptance-criteria step that stays optional | wb-kvx.6 |
 | 7 | Shipping, not just coding | Worktree per task, gated close-out, merge left to you | Pull request, CI status and merge in the flow; squash-merged branches still read as unmerged (wb-e8p, wb-7pq) | wb-kvx.7 |
@@ -232,7 +235,6 @@ wb-kvx.1) closed in November 2026 for the Desktop app and moved to "What works t
 | 10 | A weekly rhythm | Weekly grooming, review, monthly strategy | Retro: what shipped this week against the goals | wb-kvx.10 |
 | 11 | Anyone can try it | macOS and Apple Terminal only | Other terminals first; other systems not planned yet | wb-kvx.11 |
 | 12 | Hearing from users | No channel | Issue templates and a short "tell us your setup" form | wb-kvx.12 |
-| 13 | Always on the latest version | Users pull and re-run `install.sh` when they happen to notice | Numbered releases with a changelog, a once-a-day check that says when a new version is out, and a one-step `wb-update` | wb-kvx.14 |
 
 ## Keeping this true
 
@@ -240,4 +242,4 @@ This file is meant to be the source of the workbench space's own goals. Once it 
 space's `goals.md` (the private plan weekly grooming reads) names the promises above, so each
 Saturday the grooming run flags beads that serve no promise and promises with no beads. When a gap closes, its row moves into
 [What works today](#what-works-today) in the same commit. The launch post is cut from the press
-release once promises 1 and 4 work.
+release; promises 1 and 4, which it waited for, now work.
