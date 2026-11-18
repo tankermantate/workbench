@@ -256,6 +256,24 @@ wb-groom apply <run dir> <space root> --plan <plan dir> --proposal <n>   # one p
 Fresh template plans carry `date: YYYY-MM-DD` on purpose: until the first strategy session sets a
 real date, the plan counts as missing.
 
+## Plan in Claude Desktop
+
+Talk your plans through in the Claude Desktop app, against your real beads: ask what's in an epic,
+split it into tasks, sharpen a description, and the changes are in the launcher next time you open it.
+
+```bash
+wb-mcp connect      # quit Claude Desktop first; then open it again
+wb-mcp check        # which spaces Desktop can see, and whether it's connected
+wb-mcp disconnect   # take it out again
+```
+
+Desktop sees only the spaces of the account it's signed in as: a space belongs to the account its
+`claude_config` is logged in to (`~/.claude.json` without one). Sign Desktop in to another account
+and it sees that account's spaces instead. Claude can file, refine and link beads there; it can't
+close, claim or defer them, can't change grooming's labels (`wave:1`, `wave:2`, `icebox`,
+`attention`), and can't lower a protected bead's priority. Spec:
+`docs/specs/2026-11-17-plan-in-claude-design.md`.
+
 ## Configuration
 
 Everything about your machine lives in `~/.config/workbench/spaces.toml` (or `$WORKBENCH_CONFIG`),

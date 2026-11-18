@@ -137,8 +137,8 @@ opening on them.
 
 ### What works today
 
-As of November 2026, the build side is real and in daily use; the Claude side is not built
-yet.
+As of November 2026, the build side is real and in daily use, planning in the Claude Desktop
+app works, and a guided first run sets it all up.
 
 - **Works today:** the launcher in every new terminal tab (Apple Terminal), showing your spaces
   with ready-task counts, then the space's tasks with what's next and what needs attention;
@@ -148,22 +148,24 @@ yet.
   (which sessions are waiting on you); session restore after a restart; `wb-tidy` (end the
   finished worktrees); weekly unattended grooming with a review, and a monthly strategy session;
   a "time to restart" hint; a guided first run (`wb-setup`: tools, your projects, the config,
-  `bd init`, a demo space, the `~/.zshrc` line) and a health check (`wb-doctor`).
+  `bd init`, a demo space, the `~/.zshrc` line) and a health check (`wb-doctor`); planning in the
+  Claude Desktop app against your real tasks (`wb-mcp connect`), seeing only the signed-in
+  account's spaces and keeping workbench's rules.
 - **Partly there:** areas exist as *spaces* (with an optional group), and epics and tasks exist as
   beads, but there is no initiative layer or roll-up across spaces. Shaping before code exists,
   but there is no light spec or acceptance-criteria step.
-- **Not built:** planning in Claude (the headline of this release), so setup can't connect Claude
-  yet; anything after the commit (pull requests, CI status, release); a single "vibe to strict"
-  setting for how much workbench suggests.
+- **Not built:** planning in Claude on the web or phone (the roadmap view comes first); anything
+  after the commit (pull requests, CI status, release); a single "vibe to strict" setting for how
+  much workbench suggests.
 
 ### For us (internal)
 
 **What's the hardest part?**
-The Claude connection. Beads already ships an MCP server (`beads-mcp`) that the Claude Desktop
-app can use, with one server handling many projects, so the plumbing exists. The work is making it
-feel like one roadmap: workbench has to tell Claude which areas exist and where their stores are,
-keep Claude's edits inside the rules workbench uses (labels, epics, protected work), and do it
-without a setup step a non-developer would stumble on.
+The Claude connection. The work is making it feel like one roadmap: workbench has to tell Claude
+which areas exist, keep Claude's edits inside the rules workbench uses (labels, epics, protected
+work), and do it without a setup step a non-developer would stumble on. Beads ships its own MCP
+server (`beads-mcp`), but it takes any folder and can close, reopen and repair anything, so
+workbench runs its own small one (`wb-mcp`) that knows the spaces and keeps the rules.
 
 **One roadmap, or one per persona?** *(Decided, November 2026.)*
 One per persona. A persona is a Claude account; the Claude Desktop app is signed in to one at a
@@ -173,8 +175,8 @@ already starts each area on its own account. A view across personas (say, a rout
 several accounts) is a reasonable thing for someone to build later, but it is not needed now.
 
 **Why start with the Desktop app?**
-Because the plumbing for it exists: beads documents a Claude Desktop setup for `beads-mcp`, and
-one server can route requests to many projects. So the first version is Desktop. A roadmap page you can open anywhere (a published Claude artifact
+Because a local server is enough there: the Desktop app runs one on your Mac, so your tasks
+never leave it. So the first version is Desktop. A roadmap page you can open anywhere (a published Claude artifact
 that syncs with your tasks) is the likely second step. Putting your tasks on a hosted server so
 the web can reach them is not planned: it breaks "your data stays with you".
 
@@ -214,14 +216,14 @@ week, and no longer finding forgotten sessions and worktrees.
 ## Gaps between this vision and today
 
 Each promise in the press release, what exists, and what closes the gap. All of them sit under the
-epic wb-kvx, with the launch post (wb-kvx.13), which waits for gaps 1 and 4.
+epic wb-kvx, with the launch post (wb-kvx.13), which waits for gaps 1 and 4. Gap 1 (plan in Claude,
+wb-kvx.1) closed in November 2026 for the Desktop app and moved to "What works today".
 
 | # | Promise | Today | Gap | Bead |
 |---|---|---|---|---|
-| 1 | Plan in Claude, against your real tasks | Nothing: tasks are only reachable from the terminal | Connect the Claude Desktop app to every space's beads (via `beads-mcp`), tell Claude what spaces exist, and keep its edits within workbench's rules; one roadmap per persona, showing only that persona's areas | wb-kvx.1 |
 | 2 | See the roadmap visually, anywhere | Nothing | A roadmap view (a published Claude artifact) that reads and writes your tasks | wb-kvx.2 |
 | 3 | Areas → initiatives → epics → tasks | Spaces (with a group), beads with parent epics | An initiative layer and a roll-up view across spaces | wb-kvx.3 |
-| 4 | Ten-minute guided setup | `wb-setup` checks and installs the tools, asks about your projects, writes the config, runs `bd init`, offers a demo space and ends with `wb-doctor` | Its "connect Claude" step runs `wb-mcp connect` once gap 1 ships; until then it says planning in Claude isn't in this version | wb-kvx.4 |
+| 4 | Ten-minute guided setup | `wb-setup` checks and installs the tools, asks about your projects, writes the config, runs `bd init`, offers a demo space and ends with `wb-doctor` | Its "connect Claude" step now runs `wb-mcp connect` (gap 1 shipped); the ten minutes, for a person, hasn't been timed | wb-kvx.4 |
 | 5 | Usable by non-developers | A README written for developers | A plain-language guide, a glossary (space, bead, worktree), screenshots or a short recording | wb-kvx.5 |
 | 6 | Shape before building, with done-when | "Something new" shapes an idea into a bead | A light spec and acceptance-criteria step that stays optional | wb-kvx.6 |
 | 7 | Shipping, not just coding | Worktree per task, gated close-out, merge left to you | Pull request, CI status and merge in the flow; squash-merged branches still read as unmerged (wb-e8p, wb-7pq) | wb-kvx.7 |
