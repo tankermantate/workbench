@@ -30,8 +30,9 @@ if [ -n "$revs" ]; then
     found=1
   fi
 fi
-# The bead store syncs to the remote too. With no remote nothing carries it yet,
-# so a finding only warns; once a remote is set, it (or a store we can't scan) fails.
+# The bead store syncs to the remote too. With no remote, or a git remote and bd's no-push on,
+# nothing carries it yet, so a finding only warns; once it would be published, it (or a store we
+# can't scan) fails.
 # The store is untracked, so only the main checkout has it, whichever worktree runs this.
 beads_note=""
 if [ "${WB_LEAK_SKIP_BEADS:-}" = 1 ]; then
@@ -55,7 +56,7 @@ if [ "$found" -eq 1 ]; then
 fi
 n="$(wc -l < "$terms" | tr -d ' ')"
 if [ "$beads_note" = 1 ]; then
-  echo "check-leaks: files + history + commit messages clean ($n terms checked), but the bead db is NOT (lines above). No remote is set, so nothing carries it yet: scrub it before adding one."
+  echo "check-leaks: files + history + commit messages clean ($n terms checked), but the bead db is NOT (lines above). Nothing publishes it yet (no remote, or bd's no-push is on): scrub it before that changes."
 else
   echo "check-leaks: clean ($n terms checked, files + history + commit messages$beads_note)"
 fi
