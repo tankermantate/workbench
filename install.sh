@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Link bin/*'s commands into ~/.local/bin (dropping our links to ones that are gone), install
 # the launch agents (weekly grooming; the restore snapshot every 10 minutes), and print the
-# line to add to ~/.zshrc. Idempotent. Never edits ~/.zshrc and never replaces a file it didn't
+# line to add to ~/.zshrc (and, before there's a spaces.toml, point at wb-setup). Idempotent. Never edits ~/.zshrc and never replaces a file it didn't
 # create (the launch agents are ours: re-running rewrites them).
 #   --no-schedule   skip the launch agents
 # WORKBENCH_DRY_RUN=1 prints the launchctl commands instead of running them;
@@ -107,6 +107,12 @@ command -v fzf >/dev/null || echo "note: fzf not found; the launcher will use a 
 command -v bd  >/dev/null || echo "note: bd not found; spaces will show (bd not installed)."
 python3 -c 'import sys; sys.exit(sys.version_info < (3, 11))' || echo "note: python3 >= 3.11 is required."
 line="source \"$here/shell/workbench.zsh\""
+if [ ! -e "${WORKBENCH_CONFIG:-$HOME/.config/workbench/spaces.toml}" ]; then
+  # a first install: the guided setup does the rest (spaces, backlogs, this line)
+  echo
+  echo "Next: run $here/bin/wb-setup"
+  echo "  It asks about your projects, writes the config, gives each a backlog and adds the line below."
+fi
 if grep -qF "$line" "${ZDOTDIR:-$HOME}/.zshrc" 2>/dev/null; then
   echo "~/.zshrc already sources workbench."
 else

@@ -1,0 +1,23 @@
+#!/usr/bin/env python3
+"""wb-doctor — is this machine ready for the launcher?
+
+  wb-doctor     one line per check: ok, -- (optional, or a note), !! (to fix, with how)
+
+Exit 1 when anything needs fixing. wb-setup runs it last. Checks: python3 >= 3.11, git, claude,
+bd, fzf, the commands linked by install.sh, the ~/.zshrc line, the schedule, spaces.toml and
+each space's folder and backlog, and Claude Desktop when this version has wb-mcp.
+Runs on macOS's own python 3.9 too, so it can say that python is too old.
+"""
+import os
+import sys
+
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.realpath(__file__)), "..", "lib"))
+import wb_doctor  # noqa: E402
+
+if __name__ == "__main__":
+    if sys.argv[1:] in (["-h"], ["--help"]):
+        print(__doc__.strip())
+        sys.exit(0)
+    if sys.argv[1:]:
+        sys.exit("usage: wb-doctor")
+    sys.exit(wb_doctor.report(wb_doctor.checks()))

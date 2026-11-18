@@ -109,10 +109,11 @@ plan, the same as using Claude yourself. The one thing that uses Claude on a sch
 weekly review, and only for areas where you've set goals; you can turn it off.
 
 **Where does my data live?**
-On your machine, in each project's own task store (beads). Nothing is sent anywhere except to
-Claude, the same way any Claude session does, and a once-a-day check with GitHub for a newer
-version, which you can turn off. Workbench has no server and no account. The one
-exception is the optional roadmap view you can open anywhere: it is a page in your own Claude
+On your machine, in each project's own task store (beads). Workbench sends nothing anywhere
+except to Claude, the same way any Claude session does, and a once-a-day check with GitHub for a
+newer version, which you can turn off. Beads itself sends anonymous usage metrics (which
+commands run, never your tasks); `bd metrics off` stops them, and setup says so. Workbench has
+no server and no account. The one exception is the optional roadmap view you can open anywhere: it is a page in your own Claude
 account, so it holds a copy of the tasks it shows.
 
 **What do I need?**
@@ -136,8 +137,8 @@ opening on them.
 
 ### What works today
 
-As of November 2026, the build side is real and in daily use, and planning in the Claude Desktop
-app works; onboarding is not built yet.
+As of November 2026, the build side is real and in daily use, planning in the Claude Desktop
+app works, and a guided first run sets it all up.
 
 - **Works today:** the launcher in every new terminal tab (Apple Terminal), showing your spaces
   with ready-task counts, then the space's tasks with what's next and what needs attention;
@@ -146,13 +147,16 @@ app works; onboarding is not built yet.
   that refuses to lose work; status lines showing the session's task and space; `wb-tabs`
   (which sessions are waiting on you); session restore after a restart; `wb-tidy` (end the
   finished worktrees); weekly unattended grooming with a review, and a monthly strategy session;
-  a "time to restart" hint; planning in the Claude Desktop app against your real tasks
-  (`wb-mcp connect`), seeing only the signed-in account's spaces and keeping workbench's rules.
+  a "time to restart" hint; a guided first run (`wb-setup`: tools, your projects, the config,
+  `bd init`, a demo space, the `~/.zshrc` line) and a health check (`wb-doctor`); planning in the
+  Claude Desktop app against your real tasks (`wb-mcp connect`), seeing only the signed-in
+  account's spaces and keeping workbench's rules.
 - **Partly there:** areas exist as *spaces* (with an optional group), and epics and tasks exist as
   beads, but there is no initiative layer or roll-up across spaces. Shaping before code exists,
   but there is no light spec or acceptance-criteria step.
-- **Not built:** planning in Claude on the web or phone (the roadmap view comes first); guided setup; anything after
-  the commit (pull requests, CI status, release); a single "vibe to strict" setting for how much workbench suggests.
+- **Not built:** planning in Claude on the web or phone (the roadmap view comes first); anything
+  after the commit (pull requests, CI status, release); a single "vibe to strict" setting for how
+  much workbench suggests.
 
 ### For us (internal)
 
@@ -219,7 +223,7 @@ wb-kvx.1) closed in November 2026 for the Desktop app and moved to "What works t
 |---|---|---|---|---|
 | 2 | See the roadmap visually, anywhere | Nothing | A roadmap view (a published Claude artifact) that reads and writes your tasks | wb-kvx.2 |
 | 3 | Areas → initiatives → epics → tasks | Spaces (with a group), beads with parent epics | An initiative layer and a roll-up view across spaces | wb-kvx.3 |
-| 4 | Ten-minute guided setup | Clone, run a script, hand-edit a config file, `bd init` per project | A guided first run that asks about your projects and writes the config; a health check; a demo space | wb-kvx.4 |
+| 4 | Ten-minute guided setup | `wb-setup` checks and installs the tools, asks about your projects, writes the config, runs `bd init`, offers a demo space and ends with `wb-doctor` | Its "connect Claude" step now runs `wb-mcp connect` (gap 1 shipped); the ten minutes, for a person, hasn't been timed | wb-kvx.4 |
 | 5 | Usable by non-developers | A README written for developers | A plain-language guide, a glossary (space, bead, worktree), screenshots or a short recording | wb-kvx.5 |
 | 6 | Shape before building, with done-when | "Something new" shapes an idea into a bead | A light spec and acceptance-criteria step that stays optional | wb-kvx.6 |
 | 7 | Shipping, not just coding | Worktree per task, gated close-out, merge left to you | Pull request, CI status and merge in the flow; squash-merged branches still read as unmerged (wb-e8p, wb-7pq) | wb-kvx.7 |
