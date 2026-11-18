@@ -183,6 +183,13 @@ if command -v dolt >/dev/null; then
   git -C "$T/beady" worktree remove "$T/beady-groom"
 
   git -C "$T/beady" remote add origin "$T/nowhere.git"
+  # bd's no-push keeps the store off the git remote, so a finding only warns, as with no remote.
+  printf 'sync-branch: main\nno-push: true\n' > "$T/beady/.beads/config.yaml"
+  out="$(leaks)"; rc=$?
+  assert_eq "bead db: a git remote with bd no-push on only warns" "$rc" "0"
+  assert_contains "bead db: and says why it's only a warning" "$out" "no-push"
+  assert_contains "bead db: still names the bead" "$out" "wb-2"
+  rm "$T/beady/.beads/config.yaml"
   out="$(leaks)"; rc=$?
   assert_eq "bead db: leak with a git remote fails" "$rc" "1"
   dq "update issues set title = 'invoice the client' where id = 'wb-2'" "scrub"
@@ -194,6 +201,10 @@ if command -v dolt >/dev/null; then
   (cd "$db" && dolt remote add backup "file://$T/doltremote")
   out="$(leaks)"; rc=$?
   assert_eq "bead db: a dolt remote counts as a remote" "$rc" "1"
+  printf 'no-push: true\n' > "$T/beady/.beads/config.yaml"
+  out="$(leaks)"; rc=$?
+  assert_eq "bead db: no-push doesn't excuse a dolt remote (bd dolt push publishes to it)" "$rc" "1"
+  rm "$T/beady/.beads/config.yaml"
 
   out="$(WB_DOLT="$T/no-dolt" leaks)"; rc=$?
   assert_eq "bead db: can't scan with a remote fails closed" "$rc" "1"

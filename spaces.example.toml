@@ -6,6 +6,9 @@
 terminals = []
 # Space names that are ordinary words, which check-leaks.sh should not flag.
 leak_allow = []
+# Once a day the launcher asks the repo you cloned workbench from (GitHub) for its release
+# tags, to say when a newer version is out. false: never ask.
+# update_check = true
 
 # A space whose sessions each get their own git worktree, via a session command.
 [[space]]

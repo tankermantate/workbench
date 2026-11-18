@@ -77,21 +77,23 @@ The managed Beads block is task-tracking guidance, not permission to override re
 - **Minimal**: Keep tool instruction files as pointers to `bd prime`; use the same conservative git policy unless active instructions say otherwise.
 - **Team-maintainer**: Only when the repository explicitly opts in, agents may close beads, run quality gates, commit, and push as part of session close. A current "do not commit" or "do not push" instruction still wins.
 
-## This Repository's Profile: Team-maintainer, Push After Each Bead
+## This Repository's Profile: Team-maintainer, Branches and Pull Requests
 
-This repository opts in to the Team-maintainer profile: agents commit finished, tested work when they close a bead, then push it to `origin` (public on GitHub), once the leak check is clean. This is the "repository profile" bd's conservative default defers to, so it overrides `bd prime`'s "Git authority: no git operations" line. A current "do not commit" from the user still wins.
+This repository opts in to the Team-maintainer profile: agents commit finished, tested work when they close a bead, push the session's branch and open a pull request. `main` changes only through a merged pull request with green CI (GitHub enforces it); merging is the owner's call. This is the "repository profile" bd's conservative default defers to, so it overrides `bd prime`'s "Git authority: no git operations" line. A current "do not commit" from the user still wins.
+
+Every session works on its own branch in its own worktree: the workbench space has `worktrees = true`, so the launcher and `new-session` make one. If you find yourself on `main` in the main checkout, don't commit there: make a worktree with `new-session <bead-id>` and carry the work over.
 
 Closing a bead, in order. Stop at the first failure and report it; don't commit around it.
 
 1. `tests/run.sh`: every suite reports 0 failed.
 2. `bd close <id> --reason="<what shipped; what did not>"`, with no private names (bead text stays local, but keep it shareable).
 3. `git status`, then stage by name the files the work touched. Never `git add -A` or `git add .`; leave out anything dirty you didn't change, and say so.
-4. One commit per bead on the current branch (main is fine), message `<type>: <summary> (<bead-id>)` like `git log`, a body saying why, and the co-author trailer.
+4. One commit per bead on the session's branch (never `main`), message `<type>: <summary> (<bead-id>)` like `git log`, a body saying why, and the co-author trailer.
 5. `scripts/check-leaks.sh`: clean, the bead db included (with a remote set, a bead-db finding fails too). If the new commit leaks, `git reset --soft HEAD~1`, fix it, commit again.
-6. `git push origin <branch>`, a plain push. If it's rejected, stop and report it; don't pull, rebase or force. Never push when step 5 found anything.
-7. Hand off: the commit hash, test and leak results, the push, what's left open.
+6. `git push -u origin HEAD`, then `gh pr create --fill` (or add commits to the branch's open pull request). Never push when step 5 found anything. If a push is rejected, stop and report it; don't pull, rebase or force.
+7. Hand off: the commit hash, test and leak results, the pull request link, what's left open. Once the owner merges it, `end-session` removes the worktree.
 
-Never: `bd dolt push` (the bead db stays local; `no-push` is on), a force push, amend, rebase or force anything already committed, `--no-verify`, or a commit with failing tests. In a worktree session, commit on its branch and push that branch; merging to main is still the user's call, and `end-session` waits for it.
+Never: commit or push to `main`, `bd dolt push` (the bead db stays local; `no-push` is on), a force push, amend, rebase or force anything already pushed, `--no-verify`, merge your own pull request unless the owner asks, or a commit with failing tests.
 
 ## Session Completion
 
@@ -165,6 +167,7 @@ User guide: `README.md`. Designs: `docs/specs/` (launcher, session scripts, sess
 - `bin/wb-restore` (python) saves every live session and, after a restart, queues them; each new tab's launcher claims one and resumes it with `claude --resume`. `lib/launchd/workbench.restore-save.plist.in` saves every 10 minutes. `lib/wb_live.py` is the live-session lookup (ps and Claude's pid files) it shares with `wb-tabs` and `wb-tidy`.
 - `bin/wb-tidy` (python) lists every worktree, offers the finished ones (merged, clean, no live session, bead closed; `--no-bead` adds those with none) and runs `end-session` on the ticked ones, stopping at the first refusal. Spec: `docs/specs/2026-11-16-wb-tidy-design.md`.
 - `bin/wb-mcp` (python) puts a persona's beads in the Claude Desktop app: an MCP server on stdio (`serve`) limited to the spaces whose `claude_config` account is the one Desktop is signed in as, editing through `bd` under grooming's protected-work rules; `connect` / `check` / `disconnect` manage Desktop's config. Spec: `docs/specs/2026-11-17-plan-in-claude-design.md`.
+- `bin/wb-update` (python) is releases: `VERSION` and `CHANGELOG.md` say what's installed and what changed, a `vX.Y` tag on `main` is a release. `wb-update --notice` puts `workbench X.Y available: wb-update` on the launcher's first screen (cached, one background `git ls-remote` a day, fail-silent, off with `update_check = false`); `wb-update` pulls, re-runs `install.sh` and shows the changelog since your version. Spec: `docs/specs/2026-11-17-updates-design.md`.
 - `bin/new-session`, `bin/end-session` (bash) with `lib/session.sh` — worktree sessions for `worktrees = true` spaces; the space's private setup runs as `on_create` / `before_end` hooks from `spaces.toml`.
 - `bin/wb-groom` (python) with `lib/wb_groom.py` and `lib/wb_judge_bd.py` — planning rituals: weekly grooming (a read-only `claude -p` judge, then policy-checked apply through `bd` with an exact undo record), and the review and strategy sessions the launcher offers. Each space's plan is private, in `~/.config/workbench/plans/<space>/` (templates in `lib/plan-templates/`); runs are kept in `~/.local/state/workbench/groom/`. `lib/launchd/workbench.groom.plist.in` is the Saturday 06:00 agent `install.sh` writes.
 - `prompts/*.txt` — the opening prompts handed to Claude (`groom.txt`, `review.txt` and `strategy.txt` for the rituals).

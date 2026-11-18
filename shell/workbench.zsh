@@ -254,19 +254,28 @@ _wb_header() {
   print -r -- $1${health:+$'\n'$health}
 }
 
+# The first screen's header: _wb_header, then the new-version notice when there is one
+# (wb-update --notice answers from its cache; the once-a-day look runs in the background).
+_wb_first_header() {
+  local note
+  note=$($WORKBENCH_HOME/bin/wb-update --notice --color 2>/dev/null)
+  print -r -- "$(_wb_header $1)"${note:+$'\n'$note}
+}
+
 # Screen 1. Prints the chosen space's index; returns 1 to leave.
 _wb_screen_spaces() {
   local ui=$WORKBENCH_HOME/bin/wb-ui line rc
   if [[ -n ${WB_TEST_PICK_SPACE-} ]] || _wb_use_fzf; then
     line=$("$ui" render-spaces $tmp | _wb_fzf "${WB_TEST_PICK_SPACE-}" \
       --listen=0 --delimiter=$'\t' --with-nth=2,3 --nth=1 --exact --ignore-case --no-sort --track \
-      --layout=reverse --ansi --prompt='Space? › ' --header="$(_wb_header 'enter: choose · esc: plain shell')" \
+      --layout=reverse --ansi --prompt='Space? › ' --header="$(_wb_first_header 'enter: choose · esc: plain shell')" \
       --bind "start:execute-silent(${(q)ui} fill-counts ${(q)tmp} >/dev/null 2>&1 &)") || return 1
   else
     while true; do
       "$ui" fill-counts $tmp          # no fzf: wait for the counts (bounded by the bd timeout)
       "$ui" render-spaces $tmp > $tmp/spaces.menu
       $WORKBENCH_HOME/bin/wb-health >&2
+      $WORKBENCH_HOME/bin/wb-update --notice >&2 2>/dev/null
       line=$(_wb_menu $tmp/spaces.menu "Space?" 2); rc=$?
       (( rc == 2 )) && continue
       (( rc == 0 )) || return 1

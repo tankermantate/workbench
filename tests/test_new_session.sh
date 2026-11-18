@@ -15,7 +15,8 @@ mkdir -p "$A/app/.beads"; : > "$A/app/.beads/issues.jsonl"
 cat > "$A/.beads/fake.json" <<'EOF'
 [{"id":"acme-a1","title":"Fix the Login Page!","issue_type":"bug","status":"open"},
  {"id":"acme-a2","title":"Add CSV export","issue_type":"feature","status":"open"},
- {"id":"acme-a3","title":"Hook fails here","issue_type":"task","status":"open"}]
+ {"id":"acme-a3","title":"Hook fails here","issue_type":"task","status":"open"},
+ {"id":"acme-a4","title":"Home folder","issue_type":"task","status":"open"}]
 EOF
 git -C "$A" add app .beads; git -C "$A" commit -q -m app; git -C "$A" push -q
 # Beta: its own store, untracked; a safe space.
@@ -193,4 +194,9 @@ assert_contains "space in path: DRY-RUN line is quoted" "$(printf '%s\n' "$out" 
   "DRY-RUN: cd $(printf '%q' "$SW/acme-spaced/app") && env $(printf '%q' "CLAUDE_CONFIG_DIR=$T/cfg") WB_SPACE_ROOT=$A/app $(printf '%q' "WB_WORKTREE=$SW/acme-spaced") claude --settings "
 out="$(WB_WORKTREES_DIR="$SW" CLAUDECODE=1 "$NS" loc spaced too 2>&1)"
 assert_contains "space in path: nested guard's cd line is quoted" "$out" "cd $(printf '%q' "$SW/loc-spaced-too")"
+# --- the claim records the worktree with ~ for the home folder: the login name is a private word
+: > "$FAKE_BD_LOG"
+HOME="$T" "$NS" acme-a4 --space acme --no-launch >/dev/null 2>&1
+assert_contains "home folder: the claim note and link use ~" "$(cat "$FAKE_BD_LOG")" \
+  "(worktree at ~/wts/acme-home-folder) --set-metadata wb_worktree=~/wts/acme-home-folder"
 finish

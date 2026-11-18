@@ -206,7 +206,9 @@ It errors out of a Claude session, like `tabname`.
 worktree (`wb-backlog claimed`: the `wb_worktree` metadata, else the last claim note). So whenever a
 session is bound to a bead not linked to this worktree (the hook's pickup in a "something new"
 session, or `wb-focus`), it links it in the `new-session` form: the claim note `Branch: <branch>
-(worktree at <path>)` when no note names the worktree, and the metadata link. A bead with only the
+(worktree at <path>)` when no note names the worktree, and the metadata link. Both write the
+home folder as `~` (`~/.worktrees/...`): the login name in a full path is one of check-leaks'
+private words, and readers expand it back (`wb_session.home_full`). A bead with only the
 note (claimed before the link, or its link lost) gains the link this way. `wb-backlog
 claimed` then has to prefer, among the beads linked to the worktree, the one
 updated most recently (`updated_at`), not the first one listed. After "continue here" both the old
