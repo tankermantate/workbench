@@ -15,6 +15,7 @@
 #             (FAKE_BD_WARN=bracket: a '[warn] …' line, which looks like JSON)
 #   update    sleeps $FAKE_BD_UPDATE_SLEEP, exits $FAKE_BD_UPDATE_RC (default 0)
 #   list      with FAKE_BD_HIDE_CLOSED set, leaves out closed beads unless --all, as bd does
+#   list --parent P  only P's children (closed ones only with --all)
 # FAKE_BD_STATEFUL=1 makes writes real against that same .beads/fake.json (wb-groom's apply and
 # undo read back what they wrote): `update` handles --add-label, --remove-label, --append-notes,
 # --notes, --set-metadata K=V, -p/--priority, -s/--status and --defer, `close ID --reason R` sets status closed with
@@ -32,6 +33,52 @@ set -u
 [ "${1:-}" = --sandbox ] && shift
 if [ -n "${FAKE_BD_STATEFUL:-}" ]; then
   case "${1:-}" in
+    create|dep)
+      # create --title T [-d D] [-t TYPE] [-p N] [--parent P] [-l a,b] [--acceptance A] [--design D] --json:
+      # a new bead PREFIX-N (PREFIX from the store's first bead; a child is PARENT.N), as bd prints it.
+      # dep add ID DEP: appends DEP to ID's dependencies. Like bd, neither checks DEP is in the store.
+      d=$PWD
+      while [ ! -f "$d/.beads/fake.json" ] && [ "$d" != / ]; do d=$(dirname "$d"); done
+      python3 - "$d/.beads/fake.json" "$@" <<'PY'
+import json, sys
+path, cmd, *rest = sys.argv[1:]
+beads = json.load(open(path))
+if cmd == "dep":
+    _, bid, dep = rest
+    b = next((x for x in beads if x["id"] == bid), None)
+    if b is None:
+        print(f"Error: no issue found matching {bid!r}", file=sys.stderr); sys.exit(1)
+    b.setdefault("dependencies", []).append(dep)
+    json.dump(beads, open(path, "w"))
+    print(f"Added dependency: {bid} depends on {dep}")
+    sys.exit(0)
+flags = {"-d": "description", "--description": "description", "-t": "issue_type", "--type": "issue_type",
+         "-p": "priority", "--priority": "priority", "--parent": "parent", "-l": "labels", "--labels": "labels",
+         "--acceptance": "acceptance_criteria", "--design": "design", "--title": "title"}
+new = {"status": "open", "priority": 2, "issue_type": "task"}
+i = 0
+while i < len(rest):
+    a = rest[i]
+    if a == "--json": i += 1; continue
+    if a not in flags:
+        print(f"fake bd: unsupported flag {a}", file=sys.stderr); sys.exit(2)
+    new[flags[a]] = rest[i + 1]; i += 2
+if "labels" in new: new["labels"] = new["labels"].split(",")
+new["priority"] = int(str(new["priority"]).lstrip("P"))
+parent = new.get("parent")
+if parent:
+    if not any(b["id"] == parent for b in beads):
+        print(f"Error: parent issue {parent} not found", file=sys.stderr); sys.exit(1)
+    n = sum(1 for b in beads if b.get("parent") == parent) + 1
+    new["id"] = f"{parent}.{n}"
+else:
+    prefix = beads[0]["id"].split("-")[0] if beads else "x"
+    new["id"] = f"{prefix}-{100 + len(beads)}"
+beads.append(new)
+json.dump(beads, open(path, "w"))
+print(json.dumps(new))
+PY
+      exit $? ;;
     update|close|undefer)
       [ -z "${FAKE_BD_REQUIRE_FILE:-}" ] || [ -s "$FAKE_BD_REQUIRE_FILE" ] || { echo "Error: $FAKE_BD_REQUIRE_FILE not written yet" >&2; exit 9; }
       d=$PWD
@@ -87,6 +134,9 @@ while i < len(rest):
             b.pop("defer_until", None)
             if b.get("status") == "deferred": b["status"] = "open"
     elif flag == "--reason": b["close_reason"] = val()
+    elif flag in ("--title", "--description", "--design", "--parent"): b[flag[2:]] = val()
+    elif flag == "--acceptance": b["acceptance_criteria"] = val()
+    elif flag in ("-t", "--type"): b["issue_type"] = val()
     elif flag == "--set-metadata":
         k, _, v = val().partition("="); b.setdefault("metadata", {})[k] = v
     else:
@@ -128,6 +178,11 @@ PY
     *" --closed-after "*) if [ -f .beads/fake-closed.json ]; then cat .beads/fake-closed.json; else echo '[]'; fi; exit 0 ;;
   esac
   [ -f .beads/fake.json ] || exit 0
+  case " $* " in
+    *" --parent "*)   # list --parent P: P's children (closed ones too only with --all, as in bd)
+      python3 -c 'import json,sys; a=sys.argv[2:]; p=a[a.index("--parent")+1]; print(json.dumps([b for b in json.load(open(sys.argv[1])) if b.get("parent")==p and ("--all" in a or b.get("status")!="closed")]))' .beads/fake.json "$@"
+      exit 0 ;;
+  esac
   case "${FAKE_BD_HIDE_CLOSED:+hide} $* " in
     "hide "*" --all "*|"hide "*" --status "*|"hide "*" -s "*|" "*) cat .beads/fake.json ;;
     *) python3 -c 'import json,sys; print(json.dumps([b for b in json.load(open(sys.argv[1])) if b.get("status") != "closed"]))' .beads/fake.json ;;

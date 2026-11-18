@@ -156,11 +156,11 @@ not built yet.
 ### For us (internal)
 
 **What's the hardest part?**
-The Claude connection. Beads already ships an MCP server (`beads-mcp`) that the Claude Desktop
-app can use, with one server handling many projects, so the plumbing exists. The work is making it
-feel like one roadmap: workbench has to tell Claude which areas exist and where their stores are,
-keep Claude's edits inside the rules workbench uses (labels, epics, protected work), and do it
-without a setup step a non-developer would stumble on.
+The Claude connection. The work is making it feel like one roadmap: workbench has to tell Claude
+which areas exist, keep Claude's edits inside the rules workbench uses (labels, epics, protected
+work), and do it without a setup step a non-developer would stumble on. Beads ships its own MCP
+server (`beads-mcp`), but it takes any folder and can close, reopen and repair anything, so
+workbench runs its own small one (`wb-mcp`) that knows the spaces and keeps the rules.
 
 **One roadmap, or one per persona?** *(Decided, November 2026.)*
 One per persona. A persona is a Claude account; the Claude Desktop app is signed in to one at a
@@ -170,8 +170,8 @@ already starts each area on its own account. A view across personas (say, a rout
 several accounts) is a reasonable thing for someone to build later, but it is not needed now.
 
 **Why start with the Desktop app?**
-Because the plumbing for it exists: beads documents a Claude Desktop setup for `beads-mcp`, and
-one server can route requests to many projects. So the first version is Desktop. A roadmap page you can open anywhere (a published Claude artifact
+Because a local server is enough there: the Desktop app runs one on your Mac, so your tasks
+never leave it. So the first version is Desktop. A roadmap page you can open anywhere (a published Claude artifact
 that syncs with your tasks) is the likely second step. Putting your tasks on a hosted server so
 the web can reach them is not planned: it breaks "your data stays with you".
 
@@ -215,7 +215,7 @@ epic wb-kvx, with the launch post (wb-kvx.13), which waits for gaps 1 and 4.
 
 | # | Promise | Today | Gap | Bead |
 |---|---|---|---|---|
-| 1 | Plan in Claude, against your real tasks | Nothing: tasks are only reachable from the terminal | Connect the Claude Desktop app to every space's beads (via `beads-mcp`), tell Claude what spaces exist, and keep its edits within workbench's rules; one roadmap per persona, showing only that persona's areas | wb-kvx.1 |
+| 1 | Plan in Claude, against your real tasks | Nothing: tasks are only reachable from the terminal | Connect the Claude Desktop app to every space's beads (via workbench's own MCP server, `wb-mcp`), tell Claude what spaces exist, and keep its edits within workbench's rules; one roadmap per persona, showing only that persona's areas | wb-kvx.1 |
 | 2 | See the roadmap visually, anywhere | Nothing | A roadmap view (a published Claude artifact) that reads and writes your tasks | wb-kvx.2 |
 | 3 | Areas → initiatives → epics → tasks | Spaces (with a group), beads with parent epics | An initiative layer and a roll-up view across spaces | wb-kvx.3 |
 | 4 | Ten-minute guided setup | Clone, run a script, hand-edit a config file, `bd init` per project | A guided first run that asks about your projects and writes the config; a health check; a demo space | wb-kvx.4 |
