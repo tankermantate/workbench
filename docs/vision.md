@@ -152,7 +152,9 @@ app works, and a guided first run sets it all up.
   check (`wb-doctor`); planning in the Claude Desktop app against your real tasks
   (`wb-mcp connect`), seeing only the signed-in account's spaces and keeping workbench's rules;
   numbered releases with a changelog, a notice on the launcher's first screen when a new version
-  is out (a once-a-day check you can turn off), and `wb-update` to bring you current in one step.
+  is out (a once-a-day check you can turn off), and `wb-update` to bring you current in one step;
+  a way to tell us how it's going without telemetry: GitHub issue forms for bugs and ideas, and
+  an opt-in "tell us your setup" form.
 - **Partly there:** areas exist as *spaces* (with an optional group), and epics and tasks exist as
   beads, but there is no initiative layer or roll-up across spaces. Shaping before code exists,
   but there is no light spec or acceptance-criteria step.
@@ -197,7 +199,7 @@ them.
 
 **How will we know it's working?**
 Workbench has no telemetry and won't add any, so we ask: interviews with a handful of early
-users and the opt-in "tell us your setup" form (gap 12). We're listening for people still using
+users and the opt-in "tell us your setup" form. We're listening for people still using
 it four weeks later, running several areas rather than one, editing the roadmap in Claude each
 week, and no longer finding forgotten sessions and worktrees.
 
@@ -218,9 +220,10 @@ week, and no longer finding forgotten sessions and worktrees.
 ## Gaps between this vision and today
 
 Each promise in the press release, what exists, and what closes the gap. All of them sit under the
-epic wb-kvx, with the launch post (wb-kvx.13). Gaps 1, 4 and 13 closed in November 2026 and moved
-to "What works today": plan in Claude (wb-kvx.1, for the Desktop app), guided setup (wb-kvx.4) and
-update notices with `wb-update` (wb-kvx.14). Timing setup for a person, which gap 4 left open, is
+epic wb-kvx, with the launch post (wb-kvx.13). Gaps 1, 4, 12 and 13 closed in November 2026 and
+moved to "What works today": plan in Claude (wb-kvx.1, for the Desktop app), guided setup
+(wb-kvx.4), issue forms and the "tell us your setup" form (wb-kvx.12) and update notices with
+`wb-update` (wb-kvx.14). Timing setup for a person, which gap 4 left open, is
 part of the newcomer test of the getting-started guide (wb-kvx.21).
 
 | # | Promise | Today | Gap | Bead |
@@ -234,7 +237,6 @@ part of the newcomer test of the getting-started guide (wb-kvx.21).
 | 9 | Sessions that keep their place | Restore, `wb-tabs`, `wb-tidy`, status lines, compaction recovery | A morning summary of what's in flight across everything | wb-kvx.9 |
 | 10 | A weekly rhythm | Weekly grooming, review, monthly strategy | Retro: what shipped this week against the goals | wb-kvx.10 |
 | 11 | Anyone can try it | macOS and Apple Terminal only | Other terminals first; other systems not planned yet | wb-kvx.11 |
-| 12 | Hearing from users | No channel | Issue templates and a short "tell us your setup" form | wb-kvx.12 |
 
 ## Keeping this true
 

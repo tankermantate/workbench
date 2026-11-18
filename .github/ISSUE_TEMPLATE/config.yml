@@ -1,0 +1,2 @@
+# The chooser at issues/new/choose. Blank issues stay on: a form shouldn't stop anyone writing.
+blank_issues_enabled: true

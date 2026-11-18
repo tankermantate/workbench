@@ -1,0 +1,84 @@
+# "Tell us your setup": how the vision's success measures get answered, since workbench has no
+# telemetry. Every field is optional (tests/test_issue_templates.sh keeps it that way).
+name: Tell us your setup
+description: A two-minute, opt-in note on how you use workbench. Every question is optional.
+title: "My setup"
+labels: [question]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        workbench collects nothing about you: no telemetry, no analytics. This form is the only
+        way we learn how it's used, so thank you for filling it in. Skip any question you like.
+
+        This issue is **public**. Counts and rough answers are all we need, so please leave out
+        the names of your spaces, projects, clients, people and accounts.
+  - type: dropdown
+    id: how-long
+    attributes:
+      label: How long have you used workbench?
+      options:
+        - Less than a week
+        - 1 to 4 weeks
+        - 1 to 3 months
+        - Longer
+        - I tried it and stopped
+  - type: dropdown
+    id: areas
+    attributes:
+      label: How many areas (spaces) do you run in it?
+      description: An area is a part of your life or business with its own projects.
+      options:
+        - "1"
+        - "2 or 3"
+        - "4 to 6"
+        - More than 6
+  - type: dropdown
+    id: personas
+    attributes:
+      label: How many Claude accounts (personas) do you use with it?
+      options:
+        - "1"
+        - "2"
+        - "3 or more"
+  - type: dropdown
+    id: roadmap
+    attributes:
+      label: How often do you edit your roadmap in the Claude Desktop app?
+      options:
+        - Most weeks
+        - Now and then
+        - Tried it once or twice
+        - Never
+        - I haven't connected it
+  - type: dropdown
+    id: forgotten
+    attributes:
+      label: Do you still find forgotten sessions or worktrees?
+      description: A Claude session or a worktree you'd lost track of.
+      options:
+        - Often
+        - Sometimes
+        - Rarely
+        - Never
+        - I never did
+  - type: textarea
+    id: for-what
+    attributes:
+      label: What do you use it for?
+      description: Roughly, with no names. "Two side businesses and the family's admin."
+  - type: textarea
+    id: almost-stopped
+    attributes:
+      label: What nearly made you stop, or did?
+  - type: textarea
+    id: wish
+    attributes:
+      label: One thing you wish it did
+  - type: checkboxes
+    id: contact
+    attributes:
+      label: A short interview
+      description: We'd reply here on GitHub to arrange it; no other contact details needed.
+      options:
+        - label: I'm happy to be contacted for a 20-minute interview.

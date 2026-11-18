@@ -1,0 +1,39 @@
+name: Something's broken
+description: workbench did something wrong, or didn't do what you expected.
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for telling us. This issue is **public**, so please leave out the names of your
+        spaces, projects, clients, people and accounts: say "my largest space" or "a client
+        project" instead, and trim private paths from anything you paste.
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened?
+      description: What you did, what workbench did, and what you expected instead.
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: How can we see it?
+      description: The steps, if you know them. "It happens every morning" helps too.
+  - type: textarea
+    id: doctor
+    attributes:
+      label: wb-doctor output
+      description: Run `wb-doctor` and paste what it prints (check it for private names first).
+      render: text
+  - type: input
+    id: version
+    attributes:
+      label: workbench version
+      description: "`wb-update --version` prints it."
+      placeholder: "0.1"
+  - type: input
+    id: system
+    attributes:
+      label: macOS version and terminal
+      placeholder: "macOS 15.6, Apple Terminal"

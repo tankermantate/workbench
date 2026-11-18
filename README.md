@@ -301,6 +301,16 @@ never in this repo. `spaces.example.toml` documents every key. In short:
 | `on_create`, `before_end` | Hooks: one-line shell commands, run in the worktree with `WB_SPACE`, `WB_WORKTREE`, `WB_PROJECT`, `WB_SOURCE`, `WB_BRANCH`, `WB_BEAD` set, and `WB_SHA` for `before_end`. Keep private setup scripts in `~/.config/workbench/hooks/`. |
 | `after_end` | Hook run by `end-session` right after the worktree is removed, on every path including `--force`, in the main checkout's project folder (the worktree is gone), with the same variables. For cleanup outside the folder. A failure or a 60 s hang only warns. |
 
+## Tell us how it's going
+
+workbench has no telemetry and collects nothing about you, so the only way we learn what works is
+when you say. Three short forms, all public issues (leave out private names):
+
+- [Tell us your setup](https://github.com/tankermantate/workbench/issues/new?template=setup.yml): a two-minute, opt-in note on how you use it.
+  Every question is optional, and one box offers a short interview.
+- [Something's broken](https://github.com/tankermantate/workbench/issues/new?template=bug.yml): paste `wb-doctor`'s output and `wb-update --version`.
+- [An idea or a missing piece](https://github.com/tankermantate/workbench/issues/new?template=idea.yml).
+
 ## Development
 
 ```bash
