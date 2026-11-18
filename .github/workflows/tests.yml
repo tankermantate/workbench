@@ -1,0 +1,28 @@
+name: tests
+
+# Every pull request, and main after a merge. Branch protection on main requires this check.
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  tests:
+    # workbench targets macOS (zsh, bash 3.2, Apple Terminal), so its tests run there too.
+    runs-on: macos-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: git identity for the tests' throwaway repos
+        run: |
+          git config --global user.name "workbench CI"
+          git config --global user.email "ci@example.com"
+          git config --global init.defaultBranch main
+      - name: tests/run.sh
+        run: tests/run.sh

@@ -253,6 +253,10 @@ tests/run.sh             # every test; plain bash, with fake bd, gh and claude
 scripts/check-leaks.sh   # before any push: no private names in files, history or the bead db
 ```
 
+Changes go through pull requests: work on a branch (the launcher gives each session its own
+worktree), push it and open a pull request. GitHub runs `tests/run.sh` on macOS for every pull
+request, and `main` only takes a merge with green tests.
+
 Designs and plans are in `docs/specs/` and `docs/plans/`.
 
 ## License
