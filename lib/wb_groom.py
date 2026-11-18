@@ -163,19 +163,34 @@ def natural(id):
     return [int(t) if t.isdigit() else t for t in re.split(r"(\d+)", id)]
 
 
+def read_gap(decisions, expected):
+    """Why DECISIONS don't show the judge read backlog.tsv to its end (EXPECTED: {end, beads}),
+    or None when they do."""
+    got = decisions.get("backlog")
+    if not isinstance(got, dict):
+        return "the judge did not confirm it read the whole backlog"
+    if got.get("end") != expected["end"]:
+        return "the judge's end marker does not match backlog.tsv's: it did not read to the end"
+    if got.get("beads") != expected["beads"]:
+        return f"the judge counted {got.get('beads')} beads, not {expected['beads']}"
+    return None
+
+
+def read_line(decisions, expected):
+    """The summary's line on how much of the backlog the judge read: workbench's check of the
+    end marker, not the judge's own say."""
+    n = expected["beads"]
+    if read_gap(decisions, expected) is None:
+        return f"The judge read all {n} live beads (backlog.tsv to its end marker)"
+    return f"The judge did not show it read all {n} live beads: beads it never saw were not judged"
+
+
 def backlog_gaps(decisions, beads, expected):
     """Why the judge's DECISIONS don't show it judged the whole backlog, as short lines (none
     when they do). EXPECTED is {end, beads} from write_backlog: the judge must echo both in
     decisions.backlog. And when it sets a sprint section, every unclaimed bead now in that wave
     must be named in now, next or leaving: one it left out is one it most likely never saw."""
-    gaps = []
-    got = decisions.get("backlog")
-    if not isinstance(got, dict):
-        gaps.append("the judge did not confirm it read the whole backlog")
-    elif got.get("end") != expected["end"]:
-        gaps.append("the judge's end marker does not match backlog.tsv's: it did not read to the end")
-    elif got.get("beads") != expected["beads"]:
-        gaps.append(f"the judge counted {got.get('beads')} beads, not {expected['beads']}")
+    gaps = [g for g in [read_gap(decisions, expected)] if g]
     sprint = decisions.get("sprint")
     if isinstance(sprint, dict):
         named = {e.get("id") for k in ("now", "next", "leaving") if isinstance(sprint.get(k), list)
@@ -343,7 +358,12 @@ def plan_ops(decisions, beads, plan, today, partial=False):
                 continue
             if any(id in ids for ids in kept.values()):
                 continue  # named in a section: its wave op (or its no-op) settles the wave
-            why = leaving.get(id) or "left the sprint"
+            if id not in leaving:
+                # Named nowhere, so most likely never read (backlog_gaps makes the run partial):
+                # a removal on no reason is what the owner once had to catch by hand.
+                dropped.append(f"{id}: not judged (named in none of now, next, leaving); keeps {label}")
+                continue
+            why = leaving[id] or "leaves the sprint (the judge gave no why)"
             if sprint_protected(id, b):
                 propose(id, "unwave", label, why, "protected")
             else:

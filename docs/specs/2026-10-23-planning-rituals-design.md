@@ -87,6 +87,11 @@ Claude never writes to the bead store. Each run has two halves:
    leaves out an unclaimed bead now in that wave (named in none of now, next, leaving). A partial
    run applies nothing unattended (every op becomes a proposal, reason `backlog not fully read`),
    writes `partial` in the run dir (the reasons), and its summary leads with `partial grooming:`.
+   A wave bead named in none of now, next, leaving is not judged, not removed: it keeps its wave
+   and apply says `<id>: not judged …; keeps wave:N` (a removal on no reason once nearly dropped a
+   sprint bead the judge never read). Workbench's part of the summary opens with how many live
+   beads the judge read, from its own marker check: `The judge read all N live beads …`, or that
+   it did not show it had.
    As built (checked by hand with claude 2.1.309 on a throwaway store; comment in
    `lib/wb_groom.py`): `claude -p --setting-sources "" --strict-mcp-config --permission-mode
    dontAsk --tools Bash,Read,Write --no-session-persistence --output-format json --settings
@@ -211,7 +216,8 @@ Cost seen in the dry run: ~6 min / ~160k tokens for a 400-bead space, ~2 min for
 
 `protected` is optional everywhere; left out it means unsure, which counts as protected. Only
 `false` lets a bead leave the sprint, move from NOW to NEXT, or be iceboxed unattended.
-`sprint.leaving` names beads that have a wave label now and are in neither list.
+`sprint.leaving` names beads that have a wave label now and are in neither list; only a bead
+named there loses its wave (one named nowhere is not judged and keeps it).
 
 ## Review (in the launcher)
 

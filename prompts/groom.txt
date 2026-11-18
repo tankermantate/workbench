@@ -84,7 +84,8 @@ Exactly this shape (JSON, no comments; omit a section you have nothing for):
   so does a sprint that leaves out a bead now in a wave it sets.
 - sprint.now and sprint.next are the whole sprint you would set, most important first, at most
   the sprint size each. Name in sprint.leaving each bead that has wave:1 or wave:2 now and is in
-  neither list. Leave claimed beads out: they keep their wave.
+  neither list, with why it leaves. One you name nowhere keeps its wave and counts as not judged.
+  Leave claimed beads out: they keep their wave.
 - changes[].kind is one of icebox, priority, merge, close, undefer, dep, date. `to` is the new
   priority (0-4) for priority, the bead to merge into for merge, the bead it depends on for dep,
   and the date (YYYY-MM-DD) and what it is for date; empty otherwise.
