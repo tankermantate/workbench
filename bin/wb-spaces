@@ -149,7 +149,7 @@ ORDER = ("label", "group", "root", "beads", "worktrees", "session_cmd",
 def main(argv):
     path = config_path()
     if not os.path.exists(path):
-        print(f"workbench: no config at {path} — copy spaces.example.toml there to start", file=sys.stderr)
+        print(f"workbench: no config at {path} — run wb-setup to make one (or copy spaces.example.toml there)", file=sys.stderr)
         return 3
     try:
         with open(path, "rb") as f:

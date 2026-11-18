@@ -10,7 +10,8 @@ echo "not ours" > "$T/bin/wb-ui"
 mkdir -p "$REPO/bin/__pycache__"
 ln -s "$REPO/bin/__pycache__" "$T/bin/__pycache__"; ln -s "$REPO/bin/wb-gone" "$T/bin/wb-gone"
 ln -s "$REPO/README.md" "$T/bin/readme"   # into the repo but not bin/: not install's to judge
-out="$(WB_BIN_DIR="$T/bin" ZDOTDIR="$T/z" bash "$REPO/install.sh" 2>&1)"
+out="$(WB_BIN_DIR="$T/bin" ZDOTDIR="$T/z" WORKBENCH_CONFIG="$T/none.toml" bash "$REPO/install.sh" 2>&1)"
+assert_contains "no config yet: points at wb-setup" "$out" "Next: run $REPO/bin/wb-setup"
 if [ ! -e "$T/bin/__pycache__" ] && [ ! -L "$T/bin/__pycache__" ]; then ok "a directory in bin/ is not linked, and an old link to it goes"; else bad "bin/__pycache__ still linked"; fi
 assert_not_contains "says nothing about linking it" "$out" "linked $T/bin/__pycache__"
 if [ ! -L "$T/bin/wb-gone" ]; then ok "a link to a command no longer in bin/ goes"; else bad "dangling wb-gone link kept"; fi
@@ -22,8 +23,10 @@ assert_contains "says it skipped it" "$out" "skip: $T/bin/wb-ui"
 assert_contains "prints the zshrc line" "$out" "source \"$REPO/shell/workbench.zsh\""
 if [ ! -e "$T/z/.zshrc" ]; then ok "never writes .zshrc"; else bad "install wrote .zshrc"; fi
 echo "source \"$REPO/shell/workbench.zsh\"" > "$T/z/.zshrc"
-out="$(WB_BIN_DIR="$T/bin" ZDOTDIR="$T/z" bash "$REPO/install.sh" 2>&1)"; rc=$?
+: > "$T/spaces.toml"
+out="$(WB_BIN_DIR="$T/bin" ZDOTDIR="$T/z" WORKBENCH_CONFIG="$T/spaces.toml" bash "$REPO/install.sh" 2>&1)"; rc=$?
 assert_eq "second run succeeds" "$rc" "0"
+assert_not_contains "a config already: no wb-setup hint" "$out" "Next: run"
 assert_contains "second run sees the zshrc line" "$out" "already sources workbench"
 
 # the weekly grooming schedule

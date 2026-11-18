@@ -21,50 +21,67 @@ account, using your own plan or API credits.
 |---|---|---|
 | macOS, with zsh as your shell | The launcher is a zsh script; tab handling uses Apple Terminal (other terminals: see `[launcher].terminals`). | zsh is the macOS default. |
 | [Claude Code](https://docs.claude.com/en/docs/claude-code), signed in | Every session the launcher starts is `claude`. | Install it, run `claude` once and log in. |
-| [bd (beads)](https://github.com/gastownhall/beads) | The issue tracker: each space's backlog, the beads you pick, the beads sessions close. | Install it, then `bd init` in each project you want a backlog for. |
-| `python3` 3.11 or later | The helper commands are Python. | `brew install python` if `python3 --version` is older. |
+| [bd (beads)](https://github.com/gastownhall/beads) | The issue tracker: each space's backlog, the beads you pick, the beads sessions close. | `wb-setup` installs it (`brew install beads`) and runs `bd init` in the projects you choose. beads shares anonymous usage metrics; `bd metrics off` stops that. |
+| `python3` 3.11 or later | The helper commands are Python. | `brew install python` if `python3 --version` is older (`wb-setup` offers it). |
 | `git` | Worktree sessions, and fetching before they start. | Comes with the Xcode command line tools. |
 | [fzf](https://github.com/junegunn/fzf) (optional) | Searchable screens. Without it, the launcher shows a numbered menu. | `brew install fzf` |
 | [gh](https://cli.github.com) (optional) | Only if a space sets `gh_account`. | `brew install gh` |
 
 ## Set up
 
-1. **Get the code** and install it. This links the commands into `~/.local/bin` (make sure that's
-   on your `PATH`) and prints a line for your `~/.zshrc`:
+Install Claude Code and sign in first (run `claude` once). Then, about ten minutes:
 
-   ```bash
-   git clone https://github.com/tankermantate/workbench.git ~/dev/workbench
-   cd ~/dev/workbench
-   ./install.sh                  # or ./install.sh --no-schedule: see "What runs on its own" below
-   ```
+```bash
+git clone https://github.com/tankermantate/workbench.git ~/dev/workbench
+~/dev/workbench/bin/wb-setup
+```
 
-   It warns if `bd`, `fzf` or a new enough `python3` is missing. Re-running it is safe.
-2. **Add the printed `source …/workbench.zsh` line to the end of `~/.zshrc`.**
-3. **Describe your spaces.** A space is a project folder (or a folder of projects) the launcher
-   offers. Copy the example and edit it; it documents every key:
+`wb-setup` walks you through the rest, asking before each change:
 
-   ```bash
-   mkdir -p ~/.config/workbench
-   cp spaces.example.toml ~/.config/workbench/spaces.toml
-   ```
+1. **Tools.** It checks python 3.11+, git, Claude Code and beads, and offers to install beads,
+   fzf or a newer python with Homebrew.
+2. **Commands.** It runs `install.sh`, which links the commands into `~/.local/bin` and, if you
+   say yes, schedules the background jobs (see [What runs on its own](#what-runs-on-its-own)).
+3. **Spaces.** It asks for your project folders, one at a time, and writes
+   `~/.config/workbench/spaces.toml`. A space is a project folder (or a folder of projects) the
+   launcher offers. For a git repository it asks whether each task should get its own
+   [worktree](#worktree-sessions); for a folder with no backlog it offers `bd init`, which adds a
+   `.beads` folder, notes telling Claude about it and git hooks, and commits them. It also offers
+   a **Demo** space with three sample tasks to try the launcher on (in
+   `~/.local/share/workbench/demo`; delete its `[[space]]` and that folder to remove it).
+4. **Terminal.** It adds the launcher line to the end of `~/.zshrc` (and `~/.local/bin` to your
+   `PATH` if it isn't there).
+5. **Claude Desktop.** When this version has `wb-mcp`, it offers to connect the Claude Desktop
+   app, so you can plan with your tasks in a chat.
 
-   The least that works is a name and a folder for each space:
+It ends by running `wb-doctor`. Then open a new Terminal window: the launcher appears. Pick a
+space, then a bead or `✦ something new`, and Claude starts in that folder. Run `wb-setup` again
+to add projects (it never overwrites `spaces.toml`, and skips what's done); edit `spaces.toml`
+by hand for everything else: `spaces.example.toml` documents every key.
 
-   ```toml
-   [[space]]
-   name  = "My app"
-   root  = "~/dev/my-app"
-   beads = true
-   ```
-4. **Give each space a backlog:** `cd` into its folder and run `bd init`, then add work with
-   `bd create`, or let Claude file beads as you go.
-5. **Open a new Terminal window.** The launcher appears: pick a space, then a bead or
-   `✦ something new`, and Claude starts in that folder. If it doesn't appear, run `launch`; if
-   it complains about the config, it says which line.
+**`wb-doctor`** checks the setup any time: one line per check, `!!` for what to fix and how,
+`--` for optional things. If the launcher doesn't appear, run it, or `launch`.
 
 Optional, once the basics work: a status line showing the session's bead and space, and a bell on
 the tab that needs you (see [While you work](#while-you-work)); planning rituals (see
 [Planning rituals](#planning-rituals)).
+
+<details>
+<summary>Setting up by hand instead</summary>
+
+Run `./install.sh` (or `./install.sh --no-schedule`) in the clone and add the `source …/workbench.zsh`
+line it prints to the end of `~/.zshrc`. Copy `spaces.example.toml` to
+`~/.config/workbench/spaces.toml`; the least that works is a name and a folder per space:
+
+```toml
+[[space]]
+name  = "My app"
+root  = "~/dev/my-app"
+beads = true
+```
+
+Then run `bd init` in each space's folder, and `wb-doctor` to check.
+</details>
 
 ### What runs on its own
 
