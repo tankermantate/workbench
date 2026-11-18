@@ -136,8 +136,8 @@ opening on them.
 
 ### What works today
 
-As of November 2026, the build side is real and in daily use; the Claude side and onboarding are
-not built yet.
+As of November 2026, the build side is real and in daily use, and planning in the Claude Desktop
+app works; onboarding is not built yet.
 
 - **Works today:** the launcher in every new terminal tab (Apple Terminal), showing your spaces
   with ready-task counts, then the space's tasks with what's next and what needs attention;
@@ -146,11 +146,12 @@ not built yet.
   that refuses to lose work; status lines showing the session's task and space; `wb-tabs`
   (which sessions are waiting on you); session restore after a restart; `wb-tidy` (end the
   finished worktrees); weekly unattended grooming with a review, and a monthly strategy session;
-  a "time to restart" hint.
+  a "time to restart" hint; planning in the Claude Desktop app against your real tasks
+  (`wb-mcp connect`), seeing only the signed-in account's spaces and keeping workbench's rules.
 - **Partly there:** areas exist as *spaces* (with an optional group), and epics and tasks exist as
   beads, but there is no initiative layer or roll-up across spaces. Shaping before code exists,
   but there is no light spec or acceptance-criteria step.
-- **Not built:** planning in Claude (the headline of this release); guided setup; a new-version notice; anything after
+- **Not built:** planning in Claude on the web or phone (the roadmap view comes first); guided setup; a new-version notice; anything after
   the commit (pull requests, CI status, release); a single "vibe to strict" setting for how much workbench suggests.
 
 ### For us (internal)
@@ -211,11 +212,11 @@ week, and no longer finding forgotten sessions and worktrees.
 ## Gaps between this vision and today
 
 Each promise in the press release, what exists, and what closes the gap. All of them sit under the
-epic wb-kvx, with the launch post (wb-kvx.13), which waits for gaps 1 and 4.
+epic wb-kvx, with the launch post (wb-kvx.13), which waits for gaps 1 and 4. Gap 1 (plan in Claude,
+wb-kvx.1) closed in November 2026 for the Desktop app and moved to "What works today".
 
 | # | Promise | Today | Gap | Bead |
 |---|---|---|---|---|
-| 1 | Plan in Claude, against your real tasks | Nothing: tasks are only reachable from the terminal | Connect the Claude Desktop app to every space's beads (via workbench's own MCP server, `wb-mcp`), tell Claude what spaces exist, and keep its edits within workbench's rules; one roadmap per persona, showing only that persona's areas | wb-kvx.1 |
 | 2 | See the roadmap visually, anywhere | Nothing | A roadmap view (a published Claude artifact) that reads and writes your tasks | wb-kvx.2 |
 | 3 | Areas → initiatives → epics → tasks | Spaces (with a group), beads with parent epics | An initiative layer and a roll-up view across spaces | wb-kvx.3 |
 | 4 | Ten-minute guided setup | Clone, run a script, hand-edit a config file, `bd init` per project | A guided first run that asks about your projects and writes the config; a health check; a demo space | wb-kvx.4 |
