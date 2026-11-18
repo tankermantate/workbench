@@ -6,6 +6,7 @@ WS="$REPO/bin/wb-spaces"
 out="$(WORKBENCH_CONFIG="$T/none.toml" "$WS" 2>&1)"; rc=$?
 assert_eq "missing config exits 3" "$rc" "3"
 assert_contains "missing config names the file" "$out" "no config at $T/none.toml"
+assert_contains "missing config: wb-setup makes one" "$out" "run wb-setup to make one"
 
 printf 'this is = = not toml\n' > "$T/bad.toml"
 out="$(WORKBENCH_CONFIG="$T/bad.toml" "$WS" 2>&1)"; rc=$?

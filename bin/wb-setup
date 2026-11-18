@@ -1,0 +1,446 @@
+#!/usr/bin/env python3
+"""wb-setup — the guided first run: from a fresh clone to a working launcher.
+
+  wb-setup      checks the tools (offering Homebrew for beads, fzf and python), links the
+                commands (install.sh), asks about your project folders and writes
+                ~/.config/workbench/spaces.toml, runs bd init where you say so, offers a Demo
+                space with sample tasks, adds the launcher line to ~/.zshrc, connects Claude
+                Desktop when this version has wb-mcp, and ends with wb-doctor.
+
+Safe to run again: it never overwrites spaces.toml (it only adds the spaces you name, and puts
+the file back if the result doesn't read), and skips whatever is already done. Enter takes the
+[default]; ctrl-c stops. Runs on macOS's own python 3.9, so it can say that python is too old.
+Spec: docs/specs/2026-11-17-guided-setup-design.md
+
+Seams: WB_BREW, WB_BD, WB_DEMO_DIR, WB_MCP, WB_PYTHON and wb_doctor's.
+"""
+import json
+import os
+import re
+import shutil
+import subprocess
+import sys
+
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.realpath(__file__)), "..", "lib"))
+import wb_doctor  # noqa: E402
+import wb_session  # noqa: E402
+
+REPO = wb_doctor.REPO
+DEMO = "Demo"
+DEMO_TASKS = (
+    ("Try the launcher: pick this task",
+     "You picked a task and Claude started in this space's folder, already told which task it's on. "
+     "Ask Claude to close it (bd close), then open a new Terminal window: the space's count goes down.",
+     "1", "wave:1"),
+    ("Shape something new",
+     "In the launcher, pick this space, then '✦ something new', and describe an idea in a sentence. "
+     "Claude helps shape it into a task, with what done looks like, before any code is written.",
+     "2", ""),
+    ("See every session at once: wb-tabs",
+     "With a few tabs open on different tasks, run wb-tabs in any shell: every tab's space, task and "
+     "status, and which ones are waiting on you.",
+     "3", ""),
+)
+
+
+class Stopped(Exception):
+    pass
+
+
+def say(s=""):
+    print(s, flush=True)
+
+
+def line(prompt):
+    sys.stdout.write(prompt)
+    sys.stdout.flush()
+    s = sys.stdin.readline()
+    if not s:
+        say()
+        raise Stopped()
+    return s.strip()
+
+
+def ask(q, default):
+    while True:
+        a = line("%s [%s] " % (q, "Y/n" if default else "y/N")).lower()
+        if not a:
+            return default
+        if a in ("y", "yes", "n", "no"):
+            return a.startswith("y")
+        say("  y or n, please")
+
+
+def tilde(p):
+    h = os.path.expanduser("~")
+    return "~" + p[len(h):] if p == h or p.startswith(h + os.sep) else p
+
+
+def toml_str(s):
+    # a JSON string is a TOML basic string: same escapes for quotes, backslashes and controls
+    return json.dumps(s, ensure_ascii=False)
+
+
+def run_shown(argv, cwd=None, env=None):
+    """Run it with its output indented under ours; its exit code (127: couldn't start)."""
+    try:
+        p = subprocess.Popen(argv, cwd=cwd, env=env, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                             stdin=subprocess.DEVNULL, text=True)
+    except OSError as e:
+        say("    %s" % e)
+        return 127
+    for l in p.stdout:
+        say("    " + l.rstrip("\n"))
+    return p.wait()
+
+
+def run_quiet(argv, cwd=None):
+    """Run it; its output only when it fails (bd init and install.sh say a lot). (ok, output)."""
+    rc, out, err = wb_doctor.run(argv, cwd=cwd, timeout=300)
+    if rc != 0:
+        for l in (out + err).rstrip("\n").splitlines():
+            say("    " + l)
+    return rc == 0, out + err
+
+
+def brew():
+    return shutil.which(os.environ.get("WB_BREW") or "brew")
+
+
+def brew_install(formula):
+    env = dict(os.environ)
+    # brew install can autoremove formulae it thinks are unused, python among them
+    env["HOMEBREW_NO_AUTOREMOVE"] = "1"
+    return run_shown([brew(), "install", formula], env=env) == 0
+
+
+def bd():
+    return wb_doctor.bd_cmd()
+
+
+# --- 1. tools ---
+
+def tools():
+    say("1. Tools")
+    v = wb_doctor.python_version()
+    if not (v and wb_doctor.new_enough(v)):
+        have = "python3 %s" % v if v else "no python3"
+        if brew() and ask("  workbench needs python 3.11 or later (found %s). Install it with Homebrew?" % have, True):
+            brew_install("python")
+            v = wb_doctor.python_version()
+        if not (v and wb_doctor.new_enough(v)):
+            say("  !!   python3 %s: workbench needs 3.11 or later. Install it (brew install python, or "
+                "https://www.python.org/downloads/), open a new Terminal window, and run wb-setup again."
+                % (v or "not found"))
+            return False
+    say("  ok   python3 %s" % v)
+    if wb_doctor.run(["git", "--version"])[0] != 0:
+        say("  !!   git doesn't work. Install Apple's command line tools (xcode-select --install), then run "
+            "wb-setup again.")
+        return False
+    say("  ok   git")
+    if not shutil.which("claude"):
+        say("  !!   claude not found. Install Claude Code first (https://docs.claude.com/en/docs/claude-code), "
+            "run claude once to sign in, then run wb-setup again.")
+        return False
+    say("  ok   claude (Claude Code)")
+    if not bd():
+        if brew() and ask("  beads (bd, the task tracker) isn't installed. Install it with Homebrew?", True):
+            brew_install("beads")
+        if not bd():
+            say("  !!   bd not found. Install beads (brew install beads, or see "
+                "https://github.com/gastownhall/beads), then run wb-setup again.")
+            return False
+    say("  ok   bd")
+    if not shutil.which("fzf"):
+        if brew() and ask("  fzf (optional: menus you can search by typing) isn't installed. Install it with Homebrew?", True):
+            brew_install("fzf")
+        if not shutil.which("fzf"):
+            say("  --   fzf: not installed; the launcher shows numbered menus instead")
+    if shutil.which("fzf"):
+        say("  ok   fzf")
+    return True
+
+
+# --- 2. commands ---
+
+def install():
+    say()
+    say("2. Commands")
+    if wb_doctor.linked():
+        say("  ok   linked into %s" % tilde(wb_doctor.bin_dir()))
+        return True
+    say("  install.sh links workbench's commands into %s. It can also schedule two background jobs:\n"
+        "  a session snapshot every 10 minutes (so sessions come back after a restart; no Claude use)\n"
+        "  and a weekly backlog review on Saturdays (uses your Claude plan, only for spaces with goals)."
+        % tilde(wb_doctor.bin_dir()))
+    argv = ["bash", os.path.join(REPO, "install.sh")]
+    schedule = ask("  Schedule them?", True)
+    if not schedule:
+        argv.append("--no-schedule")
+    ok, out = run_quiet(argv)
+    if not ok or not wb_doctor.linked():
+        say("  !!   install.sh didn't finish; see above, fix it, and run wb-setup again.")
+        return False
+    say("  ok   linked into %s%s" % (tilde(wb_doctor.bin_dir()), "; scheduled" if schedule else ""))
+    for l in out.splitlines():
+        if l.startswith(("skip:", "note:")):
+            say("    " + l)
+    return True
+
+
+# --- 3. spaces ---
+
+def slug(name):
+    return re.sub(r"[^a-z0-9]+", "-", name.lower()).strip("-") or "space"
+
+
+METRICS_NOTED = []
+
+
+def init_backlog(folder, extra=()):
+    ok, out = run_quiet([bd(), "init", "--non-interactive"] + list(extra), cwd=folder)
+    if ok and "bd metrics off" in out and not METRICS_NOTED:
+        # bd's own notice, which would otherwise scroll past: say it once, plainly
+        METRICS_NOTED.append(1)
+        say("  note: beads shares anonymous usage metrics (which bd commands run, never your tasks or\n"
+            "        paths). To turn that off: bd metrics off")
+    return ok
+
+
+def ask_project(rows, new):
+    """One project from the user, as a dict, or None when they're done."""
+    taken_roots = {os.path.realpath(r["root"]) for r in rows} | {os.path.realpath(s["root"]) for s in new}
+    while True:
+        p = line("  Project folder (Enter when done): ")
+        if not p:
+            return None
+        folder = os.path.abspath(os.path.expanduser(p))
+        if not os.path.isdir(folder):
+            say("  not a folder: %s" % folder)
+            continue
+        if os.path.realpath(folder) in taken_roots:
+            say("  already a space: %s" % folder)
+            continue
+        break
+    names = {r["label"].lower() for r in rows} | {r["group"].lower() for r in rows if r["group"]}
+    names |= {s["name"].lower() for s in new}
+    while True:
+        name = line("  Name [%s]: " % os.path.basename(folder)) or os.path.basename(folder)
+        if name.lower() in names:
+            say("  already a space called %s" % name)
+            continue
+        if "\n" in name or "\t" in name:
+            continue
+        break
+    space = {"name": name, "root": folder, "beads": "true", "worktrees": False}
+    if wb_doctor.run(["git", "-C", folder, "rev-parse", "--git-dir"])[0] == 0:
+        space["worktrees"] = ask("  Give each task its own worktree (a separate copy of the folder, on its own "
+                                 "branch)? Good for code you commit.", False)
+    staged = wb_doctor.run(["git", "-C", folder, "diff", "--cached", "--quiet"])[0] == 1
+    if wb_session.store_root(folder) is None and staged:
+        # bd init commits its own files, and whatever else is staged goes into that commit
+        say("  --   %s has staged changes (git add), which bd init would commit with its own files. Commit\n"
+            "       or unstage them, then: cd %s && bd init" % (name, folder))
+        space["beads"] = "if-present"
+    elif wb_session.store_root(folder) is None:
+        if ask("  %s has no backlog yet. Make one with bd init? It adds a .beads folder, AGENTS.md and CLAUDE.md\n"
+               "  notes telling Claude about it and git hooks, and commits them (making the folder a git\n"
+               "  repository if it isn't one)." % name, True):
+            if init_backlog(folder):
+                say("  ok   backlog made")
+            else:
+                say("  --   bd init failed; the space shows its backlog once there is one (cd %s && bd init)" % folder)
+                space["beads"] = "if-present"
+        else:
+            space["beads"] = "if-present"
+    return space
+
+
+def make_demo():
+    """The demo folder, with a backlog of sample tasks, or None if bd couldn't make one."""
+    d = os.environ.get("WB_DEMO_DIR") or os.path.join(os.path.expanduser("~"), ".local", "share", "workbench", "demo")
+    if wb_session.store_root(d) == d:
+        return d   # made by an earlier run: its tasks are the user's now
+    os.makedirs(d, exist_ok=True)
+    if not init_backlog(d, ["-q", "-p", "demo"]):
+        say("  --   bd init failed in %s; no demo" % d)
+        return None
+    for title, desc, prio, label in DEMO_TASKS:
+        argv = [bd(), "create", "--title", title, "-d", desc, "-t", "task", "-p", prio, "--silent"]
+        if label:
+            argv += ["-l", label]
+        wb_doctor.run(argv, cwd=d)
+    return d
+
+
+def space_toml(s):
+    out = ["[[space]]", "name = %s" % toml_str(s["name"]), "root = %s" % toml_str(tilde(s["root"])),
+           "beads = %s" % ("true" if s["beads"] == "true" else toml_str(s["beads"])),
+           "worktrees = %s" % ("true" if s["worktrees"] else "false")]
+    if s["worktrees"]:
+        out.append("space_key = %s" % toml_str(s["space_key"]))
+    return "\n".join(out) + "\n"
+
+
+HEADER = """# workbench's spaces: one [[space]] per project folder the launcher offers. wb-setup wrote this;
+# edit it by hand any time (wb-doctor checks it). Every key is explained in
+# %s
+
+[launcher]
+# $TERM_PROGRAM values, besides Apple_Terminal, that should auto-start the launcher.
+terminals = []
+"""
+
+
+def spaces():
+    """Ask about projects and write them to spaces.toml. (ok, demo added)."""
+    say()
+    say("3. Spaces")
+    path = wb_doctor.config_path()
+    rows = []
+    if os.path.exists(path):
+        rows, err, _ = wb_doctor.spaces()
+        if rows is None:
+            say("  !!   %s doesn't read: %s\n       Fix it (spaces.example.toml shows every key), then run wb-setup "
+                "again." % (tilde(path), err))
+            return False, False
+        say("  ok   %d space%s in %s" % (len(rows), "" if len(rows) == 1 else "s", tilde(path)))
+        if not ask("  Add a project to it?", False):
+            return True, False
+    else:
+        say("  A space is a project folder the launcher offers, with its own backlog of tasks. Name the\n"
+            "  folders you work in, one at a time (a path, like ~/dev/my-app).")
+    new = []
+    while True:
+        s = ask_project(rows, new)
+        if s is None:
+            break
+        new.append(s)
+    demo = False
+    if not any(r["label"].lower() == DEMO.lower() for r in rows) and \
+            not any(s["name"].lower() == DEMO.lower() for s in new) and \
+            ask("  Add a %s space with a few sample tasks, to try the launcher on? (Remove it any time: its\n"
+                "  [[space]] in spaces.toml and the folder.)" % DEMO, True):
+        d = make_demo()
+        if d:
+            new.append({"name": DEMO, "root": d, "beads": "true", "worktrees": False})
+            demo = True
+    if not new:
+        if not rows:
+            say("  --   no spaces yet; run wb-setup again when you have a project folder")
+        return True, False
+    keys = {r["space_key"] for r in rows if r["worktrees"]}
+    for s in new:
+        if s["worktrees"]:
+            k, n = slug(s["name"]), 2
+            while k in keys:
+                k, n = "%s-%d" % (slug(s["name"]), n), n + 1
+            keys.add(k)
+            s["space_key"] = k
+    return write_config(path, rows, new), demo
+
+
+def write_config(path, rows, new):
+    before = None
+    if os.path.exists(path):
+        with open(path, encoding="utf-8") as f:
+            before = f.read()
+    text = (before.rstrip("\n") + "\n" if before else HEADER % os.path.join(REPO, "spaces.example.toml"))
+    text += "".join("\n" + space_toml(s) for s in new)
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path + ".tmp", "w", encoding="utf-8") as f:
+        f.write(text)
+    os.replace(path + ".tmp", path)
+    got, err, _ = wb_doctor.spaces()
+    if got is None:
+        # fail closed: the file goes back to what it was
+        if before is None:
+            os.remove(path)
+        else:
+            with open(path, "w", encoding="utf-8") as f:
+                f.write(before)
+        say("  !!   the new spaces didn't read back (%s); %s is as it was" % (err, tilde(path)))
+        return False
+    for s in new:
+        say("  ok   %s: %s%s" % (s["name"], tilde(s["root"]), ", a worktree per task" if s["worktrees"] else ""))
+    say("  wrote %s" % tilde(path))
+    return True
+
+
+# --- 4. shell ---
+
+def append_zshrc(text):
+    p = wb_doctor.zshrc()
+    with open(p, "a", encoding="utf-8") as f:
+        f.write(text)
+
+
+def shell():
+    say()
+    say("4. Terminal")
+    if wb_doctor.zshrc_has_line():
+        say("  ok   ~/.zshrc starts the launcher")
+    elif ask("  Start the launcher in every new Terminal window? This adds one line to the end of ~/.zshrc.", True):
+        append_zshrc("\n# workbench: the launcher in every new Terminal window (added by wb-setup)\n%s\n"
+                     % wb_doctor.zshrc_line())
+        say("  ok   added to ~/.zshrc")
+    b = wb_doctor.bin_dir()
+    # a PATH line from an earlier run counts, though this shell hasn't read it yet
+    if not wb_doctor.on_path(b) and not wb_doctor.zshrc_adds_to_path(b):
+        if ask("  %s isn't on your PATH, so commands like wb-tabs won't be found. Add it in ~/.zshrc?" % tilde(b), True):
+            shown = tilde(b).replace("~", "$HOME", 1)
+            append_zshrc("\n# workbench's commands (added by wb-setup)\nexport PATH=\"%s:$PATH\"\n" % shown)
+            say("  ok   added to ~/.zshrc")
+
+
+# --- 5. Claude Desktop ---
+
+def desktop():
+    say()
+    say("5. Claude Desktop")
+    mcp = wb_doctor.wb_mcp()
+    if not mcp:
+        say("  --   planning in Claude Desktop (wb-mcp) isn't in this version; wb-update brings it when it ships")
+        return
+    if wb_doctor.desktop_connected():
+        say("  ok   connected")
+        return
+    if ask("  Connect the Claude Desktop app, so you can plan with your tasks in a chat? Quit Desktop first.", True):
+        if run_shown([mcp, "connect"]) != 0:
+            say("  --   not connected; try again later with: wb-mcp connect")
+
+
+def main():
+    say("workbench setup: about ten minutes. Enter takes the [default]; ctrl-c stops.")
+    say()
+    if not tools() or not install():
+        return 1
+    ok, demo = spaces()
+    if not ok:
+        return 1
+    shell()
+    desktop()
+    say()
+    say("Checking everything (wb-doctor):")
+    rc = wb_doctor.report(wb_doctor.checks())
+    say()
+    if rc == 0:
+        say("Open a new Terminal window: the launcher appears.%s Run wb-doctor any time to check again."
+            % (" Try the %s space first: pick a task, and Claude starts on it." % DEMO if demo else ""))
+    else:
+        say("Fix the !! lines, then run wb-doctor to check again (or wb-setup to carry on).")
+    return rc
+
+
+if __name__ == "__main__":
+    if sys.argv[1:] in (["-h"], ["--help"]):
+        print(__doc__.strip())
+        sys.exit(0)
+    if sys.argv[1:]:
+        sys.exit("usage: wb-setup")
+    try:
+        sys.exit(main())
+    except (Stopped, KeyboardInterrupt):
+        say("stopped; run wb-setup again to carry on (it skips what's done).")
+        sys.exit(1)
