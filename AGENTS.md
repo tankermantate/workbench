@@ -156,7 +156,7 @@ end-session [<worktree>]                    # remove it once the work is merged/
 
 ## Architecture Overview
 
-User guide: `README.md`. Designs: `docs/specs/` (launcher, session scripts, session's bead, planning rituals, tabs view, restore); plans: `docs/plans/`.
+User guide: `README.md`; the newcomer's walk-through: `docs/getting-started.md`. Designs: `docs/specs/` (launcher, session scripts, session's bead, planning rituals, tabs view, restore); plans: `docs/plans/`.
 
 - `shell/workbench.zsh` — the launcher (zsh, sourced at the end of `~/.zshrc`). Auto-starts once, at the first prompt, via a self-removing precmd hook; `launch` runs it by hand. Two fzf screens (space, then work), a numbered menu without fzf, then the handoff to Claude.
 - `bin/wb-spaces` (python) — reads `~/.config/workbench/spaces.toml` and prints one 13-field TSV row per space; every other piece reads spaces through it.
