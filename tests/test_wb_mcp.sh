@@ -143,7 +143,7 @@ assert_contains "... saying why" "$out" "plan"
 assert_contains "add_dependency: a bead from another store is refused" "$(call add_dependency '{"space":"acme","id":"acme-1","depends_on":"oth-1"}')" "ERR"
 assert_eq "... nothing written" "$(field acme acme-1 dependencies)" ""
 assert_contains "add_dependency within the store" "$(call add_dependency '{"space":"acme","id":"acme-1","depends_on":"acme-3"}')" "OK"
-assert_eq "... written" "$(field acme acme-1 dependencies)" "['acme-3']"
+assert_eq "... written" "$(field acme acme-1 dependencies)" "[{'issue_id': 'acme-1', 'depends_on_id': 'acme-3', 'type': 'blocks'}]"
 assert_not_contains "nothing closes, claims or defers" "$(grep -E '^(close|undefer)|--status|-s |--claim|--defer' "$T/bd.log")" "acme"
 
 # --- connect / check / disconnect ---

@@ -118,6 +118,9 @@ changes or isn't on a branch. `wb-update --version` prints the installed version
 - **Labels the work screen reads:** `wave:1` and `wave:2` put a bead under NOW and NEXT;
   `icebox` puts it in a last section and out of the open count, whatever its wave. A claimed bead
   untouched for over 7 days shows `idle 23d`, so a forgotten session stands out.
+- **Blocked beads:** a bead with an open blocker (`bd dep add`, or `add_dependency` from Claude)
+  is marked `⊘` (a claimed one keeps `◐`) and ends with `blocked by 4, 1`. Its detail pane lists
+  each open blocker under `blocked by:`, and the beads waiting on it under `blocks:`.
 - **Start here:** beads flagged `attention` (due soon, or neglected and protected) come first, up to five then `+N more need attention`, shown even in a short backlog; a long backlog then opens with its top three ready beads and why each was picked
   (a fresh claim, NOW/NEXT, priority, a "Done when" line, what it unblocks), then how many beads
   were created and closed in the last 30 days.

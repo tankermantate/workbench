@@ -53,6 +53,21 @@ dout="$("$REPO/bin/wb-ui" render-work "$T/dfrs" 1)"
 assert_eq "render-work: a past-due deferral is an open row tagged with its date, dim" "$(row "$dout" dfr-1)" \
   $'○ 1      P2  Back again  \e[2mdeferred until 2020-01-01\e[0m'
 assert_not_contains "render-work: a future deferral is not listed" "$dout" "dfr-2"
+# a blocked bead: its own mark, and the row ends with what blocks it, dim
+mkstore "$T/blk"; mkdir -p "$T/blks"
+cat > "$T/blk/.beads/fake.json" <<'EOF'
+[{"id":"blk-1","title":"Setup","status":"open","priority":1},
+ {"id":"blk-2","title":"Guide","status":"open","priority":2,"dependencies":[{"issue_id":"blk-2","depends_on_id":"blk-1","type":"blocks"}]},
+ {"id":"blk-3","title":"Claimed guide","status":"in_progress","priority":2,"dependencies":[{"issue_id":"blk-3","depends_on_id":"blk-1","type":"blocks"}]}]
+EOF
+printf 'Blk\t-\t%s\ttrue\t1\tx\tblk\t-\t-\t0\n' "$T/blk" > "$T/blks/spaces.tsv"
+bout="$("$REPO/bin/wb-ui" render-work "$T/blks" 1)"
+assert_eq "render-work: a blocked bead is ⊘, ending with its blockers, dim" "$(row "$bout" blk-2)" \
+  $'⊘ 2      P2  Guide  \e[2mblocked by 1\e[0m'
+assert_eq "render-work: a blocked claim stays a claimed ◐ row" \
+  "$(printf '%s\n' "$bout" | awk -F'\t' '$2=="blk-3" {print $1}') $(row "$bout" blk-3)" \
+  $'claimed ◐ 3      P2  Claimed guide  \e[2mblocked by 1\e[0m'
+assert_eq "render-work: a ready bead has no tag" "$(row "$bout" blk-1)" "○ 1      P1  Setup"
 out="$("$REPO/bin/wb-ui" filter-work "$T/start" 1 'tidy')"
 assert_eq "search: the parent's title is searched" "$(printf '%s\n' "$out" | cut -f1,2 | tr '\t\n' ': ')" \
   "new:- msg: open:acme-e1 open:acme-a2 open:acme-a1 "

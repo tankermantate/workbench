@@ -9,6 +9,9 @@ What changed for you in each workbench release. Update with `wb-update`.
   `spaces.toml`, runs `bd init` where you say so, offers a Demo space with sample tasks, adds the
   launcher line to `~/.zshrc`, and ends with `wb-doctor`. Run it again to add projects.
 - `wb-doctor`: checks the setup, one line per check, saying how to fix what's wrong.
+- The work screen shows what blocks a bead: a blocked bead is marked `⊘` (a claimed one keeps `◐`)
+  and ends with `blocked by 4, 1`; its detail pane lists `blocked by:` and `blocks:`. Start here
+  no longer picks a bead whose blocker is deferred.
 
 ## 0.1 — 2026-11-17
 

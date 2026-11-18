@@ -2,13 +2,15 @@
 """wb-backlog — one space's live beads, read through bd.
 
   wb-backlog list ROOT [--snapshot FILE] [--flow FILE]
-      TSV, best first: id, short id, mark (○ open / ◐ in progress), P<n>,
+      TSV, best first: id, short id, mark (○ open / ◐ in progress / ⊘ blocked), P<n>,
       section (NOW / NEXT / - / ICEBOX), title, parent, worktree from the claim
       notes, the parent's title, days idle (a claim untouched for over IDLE_DAYS, or -;
       grooming's own writes don't count as touching it, see lib/wb_touched.py),
       start here (rank 1-3 and why, or -; see picks()),
       attention (rank and why for a bead labelled `attention`, or -; see attention()),
-      deferred until (the date a past-due deferral was put off to, or -; see due()).
+      deferred until (the date a past-due deferral was put off to, or -; see due()),
+      blocked by (open blockers' short ids, `blocked` for status blocked with none
+      recorded, or -; see statuses()).
       --flow writes one line, the last FLOW_DAYS' beads created vs closed, to FILE;
       nothing when the closed beads can't be read.
       Exits non-zero when there is nothing to list; the code says why (STATES).
@@ -186,16 +188,36 @@ def has_done_line(b):
     return bool((b.get("acceptance_criteria") or "").strip()) or bool(DONE_RE.search(b.get("description") or ""))
 
 
-def picks(beads):
+def blocks_ids(b):
+    """The ids b depends on through a `blocks` dependency, in bd's order."""
+    return [d.get("depends_on_id") for d in b.get("dependencies") or []
+            if isinstance(d, dict) and d.get("type") == "blocks"]
+
+
+def statuses(every):
+    """{id: status} over every bead bd returned, not only the live ones: bd leaves closed beads
+    out of a list, so a blocker missing from it is closed, but a deferral not yet due is hidden
+    from the screen and still blocks."""
+    return {x.get("id"): x.get("status") for x in every}
+
+
+def open_blockers(b, status):
+    """b's blockers that are still open, status being statuses() of everything bd returned."""
+    return [i for i in blocks_ids(b) if i in status and status[i] != "closed"]
+
+
+def blocked(b, status):
+    return b.get("status") == "blocked" or bool(open_blockers(b, status))
+
+
+def picks(beads, every=None):
     """{id: "rank why"} for the start-here few: ready beads (no icebox, epic or
-    open blocker; bd leaves closed beads out, so a blocker it didn't return is
-    closed), a fresh claim first so work in hand gets finished, then NOW, NEXT,
+    open blocker among every bead bd returned, see statuses()), a fresh claim first so work in hand gets finished, then NOW, NEXT,
     priority, a done line, and how many beads each would unblock. At most one
     fresh claim, so the picks aren't a row of open tabs. Attention beads have
     their own field. None in a backlog short enough to see whole."""
-    ids = {b.get("id") for b in beads}
-    blockers = {b.get("id"): {d.get("depends_on_id") for d in b.get("dependencies") or []
-                              if d.get("type") == "blocks"} & ids for b in beads}
+    status = statuses(every or beads)
+    blockers = {b.get("id"): open_blockers(b, status) for b in beads}
     unblocks = {}
     for bs in blockers.values():
         for i in bs:
@@ -204,7 +226,7 @@ def picks(beads):
         return {}
     ready = [b for b in beads if section(b) != "ICEBOX" and b.get("issue_type") != "epic"
              and ATTENTION not in (b.get("labels") or [])
-             and b.get("status") != "blocked" and not blockers[b.get("id")]]
+             and not blocked(b, status)]
 
     def resume(b):
         days = age(touched(b))
@@ -296,18 +318,22 @@ def cmd_list(root, snapshot=None, flow=None):
     if state != "ok":
         return STATES[state][0]
     titles = {b.get("id"): b.get("title") for b in data}  # all of them: a parent may be closed
-    start = picks(live(data))
+    start = picks(live(data), data)
     flagged = attention(flaggable(data))
     visible = {id(b) for b in live(data)}
+    status = statuses(data)
     shown = [b for b in data if id(b) in visible or b.get("id") in flagged]
     for b in ordered(shown):
         bid = str(b.get("id", ""))
-        mark = "◐" if b.get("status") == "in_progress" else "○"
+        # a claim keeps ◐ even when blocked: the handoff reads it to offer resume
+        mark = "◐" if b.get("status") == "in_progress" else "⊘" if blocked(b, status) else "○"
+        waits = ", ".join(i.rsplit("-", 1)[-1] for i in open_blockers(b, status)) or (
+            "blocked" if b.get("status") == "blocked" else None)
         prio = f"P{b['priority']}" if isinstance(b.get("priority"), int) else "P-"
         print("\t".join(clean(x) for x in (bid, bid.rsplit("-", 1)[-1], mark, prio,
                                             section(b), b.get("title"), b.get("parent"),
                                             worktree(b), titles.get(b.get("parent")), idle(b),
-                                            start.get(b.get("id")), flagged.get(b.get("id")), due(b))))
+                                            start.get(b.get("id")), flagged.get(b.get("id")), due(b), waits)))
     return 0
 
 
@@ -345,6 +371,13 @@ def cmd_summary(root):
     return 0
 
 
+def print_beads(label, ids, beads):
+    """One bead a line (id, title, status), the first after label, the rest lined up under it."""
+    for n, i in enumerate(ids):
+        x = beads.get(i) or {}
+        print(f"{label if n == 0 else ' ' * len(label)}{i}  {clean(x.get('title'))}  ({x.get('status', '?')})")
+
+
 def cmd_preview(snapshot, bead_id, query=""):
     if bead_id == "":  # a section header or message row
         return 0
@@ -369,6 +402,16 @@ def cmd_preview(snapshot, bead_id, query=""):
     print()
     print("parent: " + (f"{parent}  {ptitle}" if ptitle else (parent or "—")))
     print("labels: " + (", ".join(map(str, b.get("labels") or [])) or "—"))
+    status = statuses(beads.values())
+    waits = open_blockers(b, status)
+    if waits:
+        print_beads("blocked by: ", waits, beads)
+    elif b.get("status") == "blocked":
+        print("blocked by: (status blocked; no blocker recorded)")
+    if b.get("status") != "closed":
+        waiting = [x.get("id") for x in beads.values() if bead_id in open_blockers(x, status)]
+        if waiting:
+            print_beads("blocks: ", waiting, beads)
     print()
     print(wb_search.highlight(pats, b.get("description") or "") or "(no description)")
     return 0
