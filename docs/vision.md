@@ -150,7 +150,7 @@ not built yet.
 - **Partly there:** areas exist as *spaces* (with an optional group), and epics and tasks exist as
   beads, but there is no initiative layer or roll-up across spaces. Shaping before code exists,
   but there is no light spec or acceptance-criteria step.
-- **Not built:** planning in Claude (the headline of this release); guided setup; a new-version notice; anything after
+- **Not built:** planning in Claude (the headline of this release); guided setup; anything after
   the commit (pull requests, CI status, release); a single "vibe to strict" setting for how much workbench suggests.
 
 ### For us (internal)
