@@ -79,7 +79,10 @@ you are working before deciding what to do in it.
   the title come first, then the order above. Matched words are highlighted in the list and the
   preview. wb-ui does the matching (`lib/wb_search.py`, shared with the preview), because fzf can
   only search what it shows. The space screen uses fzf's exact, case-insensitive match.
-- **The preview pane** shows the highlighted bead's description, its parent epic and its labels.
+- **The preview pane** shows the highlighted bead's description, its parent epic and its labels,
+  then (added 2026-11-17) `blocked by:` with each open blocker (id, title, status) and `blocks:`
+  with the beads waiting on it, each line left out when empty. Status `blocked` with no blocker
+  recorded says so.
 - **In-progress beads are marked `◐`.** They are probably another session's, so a glance prevents
   a second session on the same bead.
   - Selecting one in a worktree space doesn't call `new-session`, which refuses with
@@ -89,6 +92,10 @@ you are working before deciding what to do in it.
     account (`<config>/projects/<real path, non-alphanumerics as ->/*.jsonl`), `--continue` would
     only fail, so it starts a fresh session on the bead with the work-on-bead prompt and says so.
   - If it doesn't, the claim is stale, and the launcher shows that rather than guessing.
+- **Blocked beads are marked `⊘`** (added 2026-11-17) and end their row with a dim `blocked by
+  4, 1` (short ids). A blocker is open if bd returned it and it isn't closed: bd leaves closed
+  beads out of a list, and a deferral not yet due is hidden from the screen but still blocks. A
+  claimed bead keeps `◐`, which the handoff reads, and still gets the tag.
 - **Order:** `wave:1`, then `wave:2`, then everything else, then the icebox; priority within
   each. A space that doesn't use waves is sorted by priority alone, with the icebox still last.
 - **The icebox** (added 2026-10-22): a bead labelled `icebox` goes in the last section whatever its
@@ -99,7 +106,8 @@ you are working before deciding what to do in it.
   sessions; nothing is changed for you.
 - **Start here** (added 2026-10-23): with more than three live beads outside the icebox, the screen
   opens with up to three picks, so a long backlog says where to begin. Only ready beads are picked:
-  no icebox, no epics, nothing with status `blocked` or an open `blocks` dependency. Ranked by: a
+  no icebox, no epics, nothing with status `blocked` or an open `blocks` dependency (open as for
+  the `⊘` mark, so a deferred blocker counts). Ranked by: a
   claim touched in the last 7 days (finish what's in hand), then NOW, NEXT, the rest; priority; a
   done line (acceptance criteria, or a line starting "Done when"); then how many beads it would
   unblock. Each pick ends with why, dim; one without a done line says `shape first`. The picks are

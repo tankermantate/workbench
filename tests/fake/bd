@@ -48,7 +48,7 @@ if cmd == "dep":
     b = next((x for x in beads if x["id"] == bid), None)
     if b is None:
         print(f"Error: no issue found matching {bid!r}", file=sys.stderr); sys.exit(1)
-    b.setdefault("dependencies", []).append(dep)
+    b.setdefault("dependencies", []).append({"issue_id": bid, "depends_on_id": dep, "type": "blocks"})  # bd's shape
     json.dump(beads, open(path, "w"))
     print(f"Added dependency: {bid} depends on {dep}")
     sys.exit(0)

@@ -12,9 +12,9 @@ assert_eq "list ok exits 0" "$rc" "0"
 assert_eq "order: NOW by priority, NEXT, then the rest by priority; deferred+closed hidden" \
   "$(printf '%s\n' "$out" | cut -f1 | tr '\n' ' ')" "acme-a2 acme-a1 acme-b1 acme-c1 acme-e1 acme-c2 "
 assert_eq "row fields" "$(printf '%s\n' "$out" | head -1)" \
-  "acme-a2	a2	○	P1	NOW	High wave-1	acme-e1	-	Epic: tidy the shop	-	1 NOW · P1 · shape first	-	-"
+  "acme-a2	a2	○	P1	NOW	High wave-1	acme-e1	-	Epic: tidy the shop	-	1 NOW · P1 · shape first	-	-	-"
 assert_eq "in-progress is ◐ with its worktree from notes" "$(printf '%s\n' "$out" | tail -1)" \
-  "acme-c2	c2	◐	P3	-	Claimed elsewhere	-	/tmp/wb-fixture-wt/acme-x	-	-	-	-	-"
+  "acme-c2	c2	◐	P3	-	Claimed elsewhere	-	/tmp/wb-fixture-wt/acme-x	-	-	-	-	-	-"
 assert_eq "claimed: the bead whose current claim names the worktree" \
   "$("$WB" claimed "$T/store" /tmp/wb-fixture-wt/acme-x)" "acme-c2"
 "$WB" claimed "$T/store" /tmp/wb-fixture-wt/other >/dev/null; assert_eq "claimed: none exits 1" "$?" "1"
@@ -219,7 +219,7 @@ cat > "$FAKE_BD_DIR/stdout" <<EOF
 [{"id":"bee-9","title":"tab\there \$(touch $T/pwned) \"q\"\nnext","status":"open","priority":1,"description":"\$(touch $T/pwned)"}]
 EOF
 out="$("$WB" list "$T/store" --snapshot "$T/snap2.json")"
-assert_eq "hostile title is cleaned into one row of 13 fields" "$(printf '%s\n' "$out" | awk -F'\t' '{print NR":"NF}')" "1:13"
+assert_eq "hostile title is cleaned into one row of 14 fields" "$(printf '%s\n' "$out" | awk -F'\t' '{print NR":"NF}')" "1:14"
 prev="$("$WB" preview "$T/snap2.json" bee-9)"
 assert_contains "hostile description shown literally" "$prev" "\$(touch $T/pwned)"
 if [ ! -e "$T/pwned" ]; then ok "hostile title is cleaned and not executed"; else bad "something executed the title"; fi
@@ -353,4 +353,48 @@ reset_bd; cp "$FX/plain.json" "$FAKE_BD_DIR/stdout"; echo 'junk' > "$FAKE_BD_DIR
 "$WB" list "$T/store" --flow "$T/flow" >/dev/null; rc=$?
 assert_eq "flow: an unreadable closed read leaves the list alone" "$rc" "0"
 assert_eq "flow: and writes nothing rather than a wrong count" "$(cat "$T/flow" 2>/dev/null)" ""
+# blocked beads: field 14 names the open blockers (short ids), the mark is ⊘ unless claimed,
+# and the preview says what blocks a bead and what it blocks. One rule for all three: a
+# blocker is open if bd returned it and it isn't closed (bd leaves closed ones out of a list;
+# a deferred one not yet due is hidden from the list but still blocks).
+reset_bd; python3 - "$FAKE_BD_DIR/stdout" <<'EOF'
+import json, sys
+blocks = lambda *ids: [{"issue_id": "x", "depends_on_id": i, "type": "blocks"} for i in ids]
+json.dump([
+  {"id": "bk-1", "title": "Guided setup", "status": "open", "priority": 1},
+  {"id": "bk-2", "title": "Plan in Claude", "status": "in_progress", "priority": 1},
+  {"id": "bk-3", "title": "Getting-started guide", "status": "open", "priority": 0, "dependencies": blocks("bk-1", "bk-2")},
+  {"id": "bk-4", "title": "Claimed but waiting", "status": "in_progress", "priority": 0, "dependencies": blocks("bk-1")},
+  {"id": "bk-5", "title": "Later, maybe", "status": "deferred", "priority": 3, "defer_until": "2099-01-01T00:00:00Z"},
+  {"id": "bk-6", "title": "Waits on a deferral", "status": "open", "priority": 0, "dependencies": blocks("bk-5")},
+  {"id": "bk-7", "title": "Blocker done", "status": "open", "priority": 0, "dependencies": blocks("bk-gone")},
+  {"id": "bk-8", "title": "Marked blocked", "status": "blocked", "priority": 0},
+  {"id": "bk-9", "title": "Blocker closed but returned", "status": "open", "priority": 0, "dependencies": blocks("bk-10")},
+  {"id": "bk-10", "title": "Shipped", "status": "closed", "priority": 2},
+  {"id": "bk-11", "title": "Filler", "status": "open", "priority": 4},
+], open(sys.argv[1], "w"))
+EOF
+out="$("$WB" list "$T/store" --snapshot "$T/snapbk.json")"
+f() { printf '%s\n' "$out" | awk -F'\t' -v id="$1" -v n="$2" '$1==id {print $n}'; }
+assert_eq "blocked: field 14 names each open blocker" "$(f bk-3 14)" "1, 2"
+assert_eq "blocked: an open bead with an open blocker is ⊘" "$(f bk-3 3)" "⊘"
+assert_eq "blocked: a claimed one keeps ◐ (the handoff reads it) but still names its blocker" "$(f bk-4 3) $(f bk-4 14)" "◐ 1"
+assert_eq "blocked: a deferred blocker not yet due still blocks" "$(f bk-6 3) $(f bk-6 14)" "⊘ 5"
+assert_eq "blocked: a blocker bd didn't return is closed" "$(f bk-7 3) $(f bk-7 14)" "○ -"
+assert_eq "blocked: a returned closed blocker doesn't block" "$(f bk-9 3) $(f bk-9 14)" "○ -"
+assert_eq "blocked: status blocked with no recorded blocker" "$(f bk-8 3) $(f bk-8 14)" "⊘ blocked"
+assert_eq "blocked: START HERE never picks a blocked bead, a deferred blocker included" \
+  "$(printf '%s\n' "$out" | awk -F'\t' '$11 != "-" {print $1}' | sort | tr '\n' ' ')" "bk-1 bk-7 bk-9 "
+prev="$("$WB" preview "$T/snapbk.json" bk-3)"
+assert_contains "preview: blocked by, each open blocker with title and status" "$prev" \
+  $'blocked by: bk-1  Guided setup  (open)\n            bk-2  Plan in Claude  (in_progress)'
+assert_not_contains "preview: a bead that blocks nothing has no blocks line" "$prev" "blocks:"
+assert_contains "preview: blocks, the beads waiting on this one" "$("$WB" preview "$T/snapbk.json" bk-1)" \
+  $'blocks: bk-3  Getting-started guide  (open)\n        bk-4  Claimed but waiting  (in_progress)'
+assert_contains "preview: a deferred blocker shows its status" "$("$WB" preview "$T/snapbk.json" bk-6)" \
+  "blocked by: bk-5  Later, maybe  (deferred)"
+assert_not_contains "preview: closed blockers aren't listed" "$("$WB" preview "$T/snapbk.json" bk-9)" "blocked by"
+assert_contains "preview: status blocked with nothing recorded says so" "$("$WB" preview "$T/snapbk.json" bk-8)" \
+  "blocked by: (status blocked; no blocker recorded)"
+assert_not_contains "preview: a closed bead blocks nothing" "$("$WB" preview "$T/snapbk.json" bk-10)" "blocks:"
 finish
