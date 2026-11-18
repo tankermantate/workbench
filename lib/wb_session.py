@@ -21,11 +21,25 @@ BD = os.environ.get("WB_BD", "bd")
 READ_TIMEOUT = float(os.environ.get("WB_BD_TIMEOUT", "10"))  # a big store's bd show takes ~2s idle, more while claude starts
 WRITE_TIMEOUT = float(os.environ.get("WB_BD_WRITE_TIMEOUT", "30"))
 SAFE_ID = re.compile(r"[A-Za-z0-9-]{1,64}")
-WORKTREE_RE = re.compile(r"worktree at (/[^)\n]+)\)")  # the claim note's path; may contain spaces
+WORKTREE_RE = re.compile(r"worktree at ((?:/|~/)[^)\n]+)\)")  # the claim note's path; may contain spaces
 # The claim's link also goes in the bead's metadata: a session that rewrites the notes
 # (bd update --notes) drops the claim note, and with it end-session's and wb-tidy's way back.
 WORKTREE_KEY = "wb_worktree"
 TITLE_MAX = 40
+
+
+def home_short(path):
+    """PATH with the home folder written as ~, as claims record it: the login name in a full
+    path is one of check-leaks' private words, and beads are text people share."""
+    home = os.path.expanduser("~").rstrip("/")
+    if home and (path == home or path.startswith(home + "/")):
+        return "~" + path[len(home):]
+    return path
+
+
+def home_full(path):
+    """The full path for a claim's PATH, which may start with ~/."""
+    return os.path.expanduser(path) if path.startswith("~/") else path
 
 
 def state_dir():
@@ -221,14 +235,14 @@ def linked_worktree(bead):
         except ValueError:
             meta = None
     w = meta.get(WORKTREE_KEY) if isinstance(meta, dict) else None
-    return w if isinstance(w, str) and w.startswith("/") else None
+    return home_full(w) if isinstance(w, str) and w.startswith(("/", "~/")) else None
 
 
 def worktree_of(bead):
     """The worktree the bead is claimed in, or None: its metadata link, else its last claim
     note (notes are appended to, so the last is current), for beads claimed before the link."""
     found = WORKTREE_RE.findall(bead.get("notes") or "")
-    return linked_worktree(bead) or (found[-1] if found else None)
+    return linked_worktree(bead) or (home_full(found[-1]) if found else None)
 
 
 def note_claim(root, bead, worktree):
@@ -242,14 +256,14 @@ def note_claim(root, bead, worktree):
     if linked and os.path.realpath(linked) == want:
         return None
     args = ["update", bead["id"]]
-    if not any(os.path.realpath(w) == want for w in WORKTREE_RE.findall(bead.get("notes") or "")):
+    if not any(os.path.realpath(home_full(w)) == want for w in WORKTREE_RE.findall(bead.get("notes") or "")):
         try:
             branch = subprocess.run(["git", "-C", worktree, "branch", "--show-current"],
                                     capture_output=True, text=True, timeout=5).stdout.strip()
         except (OSError, subprocess.SubprocessError):
             branch = ""
-        args += ["--append-notes", f"Branch: {branch or '?'} (worktree at {worktree})"]
-    args += ["--set-metadata", f"{WORKTREE_KEY}={worktree}"]
+        args += ["--append-notes", f"Branch: {branch or '?'} (worktree at {home_short(worktree)})"]
+    args += ["--set-metadata", f"{WORKTREE_KEY}={home_short(worktree)}"]
     rc, _ = run_bd(root, args, WRITE_TIMEOUT)
     if rc != 0:
         return "bd timed out" if rc is None else f"bd exited {rc}"

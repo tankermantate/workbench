@@ -145,11 +145,16 @@ fi
 
 # ---- claim (append: --notes would replace the bead's notes). The metadata link is the one
 # a later notes rewrite can't drop; end-session and wb-tidy read it first.
+# The home folder is written as ~: the login name is one of check-leaks' private words, and
+# beads are text people share. lib/wb_session.py home_full reads it back.
+SHOWN=$WORKTREE
+home=${HOME%/}
+case "$WORKTREE" in "$home"/*) SHOWN="~${WORKTREE#"$home"}" ;; esac
 if [ -n "$BEAD" ]; then
   echo "→ claiming $BEAD"
   # Bounded: a bd stuck behind a lock must not hold up the session.
   (cd "$SOURCE" && ws_timeout "${WB_BD_WRITE_TIMEOUT:-30}" "${WB_BD:-bd}" update "$BEAD" --claim \
-     --append-notes "Branch: $BRANCH (worktree at $WORKTREE)" --set-metadata "wb_worktree=$WORKTREE" \
+     --append-notes "Branch: $BRANCH (worktree at $SHOWN)" --set-metadata "wb_worktree=$SHOWN" \
      </dev/null >/dev/null) \
     || echo "  warning: couldn't claim $BEAD; the session starts anyway." >&2
 fi

@@ -167,6 +167,18 @@ assert_eq "claimed: the metadata wins over an older notes line" "$("$WB" claimed
 FAKE_BD_LOG="$T/claimed.log" "$WB" claimed "$T/store" /x/current >/dev/null
 assert_contains "claimed: reads closed beads too (a finished worktree's bead is closed)" "$(cat "$T/claimed.log")" "list -n 0 --json --all"
 
+# claims record the worktree with ~ for the home folder (the login name is a private word)
+reset_bd
+cat > "$FAKE_BD_DIR/stdout" <<'EOF'
+[{"id":"bee-t","title":"Tilde note","status":"in_progress","priority":1,
+  "notes":"Branch: feat/t (worktree at ~/wts/t one)"},
+ {"id":"bee-tm","title":"Tilde link","status":"in_progress","priority":2,
+  "notes":"rewritten","metadata":{"wb_worktree":"~/wts/tm"}}]
+EOF
+assert_eq "claimed: a ~ claim note resolves against HOME" "$(HOME="$T/h" "$WB" claimed "$T/store" "$T/h/wts/t one")" "bee-t"
+assert_eq "claimed: a ~ metadata link resolves against HOME" "$(HOME="$T/h" "$WB" claimed "$T/store" "$T/h/wts/tm")" "bee-tm"
+assert_eq "list: the worktree comes back as a full path" "$(HOME="$T/h" "$WB" list "$T/store" | cut -f8 | head -1)" "$T/h/wts/t one"
+
 # grooming's own writes (an attention flag on a claim) don't count as touching it: the
 # stamp a grooming apply or undo left walks back to the one before, through the run records
 reset_bd; python3 - "$FAKE_BD_DIR/stdout" "$WB_GROOM_DIR" "$T/store" <<'EOF'
