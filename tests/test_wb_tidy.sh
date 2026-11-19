@@ -125,4 +125,30 @@ assert_contains "beads unreadable: nothing in that space is offered" "$(line "$o
 assert_contains "and says why" "$(line "$out" acme-nobead)" "couldn't read Acme's beads"
 assert_not_contains "nothing would be ended" "$out" "would end"
 
+# ---- squash-merged through a pull request: not an ancestor of main, but gh knows
+wt acme-squashed feat/squashed
+echo s > "$T/wts/acme-squashed/s.txt"
+git -C "$T/wts/acme-squashed" add s.txt
+git -C "$T/wts/acme-squashed" -c user.email=t@example.com -c user.name=t commit -q -m s
+git -C "$T/acme" merge -q --squash feat/squashed >/dev/null
+git -C "$T/acme" -c user.email=t@example.com -c user.name=t commit -q -m "squash"
+python3 - "$T/acme/.beads/fake.json" "$(note acme-squashed)" <<'PY'
+import json, sys
+p, n = sys.argv[1:]
+d = json.load(open(p))
+d.append({"id": "ac-5", "title": "Squashed one", "status": "closed", "notes": n, "updated_at": "2026-11-10T00:00:00Z"})
+json.dump(d, open(p, "w"))
+PY
+tip=$(git -C "$T/wts/acme-squashed" rev-parse HEAD)
+PRS="[{\"number\":21,\"headRefName\":\"feat/squashed\",\"headRefOid\":\"$tip\",\"baseRefName\":\"main\"},
+      {\"number\":22,\"headRefName\":\"feat/unmerged\",\"headRefOid\":\"0000000\",\"baseRefName\":\"main\"}]"
+out=$(WORKBENCH_DRY_RUN=1 FAKE_GH_LOG="$T/gh.log" FAKE_GH_PRS="$PRS" "$W" </dev/null 2>&1)
+assert_contains "squash-merged by a PR: offered" "$(line "$out" acme-squashed)" "  offer  acme-squashed"
+assert_contains "and says how it knows" "$(line "$out" acme-squashed)" "squash-merged by PR #21"
+assert_contains "a merged PR whose head isn't the worktree's HEAD doesn't count" "$(line "$out" acme-unmerged)" "not merged into main"
+assert_eq "one gh call for the repo, not one per worktree" "$(grep -c '^pr list' "$T/gh.log")" "1"
+out=$(WORKBENCH_DRY_RUN=1 FAKE_GH_PR_RC=1 FAKE_GH_PRS="$PRS" "$W" </dev/null 2>&1)
+assert_contains "gh failing: kept" "$(line "$out" acme-squashed)" "keep"
+assert_contains "and says gh couldn't tell" "$(line "$out" acme-squashed)" "not merged into main (gh couldn't check for a merged pull request)"
+
 finish

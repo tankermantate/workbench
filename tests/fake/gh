@@ -1,9 +1,19 @@
 #!/usr/bin/env bash
-# Fake gh: logs argv to $FAKE_GH_LOG; reports $FAKE_GH_ACTIVE as the active
-# account; 'auth switch' exits $FAKE_GH_SWITCH_RC (default 0).
-[ -n "${FAKE_GH_LOG:-}" ] && echo "$*" >> "$FAKE_GH_LOG"
+# Fake gh: logs argv to $FAKE_GH_LOG (and the GH_TOKEN it was given); reports
+# $FAKE_GH_ACTIVE as the active account; 'auth switch' exits $FAKE_GH_SWITCH_RC
+# (default 0); 'auth token --user U' prints tok-U; 'pr list' prints $FAKE_GH_PRS
+# (default []) unfiltered and exits $FAKE_GH_PR_RC (default 0), sleeping
+# $FAKE_GH_SLEEP seconds first when set.
+if [ -n "${FAKE_GH_LOG:-}" ]; then
+  echo "$*" >> "$FAKE_GH_LOG"
+  [ -z "${GH_TOKEN:-}" ] || echo "token=$GH_TOKEN" >> "$FAKE_GH_LOG"
+fi
 case "${1:-} ${2:-}" in
   "auth status") echo "github.com"; echo "  ✓ Logged in to github.com account ${FAKE_GH_ACTIVE:-someone} (keyring)" ;;
   "auth switch") exit "${FAKE_GH_SWITCH_RC:-0}" ;;
+  "auth token") [ "${3:-}" = --user ] && echo "tok-${4:-}" || echo "tok-${FAKE_GH_ACTIVE:-someone}" ;;
+  "pr list")
+    [ -z "${FAKE_GH_SLEEP:-}" ] || sleep "$FAKE_GH_SLEEP"
+    printf '%s\n' "${FAKE_GH_PRS:-[]}"; exit "${FAKE_GH_PR_RC:-0}" ;;
 esac
 exit 0

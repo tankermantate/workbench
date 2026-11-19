@@ -210,6 +210,58 @@ assert_eq "after_end hangs: still exits 0" "$rc" "0"
 assert_contains "after_end hangs: warns" "$out" "after_end failed"
 if [ "$took" -lt 10 ]; then ok "after_end hangs: cut off by the timeout"; else bad "after_end hangs: took ${took}s"; fi
 
+# 20 squash-merged through a pull request: the branch's commits never reach main,
+# only the squash does, so ancestry can't tell. gh can: a merged PR into main whose
+# head is exactly this worktree's HEAD.
+s="$T/r20"; setup_repo "$s"; conf "$s" "$GATE"
+squash() {   # squash REPO BRANCH: squash-merge BRANCH into main and push, as GitHub would
+  git -C "$1" merge -q --squash "$2" >/dev/null; git -C "$1" commit -q -m "squash $2"; git -C "$1" push -q origin main
+}
+pr() { printf '[{"number":%s,"headRefName":"%s","headRefOid":"%s","baseRefName":"%s"}]' "$1" "$2" "$3" "${4:-main}"; }
+w=$(wt "$s" feat/sq); commit "$w" s1; commit "$w" s2; git -C "$w" push -q -u origin feat/sq
+squash "$s" feat/sq; git -C "$s" push -q origin --delete feat/sq   # GitHub deletes the head branch
+out="$(FAKE_GH_PRS="$(pr 12 feat/sq "$(git -C "$w" rev-parse HEAD)")" "$ES" "$w" 2>&1)"; rc=$?
+assert_eq "squash-merged: exits 0" "$rc" "0"
+gone "squash-merged: worktree removed" "$w"; branch_gone "squash-merged: branch deleted" "$s" feat/sq
+assert_contains "squash-merged: says how it knows" "$out" "squash-merged into main by PR #12"
+assert_not_contains "squash-merged: before_end not run (the code is on main)" "$out" "predeploy has not passed"
+assert_not_contains "squash-merged: no 'not pushed' though the remote branch is gone" "$out" "not pushed"
+
+# a commit beyond the merged PR's head is real work: checked as before
+w=$(wt "$s" feat/sq2); commit "$w" t1; git -C "$w" push -q -u origin feat/sq2
+head=$(git -C "$w" rev-parse HEAD); squash "$s" feat/sq2
+commit "$w" t2; git -C "$w" push -q origin feat/sq2
+out="$(FAKE_GH_PRS="$(pr 13 feat/sq2 "$head")" "$ES" "$w" 2>&1)"; rc=$?
+assert_eq "work beyond the merged PR: refused by before_end" "$rc" "1"
+assert_contains "work beyond the merged PR: the gate ran" "$out" "predeploy has not passed"
+there "work beyond the merged PR: kept" "$w"
+
+# a PR merged into another branch isn't merged into main
+conf "$s"
+w=$(wt "$s" feat/sq3); commit "$w" u1; git -C "$w" push -q -u origin feat/sq3
+out="$(FAKE_GH_PRS="$(pr 14 feat/sq3 "$(git -C "$w" rev-parse HEAD)" develop)" "$ES" "$w" 2>&1)"
+gone "PR into develop: removed (pushed)" "$w"; branch_kept "PR into develop: branch kept" "$s" feat/sq3
+assert_contains "PR into develop: not merged" "$out" "not merged into main"
+
+# gh failing or hanging reads as not merged, as before
+w=$(wt "$s" feat/sq4); commit "$w" v1; git -C "$w" push -q -u origin feat/sq4; squash "$s" feat/sq4
+FAKE_GH_PR_RC=1 FAKE_GH_PRS="$(pr 15 feat/sq4 "$(git -C "$w" rev-parse HEAD)")" "$ES" "$w" >/dev/null 2>&1
+branch_kept "gh fails: branch kept" "$s" feat/sq4
+w=$(wt "$s" feat/sq5); commit "$w" v2; git -C "$w" push -q -u origin feat/sq5; squash "$s" feat/sq5
+start=$(date +%s)
+WB_GH_TIMEOUT=1 FAKE_GH_SLEEP=20 FAKE_GH_PRS="$(pr 16 feat/sq5 "$(git -C "$w" rev-parse HEAD)")" "$ES" "$w" >/dev/null 2>&1
+took=$(( $(date +%s) - start ))
+branch_kept "gh hangs: branch kept" "$s" feat/sq5
+if [ "$took" -lt 10 ]; then ok "gh hangs: cut off by the timeout"; else bad "gh hangs: took ${took}s"; fi
+
+# the space's GitHub account asks, without switching gh's active account
+conf "$s" "gh_account = \"acme-bot\""
+w=$(wt "$s" feat/sq6); commit "$w" v3; git -C "$w" push -q -u origin feat/sq6; squash "$s" feat/sq6
+FAKE_GH_LOG="$T/gh20.log" FAKE_GH_PRS="$(pr 17 feat/sq6 "$(git -C "$w" rev-parse HEAD)")" "$ES" "$w" >/dev/null 2>&1
+branch_gone "gh account: squash-merged, deleted" "$s" feat/sq6
+assert_contains "gh account: asked as the space's account" "$(cat "$T/gh20.log")" "token=tok-acme-bot"
+assert_not_contains "gh account: active account left alone" "$(cat "$T/gh20.log")" "auth switch"
+
 # 16 refusals
 conf "$h"
 out="$("$ES" "$h" 2>&1)"; rc=$?

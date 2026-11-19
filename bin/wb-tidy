@@ -5,7 +5,8 @@
                         ticked ones with end-session, one at a time, stopping at the first refusal
 
 Offered only when all hold: its space is known, its branch is merged into the repo's default
-branch, it has no uncommitted changes, no Claude session is open in it, and the bead claimed in it
+branch (in its history, or squash-merged: gh reports a merged pull request from the branch into it
+whose head is exactly the branch's tip; one gh call per repo, as the space's gh_account), it has no uncommitted changes, no Claude session is open in it, and the bead claimed in it
 is closed (new-session's wb_worktree metadata link names it, else the bead's last claim note). A
 closed bead is the only sign the work is done: merged and clean only say no code would be lost, and
 a worktree's conversation goes with its folder. So a worktree no bead names is kept, unless
@@ -27,6 +28,7 @@ import sys
 ME = os.path.realpath(__file__)
 sys.path.insert(0, os.path.join(os.path.dirname(ME), "..", "lib"))
 import wb_live  # noqa: E402  (lives in lib/; realpath, since install.sh links bin/ elsewhere)
+import wb_merged  # noqa: E402
 import wb_session  # noqa: E402
 import wb_space  # noqa: E402
 
@@ -123,11 +125,14 @@ def survey(no_bead=False):
         if len(r) > 6 and r[4] == "1":
             top = wb_space.toplevel(r[2])
             if top:
-                repos.setdefault(real(top), []).append({"name": r[0], "root": r[2], "key": r[6]})
+                repos.setdefault(real(top), []).append({"name": r[0], "root": r[2], "key": r[6],
+                                                        "gh": r[10] if len(r) > 10 and r[10] != "-" else None})
 
     found, seen, beads_of = [], set(), {}
     for main, spaces in repos.items():
         base = default_branch(main)
+        prs = []  # the repo's merged PRs into base, asked for once and only when needed; None: gh can't say
+        asked = False
         for path, branch in worktrees(main):
             seen.add(path)
             space = space_of(path, spaces)
@@ -141,17 +146,26 @@ def survey(no_bead=False):
                 why = "detached HEAD, so its branch is unknown"
             elif git("status", "--porcelain", cwd=path)[1]:
                 why = "uncommitted changes"
-            elif not any(not git("merge-base", "--is-ancestor", branch, ref, cwd=main)[0]
-                         for ref in (base, f"origin/{base}")):
-                why = f"not merged into {base}"
-            elif beads is None:
+            merged = "merged"
+            if not why and not any(not git("merge-base", "--is-ancestor", branch, ref, cwd=main)[0]
+                                   for ref in (base, f"origin/{base}")):
+                if not asked:
+                    prs, asked = wb_merged.merged_prs(main, base, next((s["gh"] for s in spaces if s["gh"]), None)), True
+                n = wb_merged.squash_pr(prs, branch, base, git("rev-parse", branch, cwd=main)[1])
+                if n is not None:
+                    merged = f"squash-merged by PR #{n}"
+                elif prs is None:
+                    why = f"not merged into {base} (gh couldn't check for a merged pull request)"
+                else:
+                    why = f"not merged into {base}"
+            if not why and beads is None:
                 why = f"couldn't read {space['name']}'s beads, so its bead is unknown"
             bead = bead_for(path, beads or [])
             if not why and bead and bead.get("status") != "closed":
                 why = f"its bead {bead.get('id')} is {bead.get('status')}"
             if not why and not bead and not no_bead:
                 why = "merged and clean, but no bead names it; wb-tidy --no-bead offers these too"
-            note = (f"bead {bead.get('id')} {bead.get('status')}" if bead else "no bead") + f" · merged · clean"
+            note = (f"bead {bead.get('id')} {bead.get('status')}" if bead else "no bead") + f" · {merged} · clean"
             found.append((path, space["name"], branch or "-", not why, why or note))
 
     wdir = os.environ.get("WB_WORKTREES_DIR") or os.path.expanduser("~/.worktrees")

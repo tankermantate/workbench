@@ -16,6 +16,10 @@ Usage: end-session [<worktree-path>] [--force] [--no-space] [--base=<branch>]
                     (so no before_end check runs)
   --base=<branch>   the branch "merged" is checked against
                     (default: the repo's default branch)
+
+Merged means the branch is in <branch>'s history, or gh reports a merged pull
+request from it into <branch> whose head is exactly the worktree's HEAD (a
+squash merge, whose commits never reach <branch> themselves).
 EOF
 }
 die() { echo "end-session: $1" >&2; exit "${2:-2}"; }
@@ -120,6 +124,21 @@ if [ "$FORCE" = 0 ]; then
   fi
 fi
 
+# A squash merge leaves the branch's commits off the base, so ancestry says
+# "unmerged" forever, the before_end marker for this SHA never comes, and GitHub
+# may have deleted the remote branch. A merged pull request whose head is exactly
+# this HEAD says the work is on the base: nothing to push or verify.
+SQUASH=""   # "PR #N" when so
+if [ "$FORCE" = 0 ] && [ "$NOTHING" = 0 ] && [ "$HAS_ORIGIN" = 1 ]; then
+  ACCOUNT=""; [ "$FOUND" = 1 ] && ACCOUNT=$S_GH_ACCOUNT
+  if SQUASH=$("$WB_HOME/lib/wb_merged.py" "$TARGET" "$BRANCH" "$BASE" \
+                "$(git -C "$TARGET" rev-parse HEAD)" ${ACCOUNT:+"$ACCOUNT"} 2>/dev/null); then
+    NOTHING=1; echo "→ squash-merged into $BASE by $SQUASH at this HEAD — nothing to push or verify"
+  else
+    SQUASH=""
+  fi
+fi
+
 if [ "$FORCE" = 0 ] && [ "$NOTHING" = 0 ] && [ "$HAS_ORIGIN" = 1 ]; then
   git -C "$TARGET" fetch --quiet origin "$BRANCH" 2>/dev/null || true
   LOCAL=$(git -C "$TARGET" rev-parse HEAD)
@@ -177,15 +196,17 @@ if [ "$FORCE" = 1 ]; then
 fi
 if [ "$HAS_ORIGIN" = 1 ]; then git -C "$MAIN" fetch --quiet origin "$BASE" 2>/dev/null || true; fi
 MERGED=0
+if [ -n "$SQUASH" ]; then MERGED=1; fi
 if git -C "$MAIN" merge-base --is-ancestor "$BRANCH" "$BASE" 2>/dev/null; then MERGED=1; fi
 if [ "$HAS_ORIGIN" = 1 ] && git -C "$MAIN" merge-base --is-ancestor "$BRANCH" "origin/$BASE" 2>/dev/null; then MERGED=1; fi
 if [ "$MERGED" = 1 ]; then
-  # -D, not -d: ancestry is proven above, and -d re-checks against the branch's
+  # -D, not -d: ancestry (or the squash PR) is proven above, and -d re-checks against the branch's
   # own (possibly stale) upstream.
   TIP=$(git -C "$MAIN" rev-parse "$BRANCH")
   git -C "$MAIN" branch -D "$BRANCH" >/dev/null
-  note_bead "Session ended: worktree removed; branch $BRANCH merged into $BASE at ${TIP:0:10} and deleted."
-  echo "✓ session ended. Branch '$BRANCH' is merged into $BASE and was deleted."
+  HOW="merged into $BASE"; [ -z "$SQUASH" ] || HOW="squash-merged into $BASE by $SQUASH"
+  note_bead "Session ended: worktree removed; branch $BRANCH $HOW at ${TIP:0:10} and deleted."
+  echo "✓ session ended. Branch '$BRANCH' is $HOW and was deleted."
 else
   note_bead "Session ended: worktree removed; branch $BRANCH kept, not merged into $BASE."
   echo "✓ session ended. Branch '$BRANCH' is not merged into $BASE, so it was kept."

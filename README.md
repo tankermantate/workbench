@@ -28,7 +28,7 @@ account, using your own plan or API credits.
 | `python3` 3.11 or later | The helper commands are Python. | `brew install python` if `python3 --version` is older (`wb-setup` offers it). |
 | `git` | Worktree sessions, and fetching before they start. | Comes with the Xcode command line tools. |
 | [fzf](https://github.com/junegunn/fzf) (optional) | Searchable screens. Without it, the launcher shows a numbered menu. | `brew install fzf` |
-| [gh](https://cli.github.com) (optional) | Only if a space sets `gh_account`. | `brew install gh` |
+| [gh](https://cli.github.com) (optional) | Only if a space sets `gh_account`, or to recognise branches squash-merged by a pull request. | `brew install gh` |
 
 ## Set up
 
@@ -148,7 +148,8 @@ store, runs the space's `on_create` hook, claims the bead and starts Claude.
 `end-session` refuses while the worktree has uncommitted or unpushed work, while the space's
 `before_end` hook fails, or when no space in your config claims the repo (`--no-space` goes ahead
 anyway). `--force` skips those checks and keeps the branch. A merged branch is deleted; an
-unmerged one is kept. Either way it appends a note to the session's bead saying what happened,
+unmerged one is kept. A branch squash-merged through a pull request counts as merged when `gh`
+says the pull request's head is the worktree's HEAD, so a squash merge needs no `--force`. Either way it appends a note to the session's bead saying what happened,
 without closing it: merged isn't the same as done.
 
 ## While you work
@@ -218,7 +219,7 @@ A session the launcher (or `new-session`) starts knows which bead it's on:
   yellow with `restart soon` once the Mac has been up 30 days or swap reaches half of RAM, which
   is when it starts to grind. `wb-health` prints the same line.
 - **Tidying finished worktrees.** `wb-tidy` lists every worktree with whether it's finished:
-  merged into the default branch, nothing uncommitted, no Claude session open in it, and its bead
+  merged into the default branch (squash merges too, through `gh`), nothing uncommitted, no Claude session open in it, and its bead
   closed. It offers only those, all ticked; Enter runs `end-session` on each, one at a time,
   stopping at the first refusal. Anything else is listed with why it stays. A worktree no bead
   names stays too; `wb-tidy --no-bead` offers those as well, when merged and clean.
@@ -297,7 +298,7 @@ never in this repo. `spaces.example.toml` documents every key. In short:
 | `folder_colors` | A glob space only: colours for some of its folders, like `{ alpha = "red" }`; the rest keep its `color`. |
 | `[launcher]` `update_check` | `false`: never look for a new version (see [What runs on its own](#what-runs-on-its-own)). |
 | `judge_env` | Variables the grooming judge needs beyond its allowlist (a proxy, Bedrock), with their values. |
-| `gh_account` | The `gh` account to switch to before fetching. |
+| `gh_account` | The `gh` account to switch to before fetching, and the one `end-session` and `wb-tidy` ask GitHub as whether a pull request squash-merged a branch. |
 | `on_create`, `before_end` | Hooks: one-line shell commands, run in the worktree with `WB_SPACE`, `WB_WORKTREE`, `WB_PROJECT`, `WB_SOURCE`, `WB_BRANCH`, `WB_BEAD` set, and `WB_SHA` for `before_end`. Keep private setup scripts in `~/.config/workbench/hooks/`. |
 | `after_end` | Hook run by `end-session` right after the worktree is removed, on every path including `--force`, in the main checkout's project folder (the worktree is gone), with the same variables. For cleanup outside the folder. A failure or a 60 s hang only warns. |
 
