@@ -450,14 +450,16 @@ PARTIAL = "partial"  # in a run dir: why the judge's run did not cover the backl
 
 
 def backlog_gaps(run_dir, beads, backlog):
-    """wb_groom.backlog_gaps for the run's decisions.json; an unreadable one has none (apply
-    refuses it with its own exit)."""
+    """(gaps, read line) for the run's decisions.json: wb_groom.backlog_gaps and read_line. An
+    unreadable one has no gaps and no line (apply refuses it with its own exit)."""
     try:
         with open(os.path.join(run_dir, "decisions.json"), encoding="utf-8") as f:
             decisions = json.load(f)
     except (OSError, ValueError):
-        return []
-    return wb_groom.backlog_gaps(decisions, beads, backlog) if isinstance(decisions, dict) else []
+        return [], None
+    if not isinstance(decisions, dict):
+        return [], None
+    return wb_groom.backlog_gaps(decisions, beads, backlog), wb_groom.read_line(decisions, backlog)
 
 
 def groom_in(space, base, run_dir):
@@ -542,7 +544,7 @@ def groom_in(space, base, run_dir):
         return stop(EXIT_RUN_DIR, f"cannot take the judge's decisions.json ({e}); nothing applied")
     if not os.path.isfile(os.path.join(run_dir, "decisions.json")):
         return stop(EXIT_JUDGE, "the judge left no decisions.json; nothing applied; see judge.json and judge.err in the run dir")
-    gaps = backlog_gaps(run_dir, beads, backlog)
+    gaps, read = backlog_gaps(run_dir, beads, backlog)
     if gaps:
         try:
             with open(os.path.join(run_dir, PARTIAL), "w", encoding="utf-8") as f:
@@ -562,7 +564,7 @@ def groom_in(space, base, run_dir):
     if code != 0:
         lead = [f"apply stopped (exit {code}); see apply.log"] + lead
     try:
-        finish_summary(run_dir, base, root, lead, said)
+        finish_summary(run_dir, base, root, lead, ([read] if read else []) + said)
     except OSError as e:
         print(f"wb-groom: {label}: cannot write summary.md: {e}", file=sys.stderr)
         return code if code != 0 else EXIT_RUN_DIR

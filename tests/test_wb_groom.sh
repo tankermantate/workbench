@@ -39,7 +39,7 @@ assert_eq "unprotected only when the judge says false and no label" \
 # --- sprint ---
 out="$(ops '{"sprint":{"now":[{"id":"acme-1","why":"g1"},{"id":"acme-7","why":"money"},{"id":"acme-9","why":"x"},{"id":"acme-3","why":"x"},{"id":"acme-99","why":"x"}],
  "next":[{"id":"acme-8","why":"later"},{"id":"acme-6","why":"same"}],
- "leaving":[{"id":"acme-4","why":"no goal","protected":false}]}}')"; rc=$?
+ "leaving":[{"id":"acme-4","why":"no goal","protected":false},{"id":"acme-5","why":"later"}]}}')"; rc=$?
 assert_eq "ops exits 0" "$rc" "0"
 assert_contains "sprint: add an unprotected bead to NOW" "$out" $'acme-1\twave\twave:1\tNOW: g1'
 assert_contains "sprint: a protected bead moving NEXT to NOW is applied" "$out" $'acme-7\twave\twave:1\t'
@@ -52,14 +52,22 @@ assert_not_contains "sprint: already in the named wave: no op" "$out" "acme-6"$'
 assert_contains "sprint: past size is dropped" "$out" $'dropped\tacme-9: over size'
 assert_contains "sprint: claimed is dropped" "$out" $'dropped\tacme-3: claimed'
 assert_contains "sprint: unknown id is dropped" "$out" $'dropped\tacme-99: unknown id'
-out2="$(ops '{"sprint":{"now":[]},"changes":[{"id":"acme-4","kind":"priority","to":"3","why":"p","protected":null}]}')"
+out2="$(ops '{"sprint":{"now":[],"leaving":[{"id":"acme-4","why":"w"}]},"changes":[{"id":"acme-4","kind":"priority","to":"3","why":"p","protected":null}]}')"
 assert_contains "sprint: a leaving bead the judge called unsure is a proposal" "$out2" $'proposal\tacme-4\tunwave'
 out2="$(ops '{"sprint":{"now":[]}}')"
-assert_contains "sprint: leaving with no verdict at all is a proposal" "$out2" $'proposal\tacme-4\tunwave\twave:1\tleft the sprint\tprotected'
+assert_not_contains "sprint: a wave bead named in none of now, next, leaving is not unwaved (not judged)" "$out2" $'acme-4\tunwave'
+assert_not_contains "sprint: ... nor proposed for removal" "$out2" $'proposal\tacme-4'
+assert_contains "sprint: ... it keeps its wave and says not judged" "$out2" $'dropped\tacme-4: not judged (named in none of now, next, leaving); keeps wave:1'
+assert_contains "sprint: ... a protected one too" "$out2" $'dropped\tacme-5: not judged (named in none of now, next, leaving); keeps wave:1'
+assert_not_contains "sprint: no bare 'left the sprint'" "$out2" "left the sprint"
+out2="$(ops '{"sprint":{"now":[],"leaving":[{"id":"acme-4","why":"no goal"}]}}')"
+assert_contains "sprint: leaving with no verdict at all is a proposal, with its why" "$out2" $'proposal\tacme-4\tunwave\twave:1\tno goal\tprotected'
 assert_not_contains "sprint: ... not an op" "$(ops_only "$out2")" "acme-4"
+out2="$(ops '{"sprint":{"now":[],"leaving":[{"id":"acme-4","why":"","protected":false}]}}')"
+assert_contains "sprint: a leaving bead with an empty why says the judge gave none" "$out2" $'acme-4\tunwave\twave:1\tleaves the sprint (the judge gave no why)'
 out2="$(ops '{"sprint":{"now":[],"leaving":[{"id":"acme-4","why":"w","protected":false}]},"changes":[{"id":"acme-4","kind":"bogus","protected":false},{"id":"acme-4","kind":"priority","to":"3","why":"p","protected":true}]}')"
 assert_contains "sprint: a protected:true change vetoes the leaving verdict" "$out2" $'proposal\tacme-4\tunwave'
-out2="$(ops '{"sprint":{"now":[]},"changes":[{"id":"acme-4","kind":"bogus","protected":false}]}')"
+out2="$(ops '{"sprint":{"now":[],"leaving":[{"id":"acme-4","why":"w"}]},"changes":[{"id":"acme-4","kind":"bogus","protected":false}]}')"
 assert_contains "sprint: a verdict from an invalid change does not count" "$out2" $'proposal\tacme-4\tunwave'
 out2="$(ops '{"sprint":{"next":[{"id":"acme-4","why":"slip","protected":false}]}}')"
 assert_contains "sprint: NOW to NEXT with protected:false is applied" "$(ops_only "$out2")" $'acme-4\twave\twave:2\tNEXT: slip'
@@ -116,7 +124,7 @@ out="$(ops '{"attention":{"add":[{"id":"acme-3","why":"due"}]}}' "$T/none")"
 assert_contains "attention on a claimed bead, plan missing: a proposal" "$out" $'proposal\tacme-3\tattention\tattention\tdue\tplan missing'
 
 # --- plan state ---
-D='{"sprint":{"now":[{"id":"acme-1","why":"g"}]},"changes":[{"id":"acme-10","kind":"icebox","why":"i","protected":false}],"attention":{"add":[{"id":"acme-9","why":"d"}]}}'
+D='{"sprint":{"now":[{"id":"acme-1","why":"g"}],"leaving":[{"id":"acme-4","why":"l"},{"id":"acme-5","why":"l"},{"id":"acme-8","why":"l"}]},"changes":[{"id":"acme-10","kind":"icebox","why":"i","protected":false}],"attention":{"add":[{"id":"acme-9","why":"d"}]}}'
 mkdir -p "$T/stale"; printf 'date: 2026-08-01\n' > "$T/stale/goals.md"; cp "$FX/plan/protected.md" "$T/stale/"
 out="$(ops "$D" "$T/stale")"
 assert_eq "stale plan: every line is a proposal or dropped" "$(printf '%s\n' "$out" | grep -vc '^proposal')" "0"
@@ -205,7 +213,8 @@ undo() { "$WG" undo "$T/r" "$@"; }
 HOSTILE=$'due soon $(touch '"$T"$'/pwned) `touch '"$T"$'/pwned2`\nsecond line; touch '"$T"$'/pwned3'
 python3 - "$T/D.json" "$HOSTILE" <<'PY'
 import json, sys
-json.dump({"sprint": {"next": [{"id": "acme-4", "why": "slip", "protected": False}]},
+json.dump({"sprint": {"next": [{"id": "acme-4", "why": "slip", "protected": False}],
+            "leaving": [{"id": "acme-6", "why": "out"}, {"id": "acme-7", "why": "out"}]},
  "changes": [{"id": "acme-10", "kind": "icebox", "why": "no goal", "protected": False},
              {"id": "acme-9", "kind": "priority", "to": "1", "why": "p"},
              {"id": "acme-11", "kind": "icebox", "why": "unsure"},
@@ -721,6 +730,7 @@ assert_eq "backlog: inputs.json keeps its marker and count (the judge can't writ
   "$(python3 -c "import json; b = json.load(open('$R/inputs.json'))['backlog']; print(b['beads'], b['end'] == open('$R/judge/backlog.tsv').read().split()[-3])")" "13 True"
 assert_contains "backlog: the prompt names the file" "$(jl "a[-1]")" "$R/judge/backlog.tsv"
 assert_eq "backlog: a run that read it all is not partial, and applies" "$(ls "$R/partial" 2>/dev/null)$(writes)" "2"
+assert_contains "backlog: the summary says how many live beads the judge read" "$(cat "$R/summary.md")" "The judge read all 13 live beads (backlog.tsv to its end marker)"
 assert_eq "backlog: two runs get different markers" \
   "$(groom acme >/dev/null 2>&1; tail -1 "$(newest acme)/judge/backlog.tsv" | cut -d' ' -f3 | grep -c "$(tail -1 "$R/judge/backlog.tsv" | cut -d' ' -f3)")" "0"
 for how in skip wrong; do
@@ -732,6 +742,7 @@ for how in skip wrong; do
   assert_eq "partial ($how): the ops wait as proposals, saying why" \
     "$(python3 -c "import json; print(sorted({p['reason'] for p in json.load(open('$R/proposals.json'))}))")" "['backlog not fully read']"
   assert_eq "partial ($how): the run dir records it" "$(test -s "$R/partial" && echo yes)" "yes"
+  assert_contains "partial ($how): the summary says the read is unconfirmed" "$(cat "$R/summary.md")" "The judge did not show it read all 13 live beads"
   assert_eq "partial ($how): status says so on the review line" "$("$WG" status acme | grep '^review' | cut -f1,4)" "review	partial"
 done
 reset_stores; rm -rf "$G"; : > "$T/bd.log"; mkdir -p "$T/judge-sprint"; printf '# g\n' > "$T/judge-sprint/summary.md"
@@ -739,6 +750,8 @@ printf '%s' '{"sprint":{"now":[{"id":"acme-1","why":"g1","protected":false}],"le
 FAKE_CLAUDE_GROOM="$T/judge-sprint" groom acme >/dev/null 2>&1; R="$(newest acme)"
 assert_eq "partial (sprint): wave beads it left out make the run partial; nothing written" "$(writes) $(test -s "$R/partial" && echo yes)" "0 yes"
 assert_contains "partial (sprint): the summary names them" "$(head -1 "$R/summary.md")" "sprint leaves out acme-5, acme-8 "
+assert_contains "partial (sprint): the left-out beads are not judged, not removed" "$(cat "$R/summary.md")" "acme-5: not judged (named in none of now, next, leaving); keeps wave:1"
+assert_eq "partial (sprint): no proposal removes them" "$(python3 -c "import json; print([p['id'] for p in json.load(open('$R/proposals.json')) if p['kind'] == 'unwave' and p['id'] in ('acme-5', 'acme-8')])")" "[]"
 rm -rf "$G"
 
 # the prompt teaches the decisions.json shape and the plan inputs
