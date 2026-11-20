@@ -28,7 +28,7 @@ account, using your own plan or API credits.
 | `python3` 3.11 or later | The helper commands are Python. | `brew install python` if `python3 --version` is older (`wb-setup` offers it). |
 | `git` | Worktree sessions, and fetching before they start. | Comes with the Xcode command line tools. |
 | [fzf](https://github.com/junegunn/fzf) (optional) | Searchable screens. Without it, the launcher shows a numbered menu. | `brew install fzf` |
-| [gh](https://cli.github.com) (optional) | Only if a space sets `gh_account`, or to recognise branches squash-merged by a pull request. | `brew install gh` |
+| [gh](https://cli.github.com) (optional) | For `wb-ship` (pull requests), if a space sets `gh_account`, and to recognise branches squash-merged by a pull request. | `brew install gh` |
 
 ## Set up
 
@@ -139,6 +139,7 @@ A space with `worktrees = true` gives each piece of work its own git worktree an
 ```bash
 new-session <bead-id>              # worktree named after the bead; claims it in bd
 new-session <space-key> [topic]    # no bead: worktree named after the topic
+wb-ship [<worktree>]               # push, open the pull request, wait for CI, merge on a yes
 end-session [<worktree>]           # remove it, once the work is merged or pushed
 ```
 
@@ -151,6 +152,17 @@ anyway). `--force` skips those checks and keeps the branch. A merged branch is d
 unmerged one is kept. A branch squash-merged through a pull request counts as merged when `gh`
 says the pull request's head is the worktree's HEAD, so a squash merge needs no `--force`. Either way it appends a note to the session's bead saying what happened,
 without closing it: merged isn't the same as done.
+
+`wb-ship` is the step between: with the work committed, it pushes the branch (never forced),
+opens a pull request into the default branch (or reuses the open one), and waits up to nine
+minutes for its CI checks. Red never merges, and neither does a failing `before_end` (it runs
+once CI is green, as `end-session` would run it). On green it asks before merging; with no terminal
+(Claude running it) it stops and prints `wb-ship --yes=<sha>`, which merges only that commit,
+so a later push can't slip in. It merges by the repo's default method (`--method` overrides),
+leaves the branch for `end-session`, and notes the pull request and the merge on the session's
+bead. A worktree session's opening prompt tells Claude to use it and to leave the yes to you.
+Exit codes: 0 merged (or nothing to ship), 1 refused or red, 10 green and waiting for a yes,
+11 checks still running. It needs [gh](https://cli.github.com), logged in.
 
 ## While you work
 

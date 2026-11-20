@@ -38,6 +38,11 @@ assert_eq "worktree bead: new-session got the bead + --no-launch" "$(tail -1 "$T
 assert_contains "worktree bead: new-session output shown live" "$out" "creating worktree (fake)"
 assert_contains "worktree bead: config dir and env for the command" "$out" "DRY-RUN: cd $T/wt/proj && env CLAUDE_CONFIG_DIR=$T/cfg WB_SPACE_ROOT=$T/repo/sub WB_BEAD=acme-a2 WB_WORKTREE=$WTTOP claude --settings "
 assert_contains "worktree bead: protocol line" "$out" "Before anything else, read docs/PROTOCOL.md"
+assert_contains "worktree bead: told to ship with wb-ship" "$out" "ship it with \`wb-ship\`: it pushes the branch"
+assert_contains "worktree bead: merging is the owner's call" "$out" "only after I say yes"
+po="$(z "$PLAIN" '_wb_prompt work-on-bead bee-1')"
+assert_not_contains "plain bead: no wb-ship step (no worktree, no branch to ship)" "$po" "wb-ship"
+assert_eq "plain bead: no blank line where the ship step would be" "$(printf '%s\n' "$po" | tail -1 | cut -c1-3)" "3. "
 assert_contains "worktree bead: shell lands in the worktree" "$out" "PWD=$T/wt/proj"
 
 out="$(z "$WT" 'update_terminal_cwd() { print "OSC7=$PWD" }; _wb_start_bead acme-a2' 2>&1)"
