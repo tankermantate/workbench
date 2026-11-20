@@ -16,6 +16,12 @@ _wb_prompt() {
   text=$(<$WORKBENCH_HOME/prompts/$1.txt) || return 1
   [[ $s[9] != - ]] && proto="Before anything else, read $s[9]: it is how this space works."
   [[ -z $proto ]] && text=${text//$'\n{protocol}'/}   # no blank line where it would be
+  # a worktree session has a branch to ship; merging stays the owner's call
+  if [[ $s[5] == 1 ]]; then
+    text=${text//'{ship}'/"4. When it's committed, ship it with \`wb-ship\`: it pushes the branch, opens the pull request and waits for CI (run it with a 10-minute timeout; exit 11 means run it again). Merging is my call: tell me how CI went, and run the \`wb-ship --yes=<sha>\` it prints only after I say yes."}
+  else
+    text=${text//$'\n{ship}'/}
+  fi
   text=${text//'{id}'/$2}
   text=${text//'{space}'/$s[1]}
   text=${text//'{root}'/$s[3]}

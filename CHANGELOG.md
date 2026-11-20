@@ -4,6 +4,10 @@ What changed for you in each workbench release. Update with `wb-update`.
 
 ## Unreleased
 
+- `wb-ship`: the steps after the commit. In a worktree it pushes the branch, opens the pull
+  request (or reuses the open one), waits for CI, and on green merges on a yes, by the repo's
+  default method, pinned to the commit CI checked. Claude, running it, stops at green and asks
+  you; a worktree session's opening prompt says so.
 - `end-session` and `wb-tidy` recognise a branch squash-merged through a pull request. `gh` is
   asked (as the space's `gh_account`) for a merged pull request from the branch into the default
   branch whose head is the worktree's HEAD. When there is one, `wb-tidy` offers the worktree
