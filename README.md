@@ -202,7 +202,9 @@ A session the launcher (or `new-session`) starts knows which bead it's on:
 - **Claude gets the goal back after compaction or resume:** the bead's title, description and
   acceptance criteria.
 - **`✦ something new` picks up its bead.** The first bead Claude claims in the session becomes the
-  session's bead.
+  session's bead. Before filing it, Claude offers a light spec: a few done-when checks (the bead's
+  acceptance criteria, which the work screen's picks rank on) and a line or two of approach. Say
+  skip and it files the bead without them.
 - **Claiming a second bead asks first.** Claude asks whether to continue in this session or start
   fresh. Start fresh puts the bead back to open, for you to start from the launcher in a new tab.
 - **Closing the bead ends the session's job.** Claude finishes the close-out (`end-session` in a

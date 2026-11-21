@@ -143,7 +143,8 @@ app works, and a guided first run sets it all up.
 
 - **Works today:** the launcher in every new terminal tab (Apple Terminal), showing your spaces
   with ready-task counts, then the space's tasks with what's next and what needs attention;
-  "something new", where Claude shapes an idea into a task before building; a Claude account and
+  "something new", where Claude shapes an idea into a task before building, offering a light spec
+  with done-when checks that you can skip; a Claude account and
   colour per space; a worktree per task with private setup and teardown hooks, and a close-out
   that refuses to lose work; status lines showing the session's task and space; `wb-tabs`
   (which sessions are waiting on you); session restore after a restart; `wb-tidy` (end the
@@ -222,10 +223,11 @@ week, and no longer finding forgotten sessions and worktrees.
 ## Gaps between this vision and today
 
 Each promise in the press release, what exists, and what closes the gap. All of them sit under the
-epic wb-kvx, with the launch post (wb-kvx.13). Gaps 1, 4, 7, 12 and 13 closed in November 2026
+epic wb-kvx, with the launch post (wb-kvx.13). Gaps 1, 4, 6, 7, 12 and 13 closed in November 2026
 and moved to "What works today": plan in Claude (wb-kvx.1, for the Desktop app), guided setup
-(wb-kvx.4), shipping after the commit with `wb-ship` (wb-kvx.7), issue forms and the "tell us
-your setup" form (wb-kvx.12) and update notices with `wb-update` (wb-kvx.14). Review, the part of
+(wb-kvx.4), an optional done-when step when shaping something new (wb-kvx.6), shipping after the
+commit with `wb-ship` (wb-kvx.7), issue forms and the "tell us your setup" form (wb-kvx.12) and
+update notices with `wb-update` (wb-kvx.14). Review, the part of
 the shipping promise gap 7 didn't cover, is gap 14. Timing setup for a person, which gap 4 left open, is
 part of the newcomer test of the getting-started guide (wb-kvx.21).
 
@@ -234,7 +236,6 @@ part of the newcomer test of the getting-started guide (wb-kvx.21).
 | 2 | See the roadmap visually, anywhere | Nothing | A roadmap view (a published Claude artifact) that reads and writes your tasks | wb-kvx.2 |
 | 3 | Areas → initiatives → epics → tasks | Spaces (with a group), beads with parent epics | An initiative layer and a roll-up view across spaces | wb-kvx.3 |
 | 5 | Usable by non-developers | A README written for developers, and a getting-started guide through the plan, groom and build loop (`docs/getting-started.md`) | A glossary (space, bead, worktree), screenshots or a short recording, and the guide tried by someone new to workbench | wb-kvx.5 |
-| 6 | Shape before building, with done-when | "Something new" shapes an idea into a bead | A light spec and acceptance-criteria step that stays optional | wb-kvx.6 |
 | 8 | Suggests rather than insists | Mostly suggests; strict only where work could be lost | One setting from "vibe" to "strict" that every prompt respects | wb-kvx.8 |
 | 9 | Sessions that keep their place | Restore, `wb-tabs`, `wb-tidy`, status lines, compaction recovery | A morning summary of what's in flight across everything | wb-kvx.9 |
 | 10 | A weekly rhythm | Weekly grooming, review, monthly strategy | Retro: what shipped this week against the goals | wb-kvx.10 |
