@@ -47,6 +47,12 @@ class Stop(Exception):
         self.code = code
 
 
+def leaving(top):
+    """What ends the session once the work is merged: the launcher's close-out at /exit."""
+    return (f"When you /exit, the launcher removes this worktree once its bead is closed "
+            f"(a session started without the launcher: end-session {top}).")
+
+
 def run(cmd, cwd=None, timeout=60):
     """(returncode, stdout, stderr); (1, "", why) when it can't run."""
     try:
@@ -221,8 +227,7 @@ def ship(target, yes, method, wait):
 
     git("fetch", "--quiet", "origin", base, cwd=top)
     if not git("merge-base", "--is-ancestor", "HEAD", f"origin/{base}", cwd=top)[0]:
-        print(f"✓ nothing to ship: every commit is already on {base}. Once you've left this session: "
-              f"end-session {top}")
+        print(f"✓ nothing to ship: every commit is already on {base}. " + leaving(top))
         return 0
     rc, out, err = gh("pr", "list", "--head", branch, "--base", base, "--state", "all",
                       "--json", "number,state,headRefOid,url", cwd=top)
@@ -234,7 +239,7 @@ def ship(target, yes, method, wait):
         raise Stop(f"couldn't list pull requests with gh ({err or 'no answer'}); is it installed and logged in?")
     done = next((p for p in prs if p.get("state") == "MERGED" and p.get("headRefOid") == head), None)
     if done:
-        print(f"✓ already merged by PR #{done['number']}. Once you've left this session: end-session {top}")
+        print(f"✓ already merged by PR #{done['number']}. " + leaving(top))
         return 0
 
     rc, out, err = git("push", "-u", "origin", branch, cwd=top)
@@ -291,7 +296,7 @@ def ship(target, yes, method, wait):
     if rc:
         raise Stop(f"GitHub didn't merge PR #{number}: {err or out or 'no reason given'}")
     bead.note(f"PR #{number} merged into {base} by {how} at {head[:10]}.")
-    print(f"✓ PR #{number} merged into {base} by {how}. Once you've left this session: end-session {top}")
+    print(f"✓ PR #{number} merged into {base} by {how}. " + leaving(top))
     return 0
 
 

@@ -46,6 +46,7 @@ assert_contains "merges exactly the checked head, by the repo's default method" 
 for f in --delete-branch --admin --auto; do assert_not_contains "never $f" "$(log)" "$f"; done
 assert_contains "reuses the open pull request" "$out" "PR #7"
 assert_contains "says how to end the session" "$out" "end-session"
+assert_contains "... which is /exit: the launcher ends it" "$out" "When you /exit, the launcher removes this worktree"
 
 fresh; checks "$GREEN_JSON"
 out=$("$S" --yes=0000000deadbeef "$w" 2>&1); rc=$?

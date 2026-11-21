@@ -157,9 +157,10 @@ def epic_closeout(root, bead):
     """(lines under the done notice, Claude's close-out context). A bead with an
     epic gets what is left in that epic, so the user can carry on while the
     context is fresh; one without gets the plain close-out: that work is over."""
-    exit_ = ("Finish the close-out (in a worktree space, run end-session once the work "
-             "is merged or pushed), then tell the user to type /exit and start the next "
-             "bead from the workbench launcher.")
+    # not end-session: it would remove the folder Claude runs in. The launcher runs it at /exit.
+    exit_ = ("Finish the close-out (in a worktree space, commit and ship; when the user exits, "
+             "the launcher removes the worktree once its work is merged, and keeps it otherwise), "
+             "then tell the user to type /exit and start the next bead from the workbench launcher.")
     plain = f"This session's bead {bead['id']} is closed, so the session's work is done. " + exit_
     eid = bead.get("parent")
     kids = ws.children(root, eid) if eid else None
@@ -205,7 +206,8 @@ def epic_closeout(root, bead):
                    f"(`bd show {bead['id']}`) and the epic's description below: if they name a "
                    f"different next step than the top of this list, say so. This is a worktree "
                    f"session, so it can't carry on: the next bead needs its own worktree. "
-                   f"Finish the close-out (run end-session once the work is merged or pushed), then "
+                   f"Finish the close-out (commit and ship; the launcher removes the worktree at /exit "
+                   f"once its work is merged), then "
                    f"tell the user to type /exit and start {pick[0]['id']} from the workbench launcher "
                    f"in a fresh session (or the step the notes name).")
     elif pick:

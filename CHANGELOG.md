@@ -4,6 +4,11 @@ What changed for you in each workbench release. Update with `wb-update`.
 
 ## Unreleased
 
+- Leaving a worktree session cleans up after itself. When Claude exits, the launcher runs
+  `end-session --if-merged`: merged work whose bead is closed loses its worktree and branch, with
+  no command to type; anything else (a pull request waiting on your yes, uncommitted work, an open
+  bead) is kept, with one line saying why. Worktrees whose pull request merges later show on the
+  first screen as `✦ N finished worktrees, tidy?`, which runs `wb-tidy`.
 - `✦ something new` offers a light spec before filing the bead: two to five done-when checks,
   saved as its acceptance criteria, and a few lines of approach as its design. It's a suggestion:
   say skip, or keep the idea small, and the bead is filed without them. A bead with done-when

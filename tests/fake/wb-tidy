@@ -1,0 +1,5 @@
+#!/bin/sh
+# Fake wb-tidy: the launcher's tidy count, so no suite reads the real ~/.worktrees or sessions.
+# --count prints FAKE_TIDY_COUNT (default 0); anything else says it ran.
+if [ "$1" = --count ]; then echo "${FAKE_TIDY_COUNT:-0}"; exit 0; fi
+echo "FAKE-TIDY $*"

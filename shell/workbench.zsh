@@ -53,9 +53,35 @@ _wb_claude() {
   (( $+functions[update_terminal_cwd] )) && update_terminal_cwd
   if [[ -n ${WORKBENCH_DRY_RUN-} ]]; then
     print -r -- "DRY-RUN: cd $PWD && ${(j: :)${(@q-)cmd}}"
+    [[ -n $top ]] && _wb_close_out $top
     return 0
   fi
-  "${cmd[@]}"
+  local rc
+  "${cmd[@]}"; rc=$?
+  [[ -n $top ]] && _wb_close_out $top
+  return $rc
+}
+
+# Claude has exited in a worktree space; $1 is the folder's git top. end-session can't run inside
+# a session (it removes the folder Claude runs in), but here it can. With --if-merged it removes
+# the worktree only when its branch is merged and its bead closed, and otherwise keeps it and says
+# why in one line: a pull request waiting on the owner's yes keeps its folder and conversation.
+_wb_close_out() {
+  local top=$1 es=${WB_END_SESSION:-$WORKBENCH_HOME/bin/end-session}
+  # a linked worktree only: review and strategy sessions run in the main checkout
+  [[ $(git -C $top rev-parse --path-format=absolute --git-dir 2>/dev/null) != \
+     $(git -C $top rev-parse --path-format=absolute --git-common-dir 2>/dev/null) ]] || return 0
+  if [[ -n ${WORKBENCH_DRY_RUN-} ]]; then
+    print -r -- "DRY-RUN: $es --if-merged $top"
+    return 0
+  fi
+  $es --if-merged $top
+  # end-session's cd moved only itself; this shell would be left in a deleted folder
+  if [[ ! -d $top ]]; then
+    cd -- $s[3] 2>/dev/null || cd ~
+    (( $+functions[update_terminal_cwd] )) && update_terminal_cwd
+  fi
+  return 0
 }
 
 # Runs the space's session command with --no-launch, showing its output as it
@@ -150,6 +176,13 @@ _wb_show_tabs() {
     $wb --jump ${line%%$'\t'*} && return 0
     _wb_tabs_pause || return 1
   done
+}
+
+# Screen 1's tidy row: worktrees whose pull request merged after their session left. wb-tidy
+# lists them and asks again (all ticked) before ending any. Returns 1 on EOF at the pause.
+_wb_tidy() {
+  ${WB_TIDY:-$WORKBENCH_HOME/bin/wb-tidy}
+  _wb_tabs_pause
 }
 
 # ◐ beads are probably another session's. $1 id, $2 worktree from the claim
@@ -328,8 +361,11 @@ _wb_main() {
   _wb_fzf_hint
   while true; do
     i=$(_wb_screen_spaces) || return 0
-    [[ $i == tabs ]] || break
-    _wb_show_tabs || return 0
+    case $i in
+      (tabs) _wb_show_tabs || return 0 ;;
+      (tidy) _wb_tidy || return 0 ;;
+      (*)    break ;;
+    esac
   done
   [[ $i == <1-> ]] || return 0
   s=("${(@ps:\t:)rows[i]}")

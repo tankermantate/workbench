@@ -21,7 +21,7 @@ worktree by default:
    token, because `git push` authenticates through gh's credential helper, which follows the
    active account. Its bead is the one linked to the worktree (`wb-backlog claimed`).
 3. **Already merged**: a merged pull request from the branch into the default branch whose
-   head is HEAD means it's done (exit 0, with the `end-session` line). gh failing to list pull
+   head is HEAD means it's done (exit 0, with the leaving line below). gh failing to list pull
    requests is a refusal.
 4. **Push**: `git push -u origin <branch>`, never forced. A rejected push stops everything.
 5. **Pull request**: the open one from this branch into the default branch is reused, else
@@ -54,7 +54,8 @@ worktree by default:
    checkout; `end-session` deletes the branch and recognises squash merges), `--admin` or
    `--auto` (auto-merge belongs with review, wb-kvx.18). GitHub refusing (branch protection,
    conflicts) is exit 1 with gh's reason. A merge is noted on the bead, and it prints
-   `end-session <worktree>` to run once you've left the session.
+   the leaving line: at `/exit` the launcher removes the worktree once its bead is closed (its
+   close-out, wb-kvx.22), and a session started without the launcher runs `end-session <worktree>`.
 
 Exit codes: 0 merged, already merged, or nothing to ship · 1 refused, red, or not merged by
 GitHub · 2 usage · 10 green, waiting for a yes · 11 checks still running.

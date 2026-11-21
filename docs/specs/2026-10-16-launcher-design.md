@@ -152,7 +152,14 @@ you are working before deciding what to do in it.
   building. If the space has no bead store, `bd init` first. The checks are the done line the
   picks rank on, so a bead shaped this way doesn't show `shape first`.
 - **After Claude exits you land in a normal shell** in the session's directory. You don't drop
-  back into the launcher.
+  back into the launcher. In a worktree session the launcher first runs `end-session --if-merged`
+  on the worktree (wb-kvx.22; Claude can't, since it would remove the folder Claude runs in): merged
+  work with its bead closed is removed and the shell moves to the space's root; anything else stays,
+  with one line saying why. Not for review and strategy sessions, which run in the main checkout.
+- **Worktrees that finish after their session left** (the pull request merged later) show on the
+  first screen as `✦ N finished worktrees, tidy?`, after `✦ open tabs`, only when N > 0. N is
+  `wb-tidy --count`, read in the background with the spaces' counts (10 s cap; can't tell means no
+  row). Choosing it runs `wb-tidy`, which lists them and asks again, then comes back to screen 1.
 
 ## Configuration: per machine, never in the repo
 
@@ -283,7 +290,8 @@ never exits the window.
   4. A personal project → something new → Claude starts in that folder on the personal account.
   5. `q` gives a plain shell.
   6. VS Code's terminal and a new tab inside a worktree do not launch it.
-  7. After Claude exits, the shell is in the session's folder.
+  7. After Claude exits, the shell is in the session's folder (or, in a worktree session whose
+     work is merged and bead closed, in the space's root, the worktree gone).
 
 ## Publishing
 

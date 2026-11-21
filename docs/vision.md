@@ -146,7 +146,7 @@ app works, and a guided first run sets it all up.
   "something new", where Claude shapes an idea into a task before building, offering a light spec
   with done-when checks that you can skip; a Claude account and
   colour per space; a worktree per task with private setup and teardown hooks, and a close-out
-  that refuses to lose work; status lines showing the session's task and space; `wb-tabs`
+  that refuses to lose work and runs itself when you leave a session; status lines showing the session's task and space; `wb-tabs`
   (which sessions are waiting on you); session restore after a restart; `wb-tidy` (end the
   finished worktrees); weekly unattended grooming with a review, and a monthly strategy session;
   a "time to restart" hint; a guided first run (`wb-setup`: tools, your projects, the config,

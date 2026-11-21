@@ -262,6 +262,61 @@ branch_gone "gh account: squash-merged, deleted" "$s" feat/sq6
 assert_contains "gh account: asked as the space's account" "$(cat "$T/gh20.log")" "token=tok-acme-bot"
 assert_not_contains "gh account: active account left alone" "$(cat "$T/gh20.log")" "auth switch"
 
+# 17 --if-merged (wb-kvx.22): what the launcher runs when Claude exits. Only merged work whose bead
+# is closed goes; everything else is kept, with one line saying why
+i="$T/r17"; setup_repo "$i"; conf "$i"; mkstore "$i"
+# beadfor WT STATUS: the store names WT's bead, with STATUS
+beadfor() { printf '[{"id":"acme-9","title":"Nine","status":"%s","notes":"Branch: x (worktree at %s)"}]\n' "$2" "$1" > "$i/.beads/fake.json"; }
+w=$(wt "$i" feat/m1); commit "$w" a; git -C "$w" push -q -u origin feat/m1
+git -C "$i" merge -q --no-ff -m "Merge pull request #1" feat/m1; git -C "$i" push -q origin main
+beadfor "$w" closed
+out="$("$ES" --if-merged "$w" 2>&1)"; rc=$?
+assert_eq "if-merged: merged and closed exits 0" "$rc" "0"
+gone "if-merged: merged and closed, removed" "$w"; branch_gone "if-merged: ... branch deleted" "$i" feat/m1
+assert_not_contains "if-merged: no progress lines" "$out" "→"
+assert_eq "if-merged: one line on success" "$(printf '%s\n' "$out" | wc -l | tr -d ' ')" "1"
+
+w=$(wt "$i" feat/m2); commit "$w" b; git -C "$w" push -q -u origin feat/m2; beadfor "$w" closed
+out="$("$ES" --if-merged "$w" 2>&1)"; rc=$?
+assert_eq "if-merged: pushed, unmerged refused" "$rc" "1"
+there "if-merged: pushed, unmerged kept" "$w"; branch_kept "if-merged: ... branch kept" "$i" feat/m2
+assert_contains "if-merged: says it's not merged" "$out" "not merged into main"
+assert_eq "if-merged: one line when kept" "$(printf '%s\n' "$out" | wc -l | tr -d ' ')" "1"
+
+w=$(wt "$i" feat/m3); beadfor "$w" in_progress
+out="$("$ES" --if-merged "$w" 2>&1)"; rc=$?
+assert_eq "if-merged: a fresh worktree (no commits) refused" "$rc" "1"
+there "if-merged: a fresh worktree is kept" "$w"
+assert_contains "if-merged: says its bead is open" "$out" "acme-9 is in_progress"
+assert_eq "if-merged: ... in one line" "$(printf '%s\n' "$out" | wc -l | tr -d ' ')" "1"
+
+w=$(wt "$i" feat/m4); commit "$w" c; git -C "$w" push -q -u origin feat/m4
+git -C "$i" merge -q --no-ff -m "Merge pull request #4" feat/m4; git -C "$i" push -q origin main
+beadfor "$w" in_progress
+"$ES" --if-merged "$w" >/dev/null 2>&1; assert_eq "if-merged: merged but bead open refused" "$?" "1"
+there "if-merged: merged but bead open kept" "$w"
+echo '[]' > "$i/.beads/fake.json"
+out="$("$ES" --if-merged "$w" 2>&1)"; rc=$?
+assert_eq "if-merged: no bead names it, refused" "$rc" "1"; there "if-merged: no bead, kept" "$w"
+assert_contains "if-merged: says no bead names it" "$out" "no bead names"
+
+beadfor "$w" closed; echo dirt > "$w/dirt.txt"
+out="$("$ES" --if-merged "$w" 2>&1)"; rc=$?
+assert_eq "if-merged: uncommitted refused" "$rc" "1"; there "if-merged: uncommitted kept" "$w"
+assert_contains "if-merged: says uncommitted" "$out" "uncommitted changes"
+assert_eq "if-merged: ... in one line" "$(printf '%s\n' "$out" | wc -l | tr -d ' ')" "1"
+rm "$w/dirt.txt"
+
+w=$(wt "$i" feat/m6); commit "$w" f; git -C "$w" push -q -u origin feat/m6; beadfor "$w" in_progress
+out="$(FAKE_GH_LOG="$T/gh-m6.log" "$ES" --if-merged "$w" 2>&1)"
+assert_contains "if-merged: mid-work (bead open) refused" "$out" "acme-9 is in_progress"
+assert_eq "if-merged: ... without asking gh (most exits are mid-work)" "$(cat "$T/gh-m6.log" 2>/dev/null)" ""
+
+w=$(wt "$i" feat/m5); commit "$w" d; beadfor "$w" closed
+"$ES" --if-merged "$w" >/dev/null 2>&1; assert_eq "if-merged: never pushed refused" "$?" "1"
+there "if-merged: never pushed kept" "$w"
+rm -rf "$i/.beads"
+
 # 16 refusals
 conf "$h"
 out="$("$ES" "$h" 2>&1)"; rc=$?
