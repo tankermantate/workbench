@@ -181,7 +181,8 @@ Pick the top bead. Claude starts in the space's folder, claims the bead and is t
 description and what done looks like. In a space with `worktrees = true`, the bead also gets its
 own copy of the project (a worktree) so tasks don't trip over each other. Work with Claude until
 the bead is done; it closes the bead and tells you to `/exit` and start the next one in a fresh
-tab.
+tab. In a worktree space, `/exit` also tidies up: once the work is merged the launcher removes
+the worktree, and otherwise it keeps it and says why in one line.
 
 That's the whole loop. You plan in the chat, grooming sets the order, and each new tab starts
 the next session on the bead that matters most.

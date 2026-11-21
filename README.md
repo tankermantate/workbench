@@ -140,11 +140,18 @@ A space with `worktrees = true` gives each piece of work its own git worktree an
 new-session <bead-id>              # worktree named after the bead; claims it in bd
 new-session <space-key> [topic]    # no bead: worktree named after the topic
 wb-ship [<worktree>]               # push, open the pull request, wait for CI, merge on a yes
-end-session [<worktree>]           # remove it, once the work is merged or pushed
+end-session [<worktree>]           # remove it by hand (the launcher does it when Claude exits)
 ```
 
 `new-session` fetches, branches from the default branch, points the worktree at the space's bead
 store, runs the space's `on_create` hook, claims the bead and starts Claude.
+
+When Claude exits in a session the launcher started, the launcher runs `end-session --if-merged`
+on the worktree, so you don't have to: a branch that is merged, with its bead closed, goes (worktree
+and branch); anything else stays, with one line saying why (`kept acme-fix-login: 'feat/fix-login'
+is not merged into main yet.`), so a pull request waiting on your yes keeps its folder and its
+conversation. Worktrees whose pull request merges after you've left show up on the launcher's first
+screen as `✦ 2 finished worktrees, tidy?`, which runs `wb-tidy`.
 
 `end-session` refuses while the worktree has uncommitted or unpushed work, while the space's
 `before_end` hook fails, or when no space in your config claims the repo (`--no-space` goes ahead
@@ -159,7 +166,7 @@ minutes for its CI checks. Red never merges, and neither does a failing `before_
 once CI is green, as `end-session` would run it). On green it asks before merging; with no terminal
 (Claude running it) it stops and prints `wb-ship --yes=<sha>`, which merges only that commit,
 so a later push can't slip in. It merges by the repo's default method (`--method` overrides),
-leaves the branch for `end-session`, and notes the pull request and the merge on the session's
+leaves the branch for the close-out at `/exit`, and notes the pull request and the merge on the session's
 bead. A worktree session's opening prompt tells Claude to use it and to leave the yes to you.
 Exit codes: 0 merged (or nothing to ship), 1 refused or red, 10 green and waiting for a yes,
 11 checks still running. It needs [gh](https://cli.github.com), logged in.
@@ -205,8 +212,9 @@ A session the launcher (or `new-session`) starts knows which bead it's on:
   session's bead.
 - **Claiming a second bead asks first.** Claude asks whether to continue in this session or start
   fresh. Start fresh puts the bead back to open, for you to start from the launcher in a new tab.
-- **Closing the bead ends the session's job.** Claude finishes the close-out (`end-session` in a
-  worktree space), then tells you to `/exit` and start the next bead fresh.
+- **Closing the bead ends the session's job.** Claude finishes the close-out (commit, and in a
+  worktree space ship), then tells you to `/exit` and start the next bead fresh. The launcher
+  removes the worktree at `/exit` once its work is merged.
 - **`wb-tabs`** shows every open terminal tab, grouped by what it needs from you: waiting on you
   (`blocked` on a prompt, or `your turn` with its bead still open, each with its goal and next
   step), working, and nothing pending. Plain shells and sessions with no bead are labelled, not
@@ -234,7 +242,9 @@ A session the launcher (or `new-session`) starts knows which bead it's on:
   merged into the default branch (squash merges too, through `gh`), nothing uncommitted, no Claude session open in it, and its bead
   closed. It offers only those, all ticked; Enter runs `end-session` on each, one at a time,
   stopping at the first refusal. Anything else is listed with why it stays. A worktree no bead
-  names stays too; `wb-tidy --no-bead` offers those as well, when merged and clean.
+  names stays too; `wb-tidy --no-bead` offers those as well, when merged and clean. The
+  launcher's first screen shows `✦ N finished worktrees, tidy?` when there are any (`wb-tidy
+  --count`, read in the background with the other counts); choosing it runs `wb-tidy`.
 - **`wb-focus`** prints this session's bead. Inside Claude, `wb-focus <id>` moves the session to
   another bead, and `wb-focus --clear` drops it.
 

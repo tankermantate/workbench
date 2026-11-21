@@ -152,6 +152,8 @@ setstatus acme-x1y closed
 out="$(ptu p1 'bd close acme-x1y --reason "shipped"')"
 assert_eq "close: notice" "$(printf '%s' "$out" | msg)" "✓ x1y closed · this session is done"
 assert_contains "close: tells Claude to say /exit" "$(printf '%s' "$out" | pctx)" "/exit"
+assert_contains "close: the launcher ends the worktree at /exit" "$(printf '%s' "$out" | pctx)" "the launcher removes the worktree"
+assert_not_contains "close: Claude never runs end-session (it would remove its own folder)" "$(printf '%s' "$out" | pctx)" "end-session"
 assert_contains "close: marks done" "$(binding p1)" '"done": true'
 setstatus acme-x1y in_progress
 assert_eq "close of another bead: silent" "$(ptu p3 'bd close acme-x1y')" ""

@@ -52,3 +52,7 @@ Everything else is listed as `keep` with the first reason that holds. Folders in
 The offered ones go to fzf, all ticked (Tab unticks); without fzf, one yes/no. Each ticked one
 gets `end-session <path>` in turn, its output shown. The first refusal stops the run and says how
 many were left as they were. `WORKBENCH_DRY_RUN` lists and stops.
+
+`wb-tidy --count` prints only how many would be offered (exit 1 when it can't tell). The launcher's
+first screen reads it to show `✦ N finished worktrees, tidy?` (wb-kvx.22): sessions the launcher
+started are closed out at exit, so what's left here is mostly work merged after its session left.

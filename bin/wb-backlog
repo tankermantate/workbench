@@ -15,10 +15,12 @@
       nothing when the closed beads can't be read.
       Exits non-zero when there is nothing to list; the code says why (STATES).
   wb-backlog summary ROOT      one line of counts for screen 1; always exits 0
-  wb-backlog claimed ROOT PATH the bead, closed ones too, claimed in the worktree
+  wb-backlog claimed ROOT PATH [--status]
+                               the bead, closed ones too, claimed in the worktree
       at PATH (end-session's way back to the bead): its wb_worktree metadata, else
       its last claim note (lib/wb_session.py worktree_of). The one updated last
-      (grooming's writes aside) when several are; exits 1 if none
+      (grooming's writes aside) when several are; exits 1 if none. --status adds
+      a tab and its status (end-session --if-merged keeps a worktree whose bead is open)
   wb-backlog preview FILE ID [QUERY]
       the preview pane for one bead, from a snapshot, with QUERY's words
       highlighted in the title and description (lib/wb_search.py)
@@ -337,7 +339,7 @@ def cmd_list(root, snapshot=None, flow=None):
     return 0
 
 
-def cmd_claimed(root, path):
+def cmd_claimed(root, path, status=False):
     state, data = read(root, "--all")  # closed too: a finished worktree's bead is closed
     want = os.path.realpath(path)
     hits = [b for b in data or [] if worktree(b) != "-" and os.path.realpath(worktree(b)) == want]
@@ -346,7 +348,8 @@ def cmd_claimed(root, path):
     # after "continue here" (wb-focus) the old and the new bead both name the
     # worktree; the new one was noted last, so it was updated last (by anyone but
     # grooming: flagging the old one must not steer end-session to it)
-    print(max(hits, key=lambda b: str(touched(b) or "")).get("id", ""))
+    b = max(hits, key=lambda b: str(touched(b) or ""))
+    print(b.get("id", "") + (f"\t{b.get('status', '')}" if status else ""))
     return 0
 
 
@@ -429,6 +432,8 @@ def main(argv):
         return cmd_summary(args[1])
     if len(args) == 3 and args[0] == "claimed":
         return cmd_claimed(args[1], args[2])
+    if len(args) == 4 and args[0] == "claimed" and args[3] == "--status":
+        return cmd_claimed(args[1], args[2], status=True)
     if len(args) in (3, 4) and args[0] == "preview":
         return cmd_preview(*args[1:])
     print(__doc__, file=sys.stderr)

@@ -4,6 +4,11 @@ What changed for you in each workbench release. Update with `wb-update`.
 
 ## Unreleased
 
+- Leaving a worktree session cleans up after itself. When Claude exits, the launcher runs
+  `end-session --if-merged`: merged work whose bead is closed loses its worktree and branch, with
+  no command to type; anything else (a pull request waiting on your yes, uncommitted work, an open
+  bead) is kept, with one line saying why. Worktrees whose pull request merges later show on the
+  first screen as `✦ N finished worktrees, tidy?`, which runs `wb-tidy`.
 - `wb-ship`: the steps after the commit. In a worktree it pushes the branch, opens the pull
   request (or reuses the open one), waits for CI, and on green merges on a yes, by the repo's
   default method, pinned to the commit CI checked. Claude, running it, stops at green and asks

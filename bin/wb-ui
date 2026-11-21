@@ -9,7 +9,8 @@ spaces.tsv (wb-spaces output).
                                says: grooming missed, grooming failed Sat, groomed Sat [· partial] · review,
                                strategy due); with $FZF_PORT set,
                                tells fzf to reload as each one lands. Also what
-                               `wb-tabs --waiting` says, into TMP/waiting.json
+                               `wb-tabs --waiting` says, into TMP/waiting.json, and what
+                               `wb-tidy --count` says, into TMP/tidy
   wb-ui render-work TMP INDEX [QUERY]
                                screen 2 lines: kind, id, worktree, header, text
                                (sep and msg rows have an empty id, so the
@@ -39,6 +40,8 @@ ME = os.path.realpath(__file__)
 BACKLOG = os.path.join(os.path.dirname(ME), "wb-backlog")
 GROOM = os.path.join(os.path.dirname(ME), "wb-groom")
 TABS = os.path.join(os.path.dirname(ME), "wb-tabs")
+TIDY = os.environ.get("WB_TIDY") or os.path.join(os.path.dirname(ME), "wb-tidy")
+TIDY_TIMEOUT = 10  # wb-tidy reads ps, every worktree space's beads and maybe gh: seconds, not 3
 STATUS_TIMEOUT = 3  # seconds; the screens never wait longer than this for grooming's news or the waiting count
 DAYS = {"Mon": "Monday", "Tue": "Tuesday", "Wed": "Wednesday", "Thu": "Thursday", "Fri": "Friday",
         "Sat": "Saturday", "Sun": "Sunday"}
@@ -70,6 +73,15 @@ def waiting_counts(tmp):
         return 0, {}
 
 
+def tidy_count(tmp):
+    """How many worktrees wb-tidy would offer; 0 when that hasn't landed or makes no sense."""
+    try:
+        with open(os.path.join(tmp, "tidy")) as f:
+            return max(int(f.read().strip()), 0)
+    except (OSError, ValueError):
+        return 0
+
+
 def waiting_text(n):
     return f"\033[33m{n} waiting on you\033[0m" if n else ""
 
@@ -90,10 +102,12 @@ def render_spaces(tmp):
         summary = " · ".join(x for x in (waiting_text(by_space.get(s["label"])), summary) if x)
         print(f"{i}\t{name.ljust(width)}  \t{summary}")
     print(f"tabs\t✦ open tabs\t{waiting_text(total)}")
+    if n := tidy_count(tmp):
+        print(f"tidy\t✦ {n} finished worktree{'s' if n != 1 else ''}, tidy?\t")
     print("q\t[q] just give me a shell\t")
 
 
-def quiet_output(cmd):
+def quiet_output(cmd, timeout=STATUS_TIMEOUT):
     """A helper's stdout, or None if it fails or is slow: these reads must never fail or hold a screen."""
     try:
         # its own process group: a hung child's children would keep the pipe open past the kill
@@ -102,7 +116,7 @@ def quiet_output(cmd):
     except OSError:
         return None
     try:
-        out, _ = p.communicate(timeout=STATUS_TIMEOUT)
+        out, _ = p.communicate(timeout=timeout)
     except subprocess.TimeoutExpired:
         try:
             os.killpg(p.pid, signal.SIGKILL)
@@ -197,9 +211,24 @@ def fill_counts(tmp):
             os.replace(path + ".part", path)
         tell_fzf()
 
+    def tidy():
+        path = os.path.join(tmp, "tidy")
+        out = quiet_output([TIDY, "--count"], TIDY_TIMEOUT)
+        if out is None:
+            try:
+                os.remove(path)  # can't tell: no row, rather than an old count
+            except FileNotFoundError:
+                pass
+        else:
+            with open(path + ".part", "w") as f:
+                f.write(out)
+            os.replace(path + ".part", path)
+        tell_fzf()
+
     threads = [threading.Thread(target=one, args=(i, s))
                for i, s in enumerate(spaces(tmp), 1) if s["beads"] != "false"]
     threads.append(threading.Thread(target=waiting))
+    threads.append(threading.Thread(target=tidy))
     for t in threads:
         t.start()
     for t in threads:

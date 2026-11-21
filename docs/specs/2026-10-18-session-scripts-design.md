@@ -90,7 +90,7 @@ listing the space keys.
 ### `end-session`
 
 ```
-end-session [<worktree-path>] [--force] [--no-space] [--base=<branch>]
+end-session [<worktree-path>] [--force | --if-merged] [--no-space] [--base=<branch>]
 ```
 
 Kept from today: default target is the current worktree; it refuses the main checkout and anything
@@ -135,6 +135,16 @@ Changed:
 - **Stashes** made on the branch outlive the worktree (`refs/stash` belongs to the repo), so a
   line says how many are kept.
 - **`before_end`** replaces the hard-coded predeploy gate (below).
+- **`--if-merged`** (wb-kvx.22) is what the launcher runs when Claude exits in a worktree session.
+  Plain `end-session` removes a clean, pushed, unmerged worktree (keeping only the branch), which at
+  exit would take the folder and conversation of a session whose pull request is waiting on the
+  owner's yes. So `--if-merged` removes it only when the branch is merged (nothing beyond the base,
+  or the squash-merged pull request above) **and** the bead claimed in it is closed: a fresh
+  worktree with no commits also reads as merged, and only the closed bead says the work is done.
+  Uncommitted changes, an unmerged branch, no bead, or an open bead each keep everything and exit 1
+  with one line, `end-session: kept <folder>: <why>`. The local checks (uncommitted, the bead) come
+  before any fetch or `gh` call, since most exits are mid-work. It prints no progress lines (only the verdict
+  and a stash note), and can't be combined with `--force`.
 
 ## Configuration
 
