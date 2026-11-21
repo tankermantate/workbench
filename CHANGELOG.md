@@ -4,6 +4,10 @@ What changed for you in each workbench release. Update with `wb-update`.
 
 ## Unreleased
 
+- `✦ something new` offers a light spec before filing the bead: two to five done-when checks,
+  saved as its acceptance criteria, and a few lines of approach as its design. It's a suggestion:
+  say skip, or keep the idea small, and the bead is filed without them. A bead with done-when
+  checks no longer shows `shape first` in the picks, and a bead session checks them before closing.
 - `wb-ship`: the steps after the commit. In a worktree it pushes the branch, opens the pull
   request (or reuses the open one), waits for CI, and on green merges on a yes, by the repo's
   default method, pinned to the commit CI checked. Claude, running it, stops at green and asks
