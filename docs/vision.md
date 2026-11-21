@@ -235,7 +235,7 @@ part of the newcomer test of the getting-started guide (wb-kvx.21).
 |---|---|---|---|---|
 | 2 | See the roadmap visually, anywhere | Nothing | A roadmap view (a published Claude artifact) that reads and writes your tasks | wb-kvx.2 |
 | 3 | Areas → initiatives → epics → tasks | Spaces (with a group), beads with parent epics | An initiative layer and a roll-up view across spaces | wb-kvx.3 |
-| 5 | Usable by non-developers | A README written for developers, and a getting-started guide through the plan, groom and build loop (`docs/getting-started.md`) | A glossary (space, bead, worktree), screenshots or a short recording, and the guide tried by someone new to workbench | wb-kvx.5 |
+| 5 | Usable by non-developers | A README written for developers; a getting-started guide through the plan, groom and build loop (`docs/getting-started.md`), with its own word list and pictures of the launcher's two screens (`scripts/screenshots.sh`) | A picture or short recording of a Claude session at work, and the guide tried by someone new to workbench | wb-kvx.26, wb-kvx.21 |
 | 8 | Suggests rather than insists | Mostly suggests; strict only where work could be lost | One setting from "vibe" to "strict" that every prompt respects | wb-kvx.8 |
 | 9 | Sessions that keep their place | Restore, `wb-tabs`, `wb-tidy`, status lines, compaction recovery | A morning summary of what's in flight across everything | wb-kvx.9 |
 | 10 | A weekly rhythm | Weekly grooming, review, monthly strategy | Retro: what shipped this week against the goals | wb-kvx.10 |

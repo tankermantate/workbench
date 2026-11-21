@@ -150,6 +150,7 @@ bd prime                # Refresh Beads context
 tests/run.sh               # all tests (plain bash; fakes for bd/new-session/claude)
 ./install.sh               # link bin/* into ~/.local/bin, schedule weekly grooming and the 10-minute session snapshot (--no-schedule skips), print the ~/.zshrc line
 scripts/check-leaks.sh     # before any push: no private names in tracked files, history or the bead db
+scripts/screenshots.sh     # remake docs/images/ from made-up spaces (needs tmux and a python with rich)
 new-session <bead-id>|<space-key> [topic]   # worktree session for a worktrees = true space
 end-session [<worktree>]                    # remove it once the work is merged/pushed/verified
 ```
