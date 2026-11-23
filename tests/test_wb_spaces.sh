@@ -209,4 +209,44 @@ fc_bad "with an unknown colour" "glob = \"$T/side/*\"" '{ alpha = "teal" }' "fol
 fc_bad "as a string" "glob = \"$T/side/*\"" '"red"' "folder_colors must be a table"
 fc_bad "with a path for a key" "glob = \"$T/side/*\"" '{ "a/b" = "red" }' "folder_colors: 'a/b' is not a folder name"
 fc_bad "when the glob lists nothing" "glob = \"$T/empty/*\"" '{ alpha = "teal" }' "folder_colors.alpha must be one of"
+
+# --areas (wb-kvx.24.1): the glob spaces + new space can put an idea in, as JSON
+mkdir -p "$T/ar/side" "$T/ar/side2" "$T/ar/odd" "$T/ar/off" "$T/ar/acme"
+cat > "$T/areas.toml" <<EOF
+[[space]]
+name = "Side"
+glob = "$T/ar/side/*"
+
+[[space]]
+name = "Odd"
+glob = "$T/ar/odd/x-*"
+
+[[space]]
+name = "Off"
+glob = "$T/ar/off/*"
+beads = false
+
+[[space]]
+name = "Gone"
+glob = "$T/ar/gone/*"
+
+[[space]]
+name = "Acme"
+root = "$T/ar/acme"
+
+[[space]]
+name = "Side2"
+glob = "$T/ar/side2/*"
+worktrees = true
+beads = true
+claude_config = "$T/home/cfg"
+EOF
+out="$(WORKBENCH_CONFIG="$T/areas.toml" "$WS" --areas)"; rc=$?
+assert_eq "areas: exit 0" "$rc" "0"
+areas_py() { python3 -c "import json, sys; d = json.load(sys.stdin); $1" <<<"$out"; }
+assert_eq "areas: only plain <folder>/* globs with a backlog and a folder" "$(areas_py 'print([a["name"] for a in d])')" "['Side', 'Side2']"
+assert_eq "areas: Side's parent, worktrees, beads" "$(areas_py 'a = d[0]; print(a["parent"], a["worktrees"], a["beads"], repr(a["claude_config"]))')" \
+  "$T/ar/side False if-present ''"
+assert_eq "areas: Side2 keeps worktrees and its account" "$(areas_py 'a = d[1]; print(a["worktrees"], a["beads"], a["claude_config"])')" \
+  "True true $T/home/cfg"
 finish

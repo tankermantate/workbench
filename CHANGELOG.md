@@ -4,6 +4,13 @@ What changed for you in each workbench release. Update with `wb-update`.
 
 ## Unreleased
 
+- `+ new space`: start a project from the launcher. The first screen's last row is now
+  `✦ more…`, holding `+ new space`, `✦ open tabs` (moved there; the waiting count moved with it),
+  `✦ tidy worktrees`, `✦ health check` and `✦ update`. `+ new space` asks what the project is: an
+  idea or notes (git and a backlog, no branches) or a tool for you (its own space, a branch per
+  task, and a CLAUDE.md saying how work is done there: fast-forward `main` on this Mac, or pull
+  requests once there's an `origin`). Then Claude starts in it to shape the project into its
+  first epic. `wb-new-space` does the same from any shell.
 - `end-session` and `wb-tidy` recognise a branch squash-merged through a pull request. `gh` is
   asked (as the space's `gh_account`) for a merged pull request from the branch into the default
   branch whose head is the worktree's HEAD. When there is one, `wb-tidy` offers the worktree

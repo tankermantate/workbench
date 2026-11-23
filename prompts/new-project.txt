@@ -1,0 +1,4 @@
+I want to start a brand-new project in {space}: workbench has just made its folder, git and backlog. Help me shape it before writing any code: ask what it's for, who it's for and what done looks like, one question at a time.
+
+{protocol}
+Once it has a shape, file one epic for the project with `bd create --type=epic`: the why in --description, what we decided in --design, and what's still open in --notes (dated). Then file its first beads under it with --parent, and only then start building the first one. Keep the epic current as decisions change, so a Claude chat can pick the project up from it.

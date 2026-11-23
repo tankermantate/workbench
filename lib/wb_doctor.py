@@ -137,7 +137,8 @@ def spaces():
         f = line.split("\t")
         if len(f) >= 7:
             rows.append({"label": f[0], "group": "" if f[1] == "-" else f[1], "root": f[2],
-                         "beads": f[3], "worktrees": f[4] == "1", "space_key": f[6]})
+                         "beads": f[3], "worktrees": f[4] == "1", "space_key": f[6],
+                         "claude_config": "" if len(f) < 8 or f[7] == "-" else f[7]})
     return rows, None, skipped
 
 
