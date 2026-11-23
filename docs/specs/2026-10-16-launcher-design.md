@@ -43,9 +43,11 @@ you are working before deciding what to do in it.
 - A space with a working bead store shows counts. A project with no store, or one bd cannot read,
   is still listed, because "something new" works anywhere.
 - A space whose bd read fails or times out shows `(bd unavailable)` and stays selectable.
-- `✦ open tabs`, after the spaces, shows `wb-tabs` and comes back here on Enter (numbered like a
-  space in the menu without fzf). It starts nothing, so it doesn't change the space-first order.
-  Spec: `2026-11-05-tabs-view-design.md`.
+- `✦ more…`, after the spaces, opens a submenu of workbench-wide commands (`+ new space`,
+  `✦ open tabs`, tidy, health check, update); esc or `← back` comes back here. It starts nothing
+  unless `+ new space` does, so it doesn't change the space-first order. `✦ open tabs` shows
+  `wb-tabs` and comes back to the submenu. Specs: `2026-11-05-tabs-view-design.md`,
+  `2026-11-21-new-space-design.md` (which moved `✦ open tabs` there).
 
 ### Screen 2: work
 

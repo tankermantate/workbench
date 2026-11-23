@@ -116,6 +116,17 @@ changes or isn't on a branch. `wb-update --version` prints the installed version
   `✦ something new`.
 - **esc:** a plain shell, in the folder the tab opened in (q in the numbered menu).
 - **`launch`:** brings the launcher back from any shell.
+- **`✦ more…`** (the last row of the first screen) holds the commands about workbench as a whole:
+  `+ new space`, `✦ open tabs`, `✦ tidy worktrees` (`wb-tidy`), `✦ health check` (`wb-doctor`)
+  and `✦ update` (`wb-update`). esc or `← back` returns to your spaces.
+- **`+ new space`** starts a project in a new folder, sized to what it is. *An idea or notes* gets
+  git and a backlog in one of your glob spaces (or its own space when you have none), with no
+  branches. *A tool for me* gets its own space under `~/dev`, a branch per task, and a CLAUDE.md
+  that tells Claude how work is done there: commit when a bead closes, then fast-forward `main` on
+  this Mac, or push and open a pull request once the repository has an `origin`. It asks for the
+  name and, when your spaces use more than one, the Claude account; then Claude starts in the new
+  project to shape it into its first epic. `wb-new-space` runs the same questions from any shell
+  (`--json` to make one without asking). An existing folder is `wb-setup`'s job.
 - **A bead already claimed in a worktree:** the launcher offers to resume it there
   (`claude --continue`).
 - **Labels the work screen reads:** `wave:1` and `wave:2` put a bead under NOW and NEXT;
@@ -221,9 +232,9 @@ A session the launcher (or `new-session`) starts knows which bead it's on:
   (`blocked` on a prompt, or `your turn` with its bead still open, each with its goal and next
   step), working, and nothing pending. Plain shells and sessions with no bead are labelled, not
   dropped. It only reads, in about a second; a bead store that doesn't answer within 2s
-  (`WB_TABS_BD_TIMEOUT`) says so on its rows. The launcher's first screen has it too, as
-  `✦ open tabs`, where it's a list: Enter or a double-click goes to that tab (Apple Terminal), and esc brings you back. That screen also shows a yellow
-  `N waiting on you` on each space and in total.
+  (`WB_TABS_BD_TIMEOUT`) says so on its rows. The launcher has it too, as
+  `✦ open tabs` under `✦ more…`, where it's a list: Enter or a double-click goes to that tab (Apple Terminal), and esc brings you back. The first screen also shows a yellow
+  `N waiting on you` on each space, and the total on `✦ more…`.
 - **A bell on the tab that needs you:** add `"preferredNotifChannel": "terminal_bell"` to
   `settings.json` in each Claude config dir. Claude Code then rings the terminal bell when a session
   finishes or pauses for permission while you're away, and Apple Terminal shows it on that tab.

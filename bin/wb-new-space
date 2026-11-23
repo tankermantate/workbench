@@ -1,0 +1,151 @@
+#!/usr/bin/env python3
+"""wb-new-space — start a new project as a space (the launcher's '+ new space').
+
+  wb-new-space            asks: what it is, where, its name, its Claude account; then makes it.
+                          Questions go to stderr; the new space's folder is the last stdout line.
+  wb-new-space --json --kind idea|tool --name NAME [--area AREA] [--account CLAUDE_CONFIG]
+                          makes it without asking and prints the result as JSON (a chat tool
+                          calls this). Exit 0 when made, 1 when not.
+
+An idea: a backlog, no branches, in an area (a glob space) when there is one. A tool: its own
+space with a branch per task, merged into main on this Mac (or by pull request once it has an
+origin). Spec: docs/specs/2026-11-21-new-space-design.md. Runs on python 3.9.
+"""
+import argparse
+import json
+import os
+import sys
+
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.realpath(__file__)), "..", "lib"))
+import wb_doctor  # noqa: E402
+import wb_newspace  # noqa: E402
+
+
+class Stopped(Exception):
+    pass
+
+
+def say(s=""):
+    print(s, file=sys.stderr)
+
+
+def line(prompt):
+    sys.stderr.write(prompt)
+    sys.stderr.flush()
+    got = sys.stdin.readline()
+    # EOF, or Esc: without a terminal library Esc arrives as a character, and means stop here too
+    if not got or "\x1b" in got:
+        raise Stopped()
+    return got.strip()
+
+
+def pick(question, options, default):
+    """options: [(label, note)]; returns the 0-based index chosen."""
+    say(question)
+    width = max(len(o[0]) for o in options)
+    for i, (label, note) in enumerate(options, 1):
+        say("  %d) %s%s" % (i, label.ljust(width), "   " + note if note else ""))
+    while True:
+        a = line("Choose [%d]: " % (default + 1))
+        if not a:
+            return default
+        if a.isdigit() and 1 <= int(a) <= len(options):
+            return int(a) - 1
+        say("  a number from 1 to %d, please" % len(options))
+
+
+def accounts(rows):
+    """The Claude accounts the spaces use, most used first ('' is the default one). A glob space
+    counts once, not once per folder."""
+    seen, count = set(), {}
+    for r in rows:
+        space = r["group"] or r["label"]
+        if space in seen:
+            continue
+        seen.add(space)
+        count[r["claude_config"]] = count.get(r["claude_config"], 0) + 1
+    count.setdefault("", 0)
+    return sorted(count, key=lambda k: (-count[k], k))
+
+
+def ask():
+    rows, err, _ = wb_doctor.spaces()
+    if rows is None:
+        say("workbench: spaces.toml doesn't read: %s" % err)
+        return 1
+    k = pick("What is it?", [("an idea or notes", "backlog only, no branches"),
+                             ("a tool for me", "a branch per task, merged into main on this Mac")], 1)
+    kind = wb_newspace.KINDS[k]
+    area = None
+    if kind == "idea":
+        found = wb_newspace.areas()
+        if len(found) == 1:
+            area = found[0]
+        elif found:
+            area = found[pick("Which area?", [(a["name"], wb_newspace.tilde(a["parent"])) for a in found], 0)]
+    parent = area["parent"] if area else wb_newspace.default_parent()
+    while True:
+        name = line("Name (also its folder, in %s): " % wb_newspace.tilde(parent))
+        why = wb_newspace.check_name(name, rows, parent)
+        if not why:
+            break
+        say("  " + why)
+    account = None
+    if area is None:
+        found = accounts(rows)
+        if len(found) > 1:
+            labels = [(wb_newspace.tilde(a) if a else "the default account", "") for a in found]
+            account = found[pick("Which Claude account?", labels, 0)] or None
+    say()
+    say("  %s: %s" % (name, wb_newspace.tilde(os.path.join(parent, name))))
+    if area:
+        say("  in %s, %s" % (area["name"], "a branch per task" if area["worktrees"] else "backlog only"))
+    elif kind == "tool":
+        say("  its own space: git, a backlog, a branch per task, the process in CLAUDE.md")
+    else:
+        say("  its own space: git and a backlog, no branches")
+    if account:
+        say("  on the Claude account in %s" % wb_newspace.tilde(account))
+    while True:
+        a = line("Make it? [Y/n] ").lower()
+        if a in ("", "y", "yes"):
+            break
+        if a in ("n", "no", "q"):
+            say("  nothing made")
+            return 1
+        say("  y or n, please")
+    res = wb_newspace.create(kind, name, area["name"] if area else None, account)
+    if not res["ok"]:
+        say("workbench: %s" % res["error"])
+        if res["left"]:
+            say("  " + res["left"])
+        return 1
+    say("  ok   made %s" % wb_newspace.tilde(res["root"]))
+    print(res["root"])
+    return 0
+
+
+def main(argv):
+    p = argparse.ArgumentParser(prog="wb-new-space")
+    p.add_argument("--json", action="store_true")
+    p.add_argument("--kind", choices=wb_newspace.KINDS)
+    p.add_argument("--name")
+    p.add_argument("--area")
+    p.add_argument("--account")
+    a = p.parse_args(argv[1:])
+    if a.json:
+        if a.kind is None or a.name is None:
+            p.error("--json needs --kind and --name")
+        res = wb_newspace.create(a.kind, a.name, a.area, a.account)
+        print(json.dumps(res))
+        return 0 if res["ok"] else 1
+    try:
+        return ask()
+    except (Stopped, KeyboardInterrupt):
+        say()
+        say("  stopped; nothing made")
+        return 1
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv))

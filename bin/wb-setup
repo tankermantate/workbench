@@ -24,6 +24,8 @@ import sys
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.realpath(__file__)), "..", "lib"))
 import wb_doctor  # noqa: E402
 import wb_session  # noqa: E402
+import wb_newspace  # noqa: E402
+from wb_newspace import HEADER, append_spaces, slug, space_toml, tilde, toml_str, unique_key  # noqa: E402,F401
 
 REPO = wb_doctor.REPO
 DEMO = "Demo"
@@ -71,14 +73,6 @@ def ask(q, default):
         say("  y or n, please")
 
 
-def tilde(p):
-    h = os.path.expanduser("~")
-    return "~" + p[len(h):] if p == h or p.startswith(h + os.sep) else p
-
-
-def toml_str(s):
-    # a JSON string is a TOML basic string: same escapes for quotes, backslashes and controls
-    return json.dumps(s, ensure_ascii=False)
 
 
 def run_shown(argv, cwd=None, env=None):
@@ -191,15 +185,15 @@ def install():
 
 # --- 3. spaces ---
 
-def slug(name):
-    return re.sub(r"[^a-z0-9]+", "-", name.lower()).strip("-") or "space"
-
 
 METRICS_NOTED = []
 
 
 def init_backlog(folder, extra=()):
-    ok, out = run_quiet([bd(), "init", "--non-interactive"] + list(extra), cwd=folder)
+    ok, out = wb_newspace.init_backlog(folder, extra)
+    if not ok:
+        for l in out.rstrip("\n").splitlines():
+            say("    " + l)
     if ok and "bd metrics off" in out and not METRICS_NOTED:
         # bd's own notice, which would otherwise scroll past: say it once, plainly
         METRICS_NOTED.append(1)
@@ -274,23 +268,6 @@ def make_demo():
     return d
 
 
-def space_toml(s):
-    out = ["[[space]]", "name = %s" % toml_str(s["name"]), "root = %s" % toml_str(tilde(s["root"])),
-           "beads = %s" % ("true" if s["beads"] == "true" else toml_str(s["beads"])),
-           "worktrees = %s" % ("true" if s["worktrees"] else "false")]
-    if s["worktrees"]:
-        out.append("space_key = %s" % toml_str(s["space_key"]))
-    return "\n".join(out) + "\n"
-
-
-HEADER = """# workbench's spaces: one [[space]] per project folder the launcher offers. wb-setup wrote this;
-# edit it by hand any time (wb-doctor checks it). Every key is explained in
-# %s
-
-[launcher]
-# $TERM_PROGRAM values, besides Apple_Terminal, that should auto-start the launcher.
-terminals = []
-"""
 
 
 def spaces():
@@ -333,33 +310,15 @@ def spaces():
     keys = {r["space_key"] for r in rows if r["worktrees"]}
     for s in new:
         if s["worktrees"]:
-            k, n = slug(s["name"]), 2
-            while k in keys:
-                k, n = "%s-%d" % (slug(s["name"]), n), n + 1
+            k = unique_key(s["name"], keys)
             keys.add(k)
             s["space_key"] = k
     return write_config(path, rows, new), demo
 
 
 def write_config(path, rows, new):
-    before = None
-    if os.path.exists(path):
-        with open(path, encoding="utf-8") as f:
-            before = f.read()
-    text = (before.rstrip("\n") + "\n" if before else HEADER % os.path.join(REPO, "spaces.example.toml"))
-    text += "".join("\n" + space_toml(s) for s in new)
-    os.makedirs(os.path.dirname(path), exist_ok=True)
-    with open(path + ".tmp", "w", encoding="utf-8") as f:
-        f.write(text)
-    os.replace(path + ".tmp", path)
-    got, err, _ = wb_doctor.spaces()
-    if got is None:
-        # fail closed: the file goes back to what it was
-        if before is None:
-            os.remove(path)
-        else:
-            with open(path, "w", encoding="utf-8") as f:
-                f.write(before)
+    ok, err = append_spaces(path, new, os.path.join(REPO, "spaces.example.toml"))
+    if not ok:
         say("  !!   the new spaces didn't read back (%s); %s is as it was" % (err, tilde(path)))
         return False
     for s in new:

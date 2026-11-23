@@ -292,30 +292,93 @@ assert_contains "pick: lands in the project" "$out" "AFTER rc=0 PWD=$T/side/beta
 out="$(WB_TEST_PICK_SPACE='Side › gamma' WB_TEST_PICK_WORK='something new' L)"
 assert_contains "pick: no-store space still offers something new" "$out" "start something new in gamma"
 
-# the tabs row (wb-xw0): on screen 1, after the spaces; its view is only shown when chosen, then back
+# the more row (wb-kvx.24.1): screen 1 ends with ✦ more…, a submenu of workbench-wide commands;
+# open tabs (wb-xw0) lives there, and its view is only shown when chosen, then back to the submenu
 export WB_PS="$REPO/tests/fake/fake-ps" FAKE_PS_OUT="$T/ps.out" FAKE_PS_LOG="$T/ps.log"
 printf '  901     1 ttys901  -zsh\n' > "$FAKE_PS_OUT"; : > "$FAKE_PS_LOG"
 out="$(printf 'q\n' | WB_NO_FZF=1 L)"
-assert_contains "tabs row: in the numbered menu, after the three spaces" "$out" "4) ✦ open tabs"
-assert_not_contains "tabs row: drawing the screen does not show the view" "$out" "plain shell"
-out="$(printf '4\n\n1\n1\n' | WB_NO_FZF=1 L)"
-assert_contains "tabs row: choosing it shows the tabs view" "$out" "plain shell"
-assert_contains "tabs row: it waits before going back" "$out" "Press Enter to go back"
-assert_eq "tabs row: back on screen 1" "$(printf '%s\n' "$out" | grep -c '✦ open tabs')" "2"
-assert_contains "tabs row: a session still starts afterwards" "$out" "DRY-RUN"
-out="$(printf '4\n\nq\n' | WB_NO_FZF=1 FAKE_PS_RC=1 L)"
-assert_contains "tabs row: a failed view says why" "$out" "wb-tabs: can't read the process table"
-assert_eq "tabs row: ... and still comes back" "$(printf '%s\n' "$out" | grep -c '✦ open tabs')" "2"
-assert_contains "tabs row: ... and q leaves a shell" "$out" "AFTER rc=0 PWD=$T/start"
+assert_contains "more row: in the numbered menu, after the three spaces" "$out" "4) ✦ more…"
+assert_not_contains "more row: open tabs is not on screen 1" "$out" "open tabs"
+out="$(printf '4\nq\nq\n' | WB_NO_FZF=1 L)"
+assert_eq "more: its commands, in order" "$(printf '%s\n' "$out" | grep -E '^ +[0-9]+\) ' | sed -n '5,10p' | sed 's/^ *[0-9]*) //; s/  .*//')" \
+  "+ new space
+✦ open tabs
+✦ tidy worktrees
+✦ health check
+✦ update
+← back"
+out="$(printf '4\nx\nq\nq\n' | WB_NO_FZF=1 L)"
+assert_contains "more: q means back there, and the hint says so" "$out" "r, or q = back"
+assert_contains "screen 1: q still means a shell" "$(printf 'x\nq\n' | WB_NO_FZF=1 L)" "r, or q = shell"
+assert_eq "more: q goes back to screen 1, not a shell" "$(printf '%s\n' "$out" | grep -c '✦ more…')" "2"
+out="$(printf '4\n2\n\n6\n1\n1\n' | WB_NO_FZF=1 L)"
+assert_contains "open tabs: choosing it shows the tabs view" "$out" "plain shell"
+assert_contains "open tabs: it waits before going back" "$out" "Press Enter to go back"
+assert_eq "open tabs: back on the submenu" "$(printf '%s\n' "$out" | grep -c '← back')" "2"
+assert_eq "← back: on screen 1" "$(printf '%s\n' "$out" | grep -c '✦ more…')" "2"
+assert_contains "← back: a session still starts afterwards" "$out" "DRY-RUN"
+out="$(printf '4\n2\n\nq\nq\n' | WB_NO_FZF=1 FAKE_PS_RC=1 L)"
+assert_contains "open tabs: a failed view says why" "$out" "wb-tabs: can't read the process table"
+assert_eq "open tabs: ... and still comes back" "$(printf '%s\n' "$out" | grep -c '← back')" "2"
+assert_contains "open tabs: ... and q, q leaves a shell" "$out" "AFTER rc=0 PWD=$T/start"
 # no fzf: a picked tab has nowhere to go, so the numbered menu keeps the printed view
-assert_contains "tabs row: the printed view has no field for fzf" "$(printf '4\n\nq\n' | WB_NO_FZF=1 L)" $'  plain shell\n'
+assert_contains "open tabs: the printed view has no field for fzf" "$(printf '4\n2\n\nq\nq\n' | WB_NO_FZF=1 L)" $'  plain shell\n'
+# the other commands run in the launcher's shell, wait to be read, and come back
+mkdir -p "$T/ui4"; cp -R "$REPO"/bin "$REPO"/lib "$REPO"/prompts "$REPO"/shell "$T/ui4/"
+for c in wb-tidy wb-doctor wb-update; do
+  printf '#!/bin/sh\necho "ran %s $*"\n' "$c" > "$T/ui4/bin/$c"; chmod +x "$T/ui4/bin/$c"
+done
+L4() { (cd "$T/start" && WORKBENCH_HOME="$T/ui4" zsh -f -c "source '$T/ui4/shell/workbench.zsh'; launch; print \"AFTER rc=\$? PWD=\$PWD\"" 2>&1); }
+for c in "3 wb-tidy" "4 wb-doctor" "5 wb-update"; do
+  out="$(printf '4\n%s\n\nq\nq\n' "${c%% *}" | WB_TIDY="$T/ui4/bin/wb-tidy" WB_NO_FZF=1 L4)"
+  assert_contains "more: ${c#* } runs" "$out" "ran ${c#* } "$'\n'   # bare: the header's wb-update --notice has args
+  assert_contains "more: ${c#* } waits to be read" "$out" "Press Enter to go back"
+  assert_eq "more: ${c#* } comes back to the submenu" "$(printf '%s\n' "$out" | grep -c '← back')" "2"
+done
+# + new space: wb-new-space asks, makes it, and the new project's first session starts there.
+# A new space's session_cmd is the new-session next to wb-spaces, so the copy's is the fake.
+mkdir -p "$T/ui5" "$T/ns-dev"; cp -R "$REPO"/bin "$REPO"/lib "$REPO"/prompts "$REPO"/shell "$T/ui5/"
+cp "$REPO/tests/fake/new-session" "$T/ui5/bin/new-session"
+cat > "$T/ns-bd" <<'EOF'
+#!/bin/sh
+[ "$1" = init ] || exit 0
+mkdir -p .beads && : > .beads/config.yaml && git add -A && git commit -qm "bd init"
+EOF
+chmod +x "$T/ns-bd"; cp "$WORKBENCH_CONFIG" "$T/ns-spaces.toml"
+L5() { (cd "$T/start" && WORKBENCH_HOME="$T/ui5" WORKBENCH_CONFIG="$T/ns-spaces.toml" WB_BD="$T/ns-bd" \
+  WB_NEW_SPACE_PARENT="$T/ns-dev" GIT_AUTHOR_NAME=t GIT_AUTHOR_EMAIL=t@example.com GIT_COMMITTER_NAME=t \
+  GIT_COMMITTER_EMAIL=t@example.com WB_NO_FZF=1 WB_TEST_PICK_SPACE='✦ more…' WB_TEST_PICK_MORE='new space' \
+  zsh -f -c "source '$T/ui5/shell/workbench.zsh'; launch; print \"AFTER rc=\$? PWD=\$PWD\"" 2>&1); }
+: > "$FAKE_NS_LOG"
+out="$(printf '\nGadget\n\n\n' | L5)"
+assert_contains "new space: made" "$out" "made "
+[ -d "$T/ns-dev/Gadget/.beads" ] && ok "new space: the folder and its backlog" || bad "new space: no folder"
+assert_contains "new space: its first session goes through new-session, keyed gadget" "$(cat "$FAKE_NS_LOG")" "gadget"
+assert_contains "new space: Claude starts in the session's worktree" "$out" "DRY-RUN: cd $FAKE_NS_DIR"
+assert_contains "new space: with the new-project prompt" "$out" "brand-new project"
+assert_contains "new space: ... naming the space" "$out" "in Gadget"
+: > "$FAKE_NS_LOG"
+out="$(printf '\nGadget2\n\nn\n\n' | L5)"
+assert_contains "new space declined: says so" "$out" "nothing made"
+assert_contains "new space declined: waits to be read" "$out" "Press Enter to go back"
+assert_not_contains "new space declined: no session" "$out" "DRY-RUN"
+assert_contains "new space declined: back to the submenu, then out on EOF" "$out" "AFTER rc=0 PWD=$T/start"
+[ ! -e "$T/ns-dev/Gadget2" ] && ok "new space declined: nothing made" || bad "new space declined: folder made"
+
+out="$(WB_NO_FZF=1 WB_TEST_PICK_SPACE='✦ more…' WB_TEST_PICK_MORE='health check' L4 </dev/null)"
+assert_contains "more: test picks choose the row" "$out" "ran wb-doctor"
+assert_contains "more: ... once each, then EOF leaves a shell" "$out" "AFTER rc=0 PWD=$T/start"
 # with fzf (wb-1nk): the view is a list. A fake fzf, as the real one is driven: screen 1 chooses the
 # row, then each list answers with $T/answers' next line (a pattern to pick, or an exit code)
 mkdir -p "$T/pickbin"
 cat > "$T/pickbin/fzf" <<EOF
 #!/bin/bash
-if [ ! -e "$T/picked" ]; then : > "$T/picked"; grep '✦ open tabs'; exit; fi
-case " \$* " in *"--prompt=Tabs"*) ;; *) exit 130 ;; esac
+case " \$* " in
+  *"--prompt=Space"*) [ -e "$T/picked" ] && exit 130; : > "$T/picked"; grep '✦ more…'; exit ;;
+  *"--prompt=More"*) [ -e "$T/more-picked" ] && exit 130; : > "$T/more-picked"; grep 'open tabs'; exit ;;
+  *"--prompt=Tabs"*) ;;
+  *) exit 130 ;;
+esac
 cat > "$T/list.in"; printf '%s\n' "\$*" > "$T/list.args"; echo call >> "$T/list.calls"
 a=\$(sed -n "\$(wc -l < "$T/list.calls")p" "$T/answers")
 case "\$a" in ''|[0-9]*) exit "\${a:-130}" ;; esac
@@ -327,19 +390,19 @@ printf '  901     1 ttys901  -zsh\n  911     1 ttys911  -zsh\n  912   911 ttys91
 mkdir -p "$T/fakehome/.claude/sessions"
 printf '{"pid":912,"sessionId":"s9","cwd":"%s","status":"waiting","waitingFor":"input needed"}' "$T/acme" > "$T/fakehome/.claude/sessions/912.json"
 export FAKE_OSA_LOG="$T/osa.log" TERM_PROGRAM=Apple_Terminal
-pick() { rm -f "$T/picked" "$T/list.calls"; : > "$T/list.calls"; : > "$FAKE_OSA_LOG"; printf '%s\n' "${@:2}" > "$T/answers"; out="$(printf "$1" | HOME="$T/fakehome" PATH="$T/pickbin:$PATH" L)"; }
+pick() { rm -f "$T/picked" "$T/more-picked" "$T/list.calls"; : > "$T/list.calls"; : > "$FAKE_OSA_LOG"; printf '%s\n' "${@:2}" > "$T/answers"; out="$(printf "$1" | HOME="$T/fakehome" PATH="$T/pickbin:$PATH" L)"; }
 
 pick '' 'input needed'
 assert_contains "list: the tabs are offered" "$(cat "$T/list.in")" "plain shell"
 assert_contains "list: the tty is hidden from view" "$(cat "$T/list.args")" "--with-nth=2"
 assert_contains "list: starts on a tab, not the heading" "$(cat "$T/list.args")" "load:pos(2)"
 assert_eq "list: picking a row jumps to its tab" "$(cat "$FAKE_OSA_LOG")" "ttys911"
-assert_eq "list: a jump goes back to screen 1, not the list" "$(wc -l < "$T/list.calls" | tr -d ' ')" 1
+assert_eq "list: a jump goes back to the submenu, not the list" "$(wc -l < "$T/list.calls" | tr -d ' ')" 1
 assert_contains "list: screen 1 then leaves a shell" "$out" "AFTER rc=0 PWD=$T/start"
 
 pick '' 130
 assert_eq "list: esc jumps nowhere" "$(cat "$FAKE_OSA_LOG")" ""
-assert_contains "list: esc is back at screen 1, then a shell" "$out" "AFTER rc=0 PWD=$T/start"
+assert_contains "list: esc is back at the submenu, then screen 1, then a shell" "$out" "AFTER rc=0 PWD=$T/start"
 
 pick '' 'WAITING ON YOU' 130
 assert_eq "list: a heading jumps nowhere" "$(cat "$FAKE_OSA_LOG")" ""
@@ -364,9 +427,9 @@ pick '\n' 2
 assert_contains "list: fzf itself failing falls back to the printed view" "$out" "plain shell"
 assert_contains "list: ... which waits" "$out" "Press Enter to go back"
 unset FAKE_OSA_LOG TERM_PROGRAM
-rm -f "$T/picked"; unset FAKE_PS_OUT FAKE_PS_LOG
+rm -f "$T/picked" "$T/more-picked"; unset FAKE_PS_OUT FAKE_PS_LOG
 
-# the yellow count (wb-pmr): from wb-tabs --waiting, on the space's row and the tabs row
+# the yellow count (wb-pmr): from wb-tabs --waiting, on the space's row, the more row and open tabs
 mkdir -p "$T/ui3/bin" "$T/ui3/lib"; cp "$REPO"/bin/wb-ui "$REPO"/bin/wb-backlog "$T/ui3/bin/"; cp -R "$REPO"/lib/. "$T/ui3/lib/"
 cat > "$T/ui3/bin/wb-tabs" <<'EOF'
 #!/usr/bin/env bash
@@ -379,8 +442,9 @@ chmod +x "$T/ui3/bin/wb-tabs"
 rm -rf "$T/start3"; mkdir -p "$T/start3"; "$REPO/bin/wb-spaces" > "$T/start3/spaces.tsv"
 "$T/ui3/bin/wb-ui" fill-counts "$T/start3"; S1=$("$T/ui3/bin/wb-ui" render-spaces "$T/start3")
 assert_contains "waiting count: yellow, first on its space's row" "$(grep Acme <<<"$S1")" $'\t\e[33m2 waiting on you\e[0m · '
-assert_not_contains "waiting count: not on another space's row" "$(grep -v 'Acme\|open tabs' <<<"$S1")" "waiting on you"
-assert_contains "waiting count: the total on the tabs row" "$(grep 'open tabs' <<<"$S1")" $'\e[33m3 waiting on you\e[0m'
+assert_not_contains "waiting count: not on another space's row" "$(grep -v 'Acme\|more…' <<<"$S1")" "waiting on you"
+assert_contains "waiting count: the total on the more row" "$(grep 'more…' <<<"$S1")" $'\e[33m3 waiting on you\e[0m'
+assert_contains "waiting count: and on open tabs, inside" "$(grep 'open tabs' <<<"$("$T/ui3/bin/wb-ui" render-more "$T/start3")")" $'\e[33m3 waiting on you\e[0m'
 rm -rf "$T/start3/counts" "$T/start3/waiting.json"
 "$T/ui3/bin/wb-ui" render-spaces "$T/start3" > "$T/screen3"; RC=$?
 assert_eq "waiting count: not read yet, the screen still draws" "$RC" 0

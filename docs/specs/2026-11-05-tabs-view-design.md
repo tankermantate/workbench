@@ -135,7 +135,8 @@ worked, and was annoying. So was a background watcher to drive it, which nothing
 **The launcher.** `wb-tabs --waiting` prints `{"total": n, "spaces": {label: n}}`, and it never reads
 another process's environment. `wb-ui fill-counts` runs it alongside the space counts, into
 `TMP/waiting.json`, so drawing the screen doesn't wait for it. A space's row gets a yellow
-`N waiting on you` before its summary, `✦ open tabs` gets the total, and a folder in no space counts
+`N waiting on you` before its summary, `✦ more…` gets the total (and `✦ open tabs` inside it, since
+2026-11-21), and a folder in no space counts
 only in the total. Waiting means blocked or your turn; the view tells them apart. If it fails or takes
 over 3s the rows just show no count, and an earlier count is removed rather than left standing.
 
@@ -144,7 +145,7 @@ while the launcher is open.
 
 ## Going to a tab
 
-With fzf, choosing `✦ open tabs` opens the view as a list, from `wb-tabs --rows`: `tty<TAB>line`, sized
+With fzf, choosing `✦ open tabs` (under `✦ more…` since 2026-11-21) opens the view as a list, from `wb-tabs --rows`: `tty<TAB>line`, sized
 to `$COLUMNS` less fzf's gutter. All of a tab's lines carry its tty, so its goal or next line goes
 there too; headings and blanks carry `-`, and picking one does nothing. Enter or a double-click goes
 to the tab, through `wb-tabs --jump TTY`, and the launcher's tab returns to screen 1, which re-reads

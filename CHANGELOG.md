@@ -4,6 +4,13 @@ What changed for you in each workbench release. Update with `wb-update`.
 
 ## Unreleased
 
+- `+ new space`: start a project from the launcher. The first screen's last row is now
+  `✦ more…`, holding `+ new space`, `✦ open tabs` (moved there; the waiting count moved with it),
+  `✦ tidy worktrees`, `✦ health check` and `✦ update`. `+ new space` asks what the project is: an
+  idea or notes (git and a backlog, no branches) or a tool for you (its own space, a branch per
+  task, and a CLAUDE.md saying how work is done there: fast-forward `main` on this Mac, or pull
+  requests once there's an `origin`). Then Claude starts in it to shape the project into its
+  first epic. `wb-new-space` does the same from any shell.
 - Leaving a worktree session cleans up after itself. When Claude exits, the launcher runs
   `end-session --if-merged`: merged work whose bead is closed loses its worktree and branch, with
   no command to type; anything else (a pull request waiting on your yes, uncommitted work, an open

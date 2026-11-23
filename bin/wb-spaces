@@ -9,6 +9,9 @@
   wb-spaces --leak-terms   private words check-leaks.sh greps for
   wb-spaces --judge-env    JSON {label: {NAME: value}}: each space's judge_env, the variables
                            its grooming judge gets beyond wb-groom's allowlist ({} when unset)
+  wb-spaces --areas        JSON list of the glob spaces + new space can put a project in: a plain
+                           <folder>/* glob, a backlog (beads not false) and an existing folder.
+                           Each: name, parent, worktrees (bool), beads, claude_config ('' = unset)
   wb-spaces --colors       JSON {label: color} for the spaces that set one (status lines, tab titles);
                            a glob space's folder_colors overrides its color folder by folder
 
@@ -142,6 +145,24 @@ def spaces(cfg):
                        "color": per_folder.get(base, common["color"])}
 
 
+def areas(cfg):
+    """The glob spaces a new folder can go in. Only a plain <folder>/*: any other pattern can't
+    say what a new folder must be called to match it."""
+    out = []
+    for s in cfg["space"]:
+        g = s.get("glob")
+        if not g or os.path.basename(g) != "*":
+            continue
+        parent = expand(os.path.dirname(g))
+        beads = s.get("beads", "if-present")
+        beads = {True: "true", False: "false"}.get(beads, beads)
+        if beads == "false" or not os.path.isdir(parent):
+            continue
+        out.append({"name": s["name"], "parent": parent, "worktrees": bool(s.get("worktrees", False)),
+                    "beads": beads, "claude_config": expand(s.get("claude_config", ""))})
+    return out
+
+
 ORDER = ("label", "group", "root", "beads", "worktrees", "session_cmd",
          "space_key", "claude_config", "protocol", "safe", "gh_account", "on_create", "before_end", "after_end")
 
@@ -174,6 +195,9 @@ def main(argv):
         terms |= {os.path.basename(expand(s["root"]) if "root" in s else os.path.dirname(expand(s["glob"])))
                   for s in cfg["space"]}
         print("\n".join(sorted(t for t in terms if t and t.casefold() not in allow)))
+        return 0
+    if argv[1:] == ["--areas"]:
+        print(json.dumps(areas(cfg)))
         return 0
     if argv[1:] == ["--colors"]:
         print(json.dumps({r["label"]: r["color"] for r in rows if r["color"]}))

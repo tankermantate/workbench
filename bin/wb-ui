@@ -101,10 +101,25 @@ def render_spaces(tmp):
                 summary = "…"
         summary = " · ".join(x for x in (waiting_text(by_space.get(s["label"])), summary) if x)
         print(f"{i}\t{name.ljust(width)}  \t{summary}")
-    print(f"tabs\t✦ open tabs\t{waiting_text(total)}")
-    if n := tidy_count(tmp):
+    print(f"more\t✦ more…\t{waiting_text(total)}")
+    if n := tidy_count(tmp):  # a nudge, shown only when there's something to tidy
         print(f"tidy\t✦ {n} finished worktree{'s' if n != 1 else ''}, tidy?\t")
     print("q\t[q] just give me a shell\t")
+
+
+# Screen 1's ✦ more…: the commands about workbench as a whole. Ones about a single space go on its
+# work screen instead.
+def render_more(tmp):
+    total, _ = waiting_counts(tmp)
+    rows = [("new", "+ new space", "start a project: folder, git, backlog, first epic"),
+            ("tabs", "✦ open tabs", waiting_text(total) or "every tab's space, task and status"),
+            ("tidy", "✦ tidy worktrees", "end the finished ones"),
+            ("doctor", "✦ health check", "wb-doctor"),
+            ("update", "✦ update", "wb-update"),
+            ("back", "← back", "")]
+    width = max(len(r[1]) for r in rows)
+    for key, label, note in rows:
+        print(f"{key}\t{label.ljust(width)}  \t{note}")
 
 
 def quiet_output(cmd, timeout=STATUS_TIMEOUT):
@@ -382,6 +397,8 @@ def main(argv):
     cmd, args = (argv[1], argv[2:]) if len(argv) > 1 else ("", [])
     if cmd == "render-spaces" and len(args) == 1:
         render_spaces(*args)
+    elif cmd == "render-more" and len(args) == 1:
+        render_more(*args)
     elif cmd == "fill-counts" and len(args) == 1:
         fill_counts(*args)
     elif cmd == "render-work" and len(args) in (2, 3):

@@ -116,10 +116,28 @@ _wb_start_bead() {
   _wb_claude prompt "$(_wb_prompt work-on-bead $1)" $1
 }
 
+# $1 the opening prompt (default something-new; + new space passes new-project).
 _wb_start_new() {
   if [[ $s[5] == 1 ]]; then _wb_session_cd $s[7] || return 0
   else cd -- $s[3] || return 0; fi
-  _wb_claude prompt "$(_wb_prompt something-new -)" -
+  _wb_claude prompt "$(_wb_prompt ${1:-something-new} -)" -
+}
+
+# After + new space: the rows were read before it existed, so read them again and start the new
+# project's first session in it. $1 the new space's folder. Returns 1 when it isn't listed.
+_wb_start_new_space() {
+  local i
+  "$WORKBENCH_HOME/bin/wb-spaces" > $tmp/spaces.tsv 2>/dev/null
+  rows=("${(@f)$(<$tmp/spaces.tsv)}")
+  for (( i = 1; i <= $#rows; i++ )); do
+    s=("${(@ps:\t:)rows[i]}")
+    if [[ $s[3] == $1 ]]; then
+      _wb_start_new new-project
+      return 0
+    fi
+  done
+  print -u2 "workbench: made $1, but the launcher can't find it among the spaces (wb-doctor says why)."
+  return 1
 }
 
 # The planning rituals (wb-groom): Claude starts in the space root, not on a bead.
@@ -183,6 +201,49 @@ _wb_show_tabs() {
 _wb_tidy() {
   ${WB_TIDY:-$WORKBENCH_HOME/bin/wb-tidy}
   _wb_tabs_pause
+}
+
+# The ✦ more… submenu: workbench-wide commands. Prints the chosen key; esc, q and an empty
+# answer all mean back.
+_wb_screen_more() {
+  local ui=$WORKBENCH_HOME/bin/wb-ui line rc
+  if [[ -n ${WB_TEST_PICK_MORE-} ]] || _wb_use_fzf; then
+    line=$("$ui" render-more $tmp | _wb_fzf "${WB_TEST_PICK_MORE-}" \
+      --delimiter=$'\t' --with-nth=2,3 --nth=1 --exact --ignore-case --no-sort \
+      --layout=reverse --ansi --prompt='More? › ' --header="$(_wb_header 'enter: choose · esc: back')") || { print back; return 0 }
+  else
+    while true; do
+      "$ui" render-more $tmp > $tmp/more.menu
+      line=$(_wb_menu $tmp/more.menu "More?" 2 back); rc=$?
+      (( rc == 2 )) && continue
+      (( rc == 0 )) || { print back; return 0 }
+      break
+    done
+  fi
+  print -r -- ${line%%$'\t'*}
+}
+
+# Runs ✦ more… until something starts a session (returns 0) or the user goes back (2).
+# Returns 1 on EOF at a pause, when no answer is coming.
+_wb_more() {
+  local key root
+  while true; do
+    key=$(_wb_screen_more)
+    unset WB_TEST_PICK_MORE      # a test's pick is used once, as on screen 1
+    case $key in
+      tabs)   _wb_show_tabs || return 1 ;;
+      tidy)   _wb_tidy || return 1 ;;
+      doctor) $WORKBENCH_HOME/bin/wb-doctor; _wb_tabs_pause || return 1 ;;
+      update) $WORKBENCH_HOME/bin/wb-update; _wb_tabs_pause || return 1 ;;
+      new)
+        # its questions and messages go to the terminal; the folder is its last stdout line
+        if root=$($WORKBENCH_HOME/bin/wb-new-space); then
+          _wb_start_new_space "${root##*$'\n'}" && return 0
+        fi
+        _wb_tabs_pause || return 1 ;;
+      *)      return 2 ;;
+    esac
+  done
 }
 
 # ◐ beads are probably another session's. $1 id, $2 worktree from the claim
@@ -257,12 +318,13 @@ _wb_fzf_hint() {
 }
 
 # Numbered menu for when fzf is missing. $1 file of tab-separated lines,
-# $2 prompt, $3 first display column. sep/msg lines are shown, not numbered.
+# $2 prompt, $3 first display column, $4 what q does (default: shell). sep/msg
+# lines are shown, not numbered.
 # The menu goes to stderr because stdout carries the chosen line.
 # Returns 1 on q, empty input or EOF, and 2 on r (re-read); asks again on
 # anything else that isn't a listed number.
 _wb_menu() {
-  local file=$1 prompt=$2 col=$3 line ans n=0
+  local file=$1 prompt=$2 col=$3 qdo=${4:-shell} line ans n=0
   local -a pickable f
   for line in "${(@f)$(<$file)}"; do
     f=("${(@ps:\t:)line}")
@@ -274,13 +336,13 @@ _wb_menu() {
     fi
   done >&2
   while true; do
-    read -r "ans?$prompt number, r = re-read, q = shell: " || return 1
+    read -r "ans?$prompt number, r = re-read, q = $qdo: " || return 1
     case $ans in
       (''|q) return 1 ;;
       (r)    return 2 ;;
       (<1->) (( ans <= n )) && break ;;
     esac
-    print -u2 "  type a number from the list (1-$n), r or q"
+    print -u2 "  type a number from the list (1-$n), r, or q = $qdo"
   done
   print -r -- $pickable[ans]
 }
@@ -362,7 +424,8 @@ _wb_main() {
   while true; do
     i=$(_wb_screen_spaces) || return 0
     case $i in
-      (tabs) _wb_show_tabs || return 0 ;;
+      (more) unset WB_TEST_PICK_SPACE   # a test's pick is used once, so screen 1 can be left after
+             _wb_more; case $? in 0|1) return 0 ;; esac ;;   # 2: screen 1 again
       (tidy) _wb_tidy || return 0 ;;
       (*)    break ;;
     esac
