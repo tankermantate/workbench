@@ -3,6 +3,8 @@
 
   wb-tidy [--no-bead]   list every worktree with whether it's offered and why not, then end the
                         ticked ones with end-session, one at a time, stopping at the first refusal
+  wb-tidy --count       print how many it would offer, and nothing else (the launcher's first
+                        screen says "N finished worktrees, tidy?"); exits 1 when it can't tell
 
 Offered only when all hold: its space is known, its branch is merged into the repo's default
 branch (in its history, or squash-merged: gh reports a merged pull request from the branch into it
@@ -196,6 +198,12 @@ def choose(offered):
 def main(argv):
     if argv and argv[0] in ("-h", "--help"):
         print(__doc__.strip())
+        return 0
+    if argv == ["--count"]:
+        found, error = survey()
+        if error:
+            return fail(error)
+        print(sum(1 for f in found if f[3]))
         return 0
     no_bead = argv[:1] == ["--no-bead"]
     if argv[no_bead:]:

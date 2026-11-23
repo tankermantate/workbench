@@ -66,6 +66,8 @@ More? ›
 - `✦ tidy worktrees`, `✦ health check` and `✦ update` run the command in the launcher's shell,
   then wait for Enter (their output would be lost to fzf's redraw) and return to the submenu.
   `✦ update` is listed always; `wb-update` itself says when there's nothing new.
+- The one exception is a nudge: `✦ N finished worktrees, tidy?` (wb-kvx.22) stays on the first
+  screen, after `✦ more…`, because it only shows when there is something to tidy.
 - Commands that act across workbench go here, never on the first screen. Commands about one space
   (review, strategy, something new, and later publish) stay on that space's work screen.
 

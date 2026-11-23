@@ -1,9 +1,15 @@
 #!/usr/bin/env bash
-# Fake gh: logs argv to $FAKE_GH_LOG (and the GH_TOKEN it was given); reports
-# $FAKE_GH_ACTIVE as the active account; 'auth switch' exits $FAKE_GH_SWITCH_RC
-# (default 0); 'auth token --user U' prints tok-U; 'pr list' prints $FAKE_GH_PRS
-# (default []) unfiltered and exits $FAKE_GH_PR_RC (default 0), sleeping
-# $FAKE_GH_SLEEP seconds first when set.
+# Fake gh. Logs argv to $FAKE_GH_LOG (and the GH_TOKEN it was given).
+#   auth status    reports $FAKE_GH_ACTIVE as the active account
+#   auth switch    exits $FAKE_GH_SWITCH_RC (default 0)
+#   auth token     --user U prints tok-U
+#   pr list        prints $FAKE_GH_PRS (default []) unfiltered, exits $FAKE_GH_PR_RC (default 0),
+#                  sleeping $FAKE_GH_SLEEP seconds first when set
+#   pr create      prints $FAKE_GH_CREATE_URL (default .../pull/7), exits $FAKE_GH_CREATE_RC
+#   pr checks      the first line of $FAKE_GH_CHECKS_FILE, dropped once read unless it's the
+#                  last: a JSON list, or "none" (gh's "no checks reported", exit 1); [] without one
+#   pr merge       exits $FAKE_GH_MERGE_RC (default 0), saying $FAKE_GH_MERGE_ERR on stderr
+#   repo view      prints $FAKE_GH_REPO (default: squash is the viewer's default, all allowed)
 if [ -n "${FAKE_GH_LOG:-}" ]; then
   echo "$*" >> "$FAKE_GH_LOG"
   [ -z "${GH_TOKEN:-}" ] || echo "token=$GH_TOKEN" >> "$FAKE_GH_LOG"
@@ -15,5 +21,22 @@ case "${1:-} ${2:-}" in
   "pr list")
     [ -z "${FAKE_GH_SLEEP:-}" ] || sleep "$FAKE_GH_SLEEP"
     printf '%s\n' "${FAKE_GH_PRS:-[]}"; exit "${FAKE_GH_PR_RC:-0}" ;;
+  "pr create")
+    printf '%s\n' "${FAKE_GH_CREATE_URL:-https://github.com/acme/app/pull/7}"; exit "${FAKE_GH_CREATE_RC:-0}" ;;
+  "pr checks")
+    f=${FAKE_GH_CHECKS_FILE:-}
+    if [ -z "$f" ] || [ ! -s "$f" ]; then echo '[]'; exit 0; fi
+    line=$(head -n 1 "$f")
+    if [ "$(wc -l < "$f" | tr -d ' ')" -gt 1 ]; then tail -n +2 "$f" > "$f.next"; mv "$f.next" "$f"; fi
+    if [ "$line" = none ]; then echo "no checks reported on the 'x' branch" >&2; exit 1; fi
+    printf '%s\n' "$line" ;;
+  "pr merge")
+    rc=${FAKE_GH_MERGE_RC:-0}
+    [ "$rc" = 0 ] || echo "${FAKE_GH_MERGE_ERR:-merge refused}" >&2
+    exit "$rc" ;;
+  "repo view")
+    repo=${FAKE_GH_REPO:-}
+    [ -n "$repo" ] || repo='{"viewerDefaultMergeMethod":"SQUASH","mergeCommitAllowed":true,"squashMergeAllowed":true,"rebaseMergeAllowed":true}'
+    printf '%s\n' "$repo" ;;
 esac
 exit 0

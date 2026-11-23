@@ -330,7 +330,7 @@ for c in wb-tidy wb-doctor wb-update; do
 done
 L4() { (cd "$T/start" && WORKBENCH_HOME="$T/ui4" zsh -f -c "source '$T/ui4/shell/workbench.zsh'; launch; print \"AFTER rc=\$? PWD=\$PWD\"" 2>&1); }
 for c in "3 wb-tidy" "4 wb-doctor" "5 wb-update"; do
-  out="$(printf '4\n%s\n\nq\nq\n' "${c%% *}" | WB_NO_FZF=1 L4)"
+  out="$(printf '4\n%s\n\nq\nq\n' "${c%% *}" | WB_TIDY="$T/ui4/bin/wb-tidy" WB_NO_FZF=1 L4)"
   assert_contains "more: ${c#* } runs" "$out" "ran ${c#* } "$'\n'   # bare: the header's wb-update --notice has args
   assert_contains "more: ${c#* } waits to be read" "$out" "Press Enter to go back"
   assert_eq "more: ${c#* } comes back to the submenu" "$(printf '%s\n' "$out" | grep -c '← back')" "2"
@@ -456,6 +456,66 @@ assert_contains "waiting count: a failing wb-tabs leaves the other counts" "$("$
 rm -rf "$T/start3/counts"; s0=$SECONDS; FAKE_TABS_SLEEP=30 "$T/ui3/bin/wb-ui" fill-counts "$T/start3"
 assert_eq "waiting count: a hung wb-tabs can't hold the screen" "$(( SECONDS - s0 < 10 ))" 1
 assert_not_contains "waiting count: a hung wb-tabs adds nothing" "$("$T/ui3/bin/wb-ui" render-spaces "$T/start3")" "waiting on you"
+
+# the tidy row (wb-kvx.22): worktrees whose PR merged after their session left. wb-tidy --count
+# runs with the other counts; the row shows only when some are finished, and runs wb-tidy when chosen
+cat > "$T/fake-tidy" <<'EOF'
+#!/bin/sh
+if [ "$1" = --count ]; then [ -n "${FAKE_TIDY_RC:-}" ] && exit "$FAKE_TIDY_RC"; echo "${FAKE_TIDY_COUNT:-2}"; exit 0; fi
+echo "TIDY RAN $*"
+EOF
+chmod +x "$T/fake-tidy"; OLD_TIDY=$WB_TIDY; export WB_TIDY="$T/fake-tidy"
+rm -rf "$T/start4"; mkdir -p "$T/start4"; "$REPO/bin/wb-spaces" > "$T/start4/spaces.tsv"
+"$REPO/bin/wb-ui" fill-counts "$T/start4"; S4=$("$REPO/bin/wb-ui" render-spaces "$T/start4")
+assert_eq "tidy row: after the tabs row, before q" "$(printf '%s\n' "$S4" | tail -2 | head -1)" "tidy	✦ 2 finished worktrees, tidy?	"
+FAKE_TIDY_COUNT=1 "$REPO/bin/wb-ui" fill-counts "$T/start4"
+assert_contains "tidy row: one is singular" "$("$REPO/bin/wb-ui" render-spaces "$T/start4")" "✦ 1 finished worktree, tidy?"
+FAKE_TIDY_COUNT=0 "$REPO/bin/wb-ui" fill-counts "$T/start4"
+assert_not_contains "tidy row: none finished, no row" "$("$REPO/bin/wb-ui" render-spaces "$T/start4")" "tidy?"
+"$REPO/bin/wb-ui" fill-counts "$T/start4"; FAKE_TIDY_RC=1 "$REPO/bin/wb-ui" fill-counts "$T/start4"
+assert_not_contains "tidy row: wb-tidy can't tell, no row (not an old count)" "$("$REPO/bin/wb-ui" render-spaces "$T/start4")" "tidy?"
+out="$(printf 'q\n' | WB_NO_FZF=1 L)"
+assert_contains "tidy row: in the numbered menu" "$out" "5) ✦ 2 finished worktrees, tidy?"
+assert_not_contains "tidy row: drawing it runs nothing" "$out" "TIDY RAN"
+out="$(printf '5\n\nq\n' | WB_NO_FZF=1 L)"
+assert_contains "tidy row: choosing it runs wb-tidy" "$out" "TIDY RAN"
+assert_contains "tidy row: it waits before going back" "$out" "Press Enter to go back"
+assert_eq "tidy row: back on screen 1" "$(printf '%s\n' "$out" | grep -c 'finished worktrees, tidy?')" "2"
+assert_contains "tidy row: q then leaves a shell" "$out" "AFTER rc=0 PWD=$T/start"
+out="$(printf 'q\n' | FAKE_TIDY_COUNT=0 WB_NO_FZF=1 L)"
+assert_not_contains "tidy row: none finished, not in the menu" "$out" "tidy?"
+export WB_TIDY=$OLD_TIDY
+
+# the close-out (wb-kvx.22): when Claude exits in a worktree, the launcher runs end-session --if-merged
+# on it. Merged work with a closed bead goes, and the shell moves to the space root; anything else stays
+setup_repo "$T/co" >/dev/null 2>&1; CO=$(cd "$T/co" && pwd -P)
+git -C "$CO" worktree add -q -b feat/co "$CO-wt" 2>/dev/null; COW="$CO-wt"
+out="$(WB_TEST_PICK_SPACE=Acme WB_TEST_PICK_WORK='High wave-1' FAKE_NS_DIR="$COW" L)"
+assert_contains "close-out: runs after Claude, on the worktree" "$out" "DRY-RUN: $REPO/bin/end-session --if-merged $COW"
+assert_eq "close-out: ... after Claude, not before" "$(printf '%s\n' "$out" | grep DRY-RUN | tail -1)" "DRY-RUN: $REPO/bin/end-session --if-merged $COW"
+out="$(WB_TEST_PICK_SPACE=Acme WB_TEST_PICK_WORK='High wave-1' L)"
+assert_not_contains "close-out: not in a folder that isn't a git worktree" "$out" "--if-merged"
+# CO(ES-SCRIPT): the function itself, with a stand-in end-session, from inside the worktree
+CO() { (cd "$COW" && WORKBENCH_DRY_RUN= WB_END_SESSION="$1" zsh -f -c "source '$REPO/shell/workbench.zsh'; s=(Co - $CO - 1); _wb_close_out $COW; print \"AFTER PWD=\$PWD\"" 2>&1); }
+cat > "$T/es-keep" <<'EOF'
+#!/bin/sh
+echo "end-session: kept $(basename "$2"): 'feat/co' is not merged into main yet." >&2; exit 1
+EOF
+cat > "$T/es-end" <<'EOF'
+#!/bin/sh
+cd / && git -C "$(git -C "$2" rev-parse --path-format=absolute --git-common-dir)/.." worktree remove "$2" && echo "✓ session ended. Branch 'feat/co' is merged into main and was deleted."
+EOF
+chmod +x "$T/es-keep" "$T/es-end"
+out="$(CO "$T/es-keep")"
+assert_contains "close-out: unmerged says why" "$out" "kept co-wt: 'feat/co' is not merged into main yet."
+assert_contains "close-out: unmerged stays in the worktree" "$out" "AFTER PWD=$COW"
+out="$(CO "$T/es-end")"
+assert_contains "close-out: merged says so" "$out" "✓ session ended."
+assert_contains "close-out: merged moves the shell to the space root" "$out" "AFTER PWD=$CO"
+assert_not_contains "close-out: ... not the removed folder" "$out" "AFTER PWD=$COW"
+# the main checkout (review and strategy run there) is never ended
+out="$(cd "$CO" && WORKBENCH_DRY_RUN=1 zsh -f -c "source '$REPO/shell/workbench.zsh'; s=(Co - $CO - 1); _wb_close_out $CO" 2>&1)"
+assert_eq "close-out: never the main checkout" "$out" ""
 
 # leaving
 out="$(printf 'q\n' | WB_NO_FZF=1 L)"

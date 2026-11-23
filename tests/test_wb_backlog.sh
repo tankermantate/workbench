@@ -17,6 +17,8 @@ assert_eq "in-progress is ◐ with its worktree from notes" "$(printf '%s\n' "$o
   "acme-c2	c2	◐	P3	-	Claimed elsewhere	-	/tmp/wb-fixture-wt/acme-x	-	-	-	-	-	-"
 assert_eq "claimed: the bead whose current claim names the worktree" \
   "$("$WB" claimed "$T/store" /tmp/wb-fixture-wt/acme-x)" "acme-c2"
+assert_eq "claimed --status: the id and its status" \
+  "$("$WB" claimed "$T/store" /tmp/wb-fixture-wt/acme-x --status)" "acme-c2	in_progress"
 "$WB" claimed "$T/store" /tmp/wb-fixture-wt/other >/dev/null; assert_eq "claimed: none exits 1" "$?" "1"
 assert_eq "summary with waves" "$("$WB" summary "$T/store")" "NOW 2 · NEXT 1 · claimed 1"
 

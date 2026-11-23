@@ -34,6 +34,10 @@ A few words you'll meet (the [vision's glossary](vision.md#words-used-here) has 
   (the labels `wave:1` and `wave:2`); **icebox** is for beads parked on purpose.
 - **Plan**: a space's goals, what's protected, and what's due, in
   `~/.config/workbench/plans/<space>/`. Grooming judges the backlog against it.
+- **Grooming**: a review of a space's backlog against its plan, by a Claude that only reads.
+  It runs every Saturday, or when you ask, and you go through what it found.
+- **Worktree**: a private copy of a project's folder for one bead, so two sessions never trip
+  over each other's half-finished changes. Only spaces set up with `worktrees = true` use them.
 
 ## 1. Install, and open the launcher
 
@@ -61,6 +65,10 @@ It ends with `wb-doctor`, one line per check. `!!` lines say what to fix; run `w
 any time.
 
 **Check:** open a new Terminal window. The launcher shows your spaces with their bead counts.
+Type to narrow the list, use the arrow keys, and press Enter to choose:
+
+![The launcher's first screen: one row per space, with how many beads are in NOW and NEXT and how many are claimed](images/launcher-spaces.svg)
+
 Pick **Demo**: you see three sample tasks. Press esc for a plain shell, and type `launch` to
 bring the launcher back.
 
@@ -177,11 +185,26 @@ backlog first:
 - in a longer backlog, "Start here": the top three ready beads and why each was picked;
 - then the NOW section, then NEXT, then the rest, highest priority first.
 
+On the right, the bead under the cursor: its description and what done looks like. Here is a
+made-up space, Acme, after grooming:
+
+![The launcher's work screen for a space: "something new", then "start here" with the top three beads, then NOW, NEXT and everything else; on the right, the chosen bead's description](images/launcher-work.svg)
+
 Pick the top bead. Claude starts in the space's folder, claims the bead and is told its
 description and what done looks like. In a space with `worktrees = true`, the bead also gets its
 own copy of the project (a worktree) so tasks don't trip over each other. Work with Claude until
 the bead is done; it closes the bead and tells you to `/exit` and start the next one in a fresh
-tab.
+tab. In a worktree space, `/exit` also tidies up: once the work is merged the launcher removes
+the worktree, and otherwise it keeps it and says why in one line.
+
+If you add workbench to your status line (see
+[While you work](../README.md#while-you-work)), the bottom of the session says which space you're
+in and which bead it's on, and tells you when the bead is done. For example:
+
+```
+Acme · ◆ axb Fix rounding in order totals
+Acme · ✓ axb done · close this session
+```
 
 That's the whole loop. You plan in the chat, grooming sets the order, and each new tab starts
 the next session on the bead that matters most.

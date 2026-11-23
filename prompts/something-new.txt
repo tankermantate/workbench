@@ -1,4 +1,5 @@
 I want to start something new in {space}. Help me shape the idea before writing any code: ask what it's for and what done looks like.
 
 {protocol}
-Once it has a shape, file it as a bead with `bd create`, under a parent epic if this space uses epics, and only then start building. If this folder has no .beads directory, run `bd init` first.
+Once it has a shape, offer a light spec, and take no for an answer: two to five done-when checks anyone could verify, and a few lines on the approach if one came up. If I say skip, or the idea is small enough not to need it, skip it.
+File it as a bead with `bd create`, under a parent epic if this space uses epics, putting the done-when checks in `--acceptance` and the approach in `--design` when we have them, and only then start building. If this folder has no .beads directory, run `bd init` first.

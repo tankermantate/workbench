@@ -75,6 +75,10 @@ assert_contains "a live session keeps it" "$(line "$out" acme-live)" "a Claude s
 assert_contains "a folder no space claims is listed" "$(line "$out" stray)" "keep"
 assert_contains "and never offered" "$(line "$out" stray)" "not a worktree of any space"
 assert_contains "dry run says what it would end" "$out" "DRY-RUN: would end 2"
+# --count (wb-kvx.22): the launcher's first screen, how many it would offer and nothing else
+assert_eq "--count: the number offered, alone" "$("$W" --count </dev/null 2>&1)" "2"
+: > "$T/end.log"; "$W" --count </dev/null >/dev/null 2>&1
+assert_eq "--count: ends nothing" "$(cat "$T/end.log")" ""
 out=$(WORKBENCH_DRY_RUN=1 "$W" --no-bead </dev/null 2>&1)
 assert_contains "--no-bead: a merged, clean worktree with no bead is offered" "$(line "$out" acme-nobead)" "offer"
 assert_contains "--no-bead: said as such" "$(line "$out" acme-nobead)" "no bead · merged · clean"
@@ -113,6 +117,8 @@ out=$(WORKBENCH_DRY_RUN=1 FAKE_PS_RC=1 "$W" </dev/null 2>&1); rc=$?
 assert_eq "ps failing: refuses" "$rc" "1"
 assert_contains "and says why" "$out" "can't tell which worktrees have a Claude session open"
 assert_not_contains "offers nothing" "$out" "would end"
+FAKE_PS_RC=1 "$W" --count >"$T/count.out" 2>/dev/null; rc=$?
+assert_eq "--count: can't tell, exits 1" "$rc" "1"; assert_eq "--count: ... and prints no number" "$(cat "$T/count.out")" ""
 
 printf '201 1 ttys002 login\n202 201 ttys002 -zsh\n203 202 ttys002 claude\n' >> "$T/ps.out"   # no pid file
 out=$(WORKBENCH_DRY_RUN=1 "$W" </dev/null 2>&1); rc=$?

@@ -11,6 +11,19 @@ What changed for you in each workbench release. Update with `wb-update`.
   task, and a CLAUDE.md saying how work is done there: fast-forward `main` on this Mac, or pull
   requests once there's an `origin`). Then Claude starts in it to shape the project into its
   first epic. `wb-new-space` does the same from any shell.
+- Leaving a worktree session cleans up after itself. When Claude exits, the launcher runs
+  `end-session --if-merged`: merged work whose bead is closed loses its worktree and branch, with
+  no command to type; anything else (a pull request waiting on your yes, uncommitted work, an open
+  bead) is kept, with one line saying why. Worktrees whose pull request merges later show on the
+  first screen as `✦ N finished worktrees, tidy?`, which runs `wb-tidy`.
+- `✦ something new` offers a light spec before filing the bead: two to five done-when checks,
+  saved as its acceptance criteria, and a few lines of approach as its design. It's a suggestion:
+  say skip, or keep the idea small, and the bead is filed without them. A bead with done-when
+  checks no longer shows `shape first` in the picks, and a bead session checks them before closing.
+- `wb-ship`: the steps after the commit. In a worktree it pushes the branch, opens the pull
+  request (or reuses the open one), waits for CI, and on green merges on a yes, by the repo's
+  default method, pinned to the commit CI checked. Claude, running it, stops at green and asks
+  you; a worktree session's opening prompt says so.
 - `end-session` and `wb-tidy` recognise a branch squash-merged through a pull request. `gh` is
   asked (as the space's `gh_account`) for a merged pull request from the branch into the default
   branch whose head is the worktree's HEAD. When there is one, `wb-tidy` offers the worktree

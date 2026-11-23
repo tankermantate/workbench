@@ -8,10 +8,13 @@ WB_HOME="$(cd "$(dirname "$(readlink -f "$0")")/.." && pwd)"
 
 usage() {
   cat <<'EOF'
-Usage: end-session [<worktree-path>] [--force] [--no-space] [--base=<branch>]
+Usage: end-session [<worktree-path>] [--force | --if-merged] [--no-space] [--base=<branch>]
 
   <worktree-path>   default: the worktree you are in
   --force           skip the dirty, unpushed and before_end checks; keep the branch
+  --if-merged       remove it only when its branch is merged and the bead claimed in
+                    it is closed; otherwise keep everything and say why in one line.
+                    What the launcher runs when Claude exits; prints no progress lines
   --no-space        go ahead though no space in spaces.toml claims this repo
                     (so no before_end check runs)
   --base=<branch>   the branch "merged" is checked against
@@ -23,11 +26,14 @@ squash merge, whose commits never reach <branch> themselves).
 EOF
 }
 die() { echo "end-session: $1" >&2; exit "${2:-2}"; }
+# progress lines; --if-merged runs at every session's exit, where only the verdict is news
+step() { [ "$IF_MERGED" = 1 ] || echo "$1"; }
 
-FORCE=0; NO_SPACE=0; TARGET=""; BASE=""
+FORCE=0; IF_MERGED=0; NO_SPACE=0; TARGET=""; BASE=""
 while [ $# -gt 0 ]; do
   case "$1" in
     --force) FORCE=1; shift ;;
+    --if-merged) IF_MERGED=1; shift ;;
     --no-space) NO_SPACE=1; shift ;;
     --base=*) BASE=${1#*=}; shift ;;
     -h|--help) usage; exit 0 ;;
@@ -36,6 +42,8 @@ while [ $# -gt 0 ]; do
        TARGET=$1; shift ;;
   esac
 done
+
+[ "$FORCE" = 0 ] || [ "$IF_MERGED" = 0 ] || die "--force and --if-merged can't go together"
 
 # ---- the worktree, and the main checkout it belongs to
 [ -n "$TARGET" ] || TARGET=$PWD
@@ -56,7 +64,7 @@ done <<< "$LIST"
 [ "$REGISTERED" = 1 ] || die "$TARGET is not a registered git worktree" 1
 BRANCH=$(git -C "$TARGET" rev-parse --abbrev-ref HEAD)
 [ "$BRANCH" != HEAD ] || die "the worktree is on a detached HEAD, so its branch is unknown" 1
-echo "→ worktree: $TARGET (branch: $BRANCH)"
+step "→ worktree: $TARGET (branch: $BRANCH)"
 
 # ---- its space: a worktree space on this repo, preferring the one whose key
 # names the worktree (new-session makes <key>-<slug>). Fail closed: before_end
@@ -94,9 +102,10 @@ if [ "$FOUND" = 1 ]; then PREFIX=$(git -C "$S_ROOT" rev-parse --show-prefix); PR
 SOURCE="$MAIN${PREFIX:+/$PREFIX}"
 
 # ---- its bead, closed or not: the one new-session linked to this worktree (metadata, else claim note)
-BEAD=$("$WB_HOME/bin/wb-backlog" claimed "$SOURCE" "$TARGET" 2>/dev/null) || BEAD=""
-if [ -n "$BEAD" ]; then echo "→ bead: $BEAD"
-else echo "→ no bead names this worktree; nothing will be noted."; fi
+BEAD=$("$WB_HOME/bin/wb-backlog" claimed "$SOURCE" "$TARGET" --status 2>/dev/null) || BEAD=""
+BEAD_STATUS=${BEAD#*$'\t'}; BEAD=${BEAD%%$'\t'*}
+if [ -n "$BEAD" ]; then step "→ bead: $BEAD"
+else step "→ no bead names this worktree; nothing will be noted."; fi
 note_bead() {   # append, never replace: the notes hold the claim
   [ -n "$BEAD" ] || return 0
   (cd "$SOURCE" && ws_timeout "${WB_BD_WRITE_TIMEOUT:-30}" "${WB_BD:-bd}" update "$BEAD" \
@@ -110,6 +119,16 @@ if git -C "$MAIN" remote get-url origin >/dev/null 2>&1; then HAS_ORIGIN=1; fi
 REF=$BASE; if [ "$HAS_ORIGIN" = 1 ]; then REF="origin/$BASE"; fi
 
 # ---- checks
+NAME=$(basename "$TARGET")
+# --if-merged: a clean, pushed, unmerged branch would otherwise go (its pull request may be
+# waiting on the owner's yes, and the worktree holds the session's conversation). A worktree
+# with no commits reads as merged too, so the closed bead is what says the work is done. The
+# local checks come first: most exits are mid-work, and they need no fetch or gh call.
+if [ "$IF_MERGED" = 1 ]; then
+  [ -z "$(git -C "$TARGET" status --porcelain)" ] || die "kept $NAME: it has uncommitted changes." 1
+  [ -n "$BEAD" ] || die "kept $NAME: no bead names it, so nothing says its work is done (end-session ends it anyway)." 1
+  [ "$BEAD_STATUS" = closed ] || die "kept $NAME: its bead $BEAD is ${BEAD_STATUS:-of unknown status}." 1
+fi
 if [ "$FORCE" = 0 ] && [ -n "$(git -C "$TARGET" status --porcelain)" ]; then
   echo "end-session: the worktree has uncommitted changes. Commit them, or use --force:" >&2
   git -C "$TARGET" status --short >&2
@@ -120,7 +139,7 @@ NOTHING=0   # every commit already on the base: nothing to push or verify
 if [ "$FORCE" = 0 ]; then
   if [ "$HAS_ORIGIN" = 1 ]; then git -C "$TARGET" fetch --quiet origin "$BASE" 2>/dev/null || true; fi
   if git -C "$TARGET" merge-base --is-ancestor HEAD "$REF" 2>/dev/null; then
-    NOTHING=1; echo "→ no commits beyond $REF — nothing to push or verify"
+    NOTHING=1; step "→ no commits beyond $REF — nothing to push or verify"
   fi
 fi
 
@@ -133,10 +152,14 @@ if [ "$FORCE" = 0 ] && [ "$NOTHING" = 0 ] && [ "$HAS_ORIGIN" = 1 ]; then
   ACCOUNT=""; [ "$FOUND" = 1 ] && ACCOUNT=$S_GH_ACCOUNT
   if SQUASH=$("$WB_HOME/lib/wb_merged.py" "$TARGET" "$BRANCH" "$BASE" \
                 "$(git -C "$TARGET" rev-parse HEAD)" ${ACCOUNT:+"$ACCOUNT"} 2>/dev/null); then
-    NOTHING=1; echo "→ squash-merged into $BASE by $SQUASH at this HEAD — nothing to push or verify"
+    NOTHING=1; step "→ squash-merged into $BASE by $SQUASH at this HEAD — nothing to push or verify"
   else
     SQUASH=""
   fi
+fi
+
+if [ "$IF_MERGED" = 1 ] && [ "$NOTHING" = 0 ]; then
+  die "kept $NAME: '$BRANCH' is not merged into $BASE yet." 1
 fi
 
 if [ "$FORCE" = 0 ] && [ "$NOTHING" = 0 ] && [ "$HAS_ORIGIN" = 1 ]; then
@@ -147,7 +170,7 @@ if [ "$FORCE" = 0 ] && [ "$NOTHING" = 0 ] && [ "$HAS_ORIGIN" = 1 ]; then
   [ "$LOCAL" = "$REMOTE" ] || die "'$BRANCH' has unpushed commits (origin at ${REMOTE:0:10}, local at ${LOCAL:0:10})" 1
 fi
 if [ "$FORCE" = 0 ] && [ "$NOTHING" = 0 ] && [ "$HAS_ORIGIN" = 0 ]; then
-  echo "→ no origin remote, so there is nothing to push to; skipping the push check (an unmerged branch is kept)"
+  step "→ no origin remote, so there is nothing to push to; skipping the push check (an unmerged branch is kept)"
 fi
 
 # the hooks' variables. Physical paths, worked out now: after removal the
@@ -161,7 +184,7 @@ fi
 
 if [ "$FOUND" = 1 ] && [ -n "$S_BEFORE_END" ] && [ "$FORCE" = 0 ] && [ "$NOTHING" = 0 ]; then
   WB_SHA=$(git -C "$TARGET" rev-parse HEAD); export WB_SHA
-  echo "→ before_end: $S_BEFORE_END"
+  step "→ before_end: $S_BEFORE_END"
   ws_run_hook "$S_BEFORE_END" "$PROJECT" \
     || die "before_end failed, so the worktree stays. Fix what it says, or use --force." 1
 fi
@@ -173,7 +196,7 @@ if [ "$STASHES" = 1 ]; then echo "→ note: 1 stash made on $BRANCH is kept in t
 elif [ "$STASHES" -gt 1 ]; then echo "→ note: $STASHES stashes made on $BRANCH are kept in the repo (git stash list)"; fi
 
 # ---- remove, then tidy the branch
-echo "→ removing worktree $TARGET"
+step "→ removing worktree $TARGET"
 cd "$MAIN"   # the worktree may be our own folder
 if [ "$FORCE" = 1 ]; then git -C "$MAIN" worktree remove --force "$TARGET"
 else git -C "$MAIN" worktree remove "$TARGET"; fi
@@ -184,7 +207,7 @@ else git -C "$MAIN" worktree remove "$TARGET"; fi
 # runs in the main checkout's project folder. Fail-open: the worktree is
 # already removed, so a failing or hung hook only warns.
 if [ "$FOUND" = 1 ] && [ -n "$S_AFTER_END" ]; then
-  echo "→ after_end: $S_AFTER_END"
+  step "→ after_end: $S_AFTER_END"
   if ! ws_timeout "${WB_AFTER_END_TIMEOUT:-60}" sh -c 'cd "$1" && sh -c "$2"' sh "$SOURCE" "$S_AFTER_END"; then
     echo "  warning: after_end failed; the worktree is removed anyway. Clean up by hand if it matters." >&2
   fi

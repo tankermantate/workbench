@@ -1,0 +1,339 @@
+#!/usr/bin/env python3
+"""wb-ship — the steps after the commit: push, pull request, CI, and the merge on a yes.
+
+  wb-ship [<worktree>] [--yes=<sha>] [--method=merge|squash|rebase] [--wait=<secs>]
+
+In the worktree (default: the folder you're in), on a branch other than the default one, with
+nothing uncommitted and an origin remote:
+  1. pushes the branch (never forced; a rejected push stops here)
+  2. opens a pull request into the default branch, or reuses the open one
+  3. waits for its CI checks, up to --wait seconds (default 540, under Claude's 10-minute
+     command limit). Checks that haven't registered yet get WB_SHIP_GRACE seconds (default 60)
+     to appear; after that a pull request with none counts as having no CI
+  4. on green, runs the space's before_end (as end-session would; a failure merges nothing), then
+     merges only on a yes: asked on a terminal, else given as --yes=<sha>, which must
+     name the commit CI checked. The merge is pinned to that commit (--match-head-commit), by
+     --method or else the repo's own default method. It never deletes the branch (end-session
+     does that), and never uses --admin or --auto.
+
+Exit: 0 merged, already merged, or nothing to ship · 1 refused, red, or GitHub refused the merge
+· 2 usage · 10 green, waiting for a yes · 11 checks still running: run wb-ship again.
+
+The space's gh_account is switched to first, as new-session does. Its bead (the one linked to
+the worktree) gets a note when the pull request opens and when it merges.
+WB_GH, WB_BD, WB_SHIP_INTERVAL (seconds between looks, default 10) and WB_SHIP_TTY are test seams.
+"""
+import json
+import os
+import re
+import subprocess
+import sys
+import time
+
+ME = os.path.realpath(__file__)
+HERE = os.path.dirname(ME)
+sys.path.insert(0, os.path.join(HERE, "..", "lib"))
+import wb_space  # noqa: E402  (lives in lib/; realpath, since install.sh links bin/ elsewhere)
+
+GH = os.environ.get("WB_GH", "gh")
+BD = os.environ.get("WB_BD", "bd")
+METHODS = ("merge", "squash", "rebase")
+GREEN, NONE, PENDING, RED = "green", "none", "pending", "red"
+
+
+class Stop(Exception):
+    def __init__(self, message, code=1):
+        super().__init__(message)
+        self.code = code
+
+
+def leaving(top):
+    """What ends the session once the work is merged: the launcher's close-out at /exit."""
+    return (f"When you /exit, the launcher removes this worktree once its bead is closed "
+            f"(a session started without the launcher: end-session {top}).")
+
+
+def run(cmd, cwd=None, timeout=60):
+    """(returncode, stdout, stderr); (1, "", why) when it can't run."""
+    try:
+        p = subprocess.run(cmd, cwd=cwd, capture_output=True, text=True, timeout=timeout,
+                           stdin=subprocess.DEVNULL)
+    except (OSError, subprocess.SubprocessError) as e:
+        return 1, "", str(e)
+    return p.returncode, p.stdout.strip(), p.stderr.strip()
+
+
+def git(*args, cwd):
+    return run(["git", "-C", cwd, *args])
+
+
+def gh(*args, cwd):
+    return run([GH, *args], cwd=cwd)
+
+
+def default_branch(main):
+    """As lib/session.sh's ws_default_branch: origin's HEAD, else main or master."""
+    rc, b, _ = git("symbolic-ref", "--quiet", "--short", "refs/remotes/origin/HEAD", cwd=main)
+    if not rc and b:
+        return b.split("/", 1)[1]
+    for b in ("main", "master"):
+        if not git("show-ref", "--verify", "--quiet", f"refs/heads/{b}", cwd=main)[0]:
+            return b
+    return "main"
+
+
+def space_for(top, main):
+    """The worktree space on this repo as a dict (key, root, gh, before_end), picked as end-session
+    picks it: the one whose key names the folder, else the first. None without one."""
+    found = []
+    for r in wb_space.rows():
+        if len(r) > 10 and r[4] == "1":
+            t = wb_space.toplevel(r[2])
+            if t and os.path.realpath(t) == main:
+                found.append(r)
+    if not found:
+        return None
+    keyed = [r for r in found if os.path.basename(top).startswith(r[6] + "-")]
+    r = (keyed or found)[0]
+    unset = lambda i: None if len(r) <= i or r[i] == "-" else r[i]  # noqa: E731
+    return {"key": r[6], "root": r[2], "gh": unset(10), "before_end": unset(12)}
+
+
+def gh_switch(account):
+    """As lib/session.sh's ws_gh_switch: only ever warns."""
+    rc, out, _ = run([GH, "auth", "status", "--active"])
+    m = re.search(r"account (\S+) ", out)
+    if m and m.group(1) == account:
+        return
+    if run([GH, "auth", "switch", "--user", account])[0]:
+        print(f"  warning: couldn't switch gh to {account} (try: gh auth login --user {account}).",
+              file=sys.stderr)
+    else:
+        print(f"→ gh: switched to {account}")
+
+
+class Bead:
+    """The bead linked to the worktree, noted on as the work ships; quiet when there's none."""
+
+    def __init__(self, source, top):
+        self.id, self.source = None, source
+        if source:
+            rc, out, _ = run([os.path.join(HERE, "wb-backlog"), "claimed", source, top], timeout=30)
+            self.id = (out or None) if not rc else None
+
+    def note(self, text):
+        if self.id and run([BD, "update", self.id, "--append-notes", text], cwd=self.source, timeout=30)[0]:
+            print(f"  warning: couldn't note that on {self.id}.", file=sys.stderr)
+
+
+def checks(top, number):
+    """(state, [(name, bucket, link)]) of the pull request's checks."""
+    rc, out, err = gh("pr", "checks", str(number), "--json", "name,bucket,link", cwd=top)
+    if rc and "no checks reported" in err:
+        return NONE, []
+    try:
+        data = json.loads(out)
+    except ValueError:
+        raise Stop(f"couldn't read PR #{number}'s checks: {err or out or 'gh said nothing'}")
+    rows = [(c.get("name", "?"), c.get("bucket", ""), c.get("link", "")) for c in data if isinstance(c, dict)]
+    if not rows:
+        return NONE, []
+    if any(b in ("fail", "cancel") for _, b, _ in rows):
+        return RED, rows
+    if any(b not in ("pass", "skipping") for _, b, _ in rows):
+        return PENDING, rows
+    return GREEN, rows
+
+
+def wait_for_checks(top, number, deadline):
+    """Checks until green, red, or the deadline (time.monotonic(), counted from wb-ship's start,
+    so the push and the pull request come out of the same budget)."""
+    interval = float(os.environ.get("WB_SHIP_INTERVAL", "10"))
+    grace = float(os.environ.get("WB_SHIP_GRACE", "60"))
+    start = time.monotonic()
+    said = False
+    while True:
+        state, rows = checks(top, number)
+        now = time.monotonic()
+        if state == NONE and now - start >= grace:
+            return NONE, rows
+        if state in (GREEN, RED):
+            return state, rows
+        if now >= deadline:
+            return PENDING, rows
+        if not said:
+            print(f"→ waiting for PR #{number}'s checks (up to {int(deadline - now)}s more)", flush=True)
+            said = True
+        time.sleep(max(0.0, min(interval, deadline - now)))
+
+
+def merge_method(top, asked):
+    if asked:
+        return asked
+    rc, out, err = gh("repo", "view", "--json",
+                      "viewerDefaultMergeMethod,mergeCommitAllowed,squashMergeAllowed,rebaseMergeAllowed", cwd=top)
+    try:
+        repo = json.loads(out) if not rc else None
+    except ValueError:
+        repo = None
+    if isinstance(repo, dict):
+        allowed = [m for m, k in (("merge", "mergeCommitAllowed"), ("squash", "squashMergeAllowed"),
+                                  ("rebase", "rebaseMergeAllowed")) if repo.get(k)]
+        default = str(repo.get("viewerDefaultMergeMethod") or "").lower()
+        if default in allowed:
+            return default
+        if len(allowed) == 1:
+            return allowed[0]
+    raise Stop("couldn't tell which merge method this repo uses; pass --method=merge, squash or rebase.")
+
+
+def ask(question):
+    if not (sys.stdin.isatty() or os.environ.get("WB_SHIP_TTY")):
+        return None
+    print(f"{question} [y/N] ", end="", flush=True)
+    return sys.stdin.readline().strip().lower() in ("y", "yes")
+
+
+def ship(target, yes, method, wait):
+    deadline = time.monotonic() + wait
+    rc, top, _ = git("rev-parse", "--show-toplevel", cwd=target)
+    if rc:
+        raise Stop(f"{target} is not in a git repo")
+    top = os.path.realpath(top)
+    common = git("rev-parse", "--path-format=absolute", "--git-common-dir", cwd=top)[1]
+    main = os.path.realpath(os.path.join(common, ".."))
+    branch = git("rev-parse", "--abbrev-ref", "HEAD", cwd=top)[1]
+    if branch == "HEAD":
+        raise Stop("the worktree is on a detached HEAD, so its branch is unknown")
+    base = default_branch(main)
+    if branch == base:
+        raise Stop(f"on {base}, the default branch: ship from a session's branch")
+    if git("status", "--porcelain", cwd=top)[1]:
+        raise Stop("the worktree has uncommitted changes; commit them first")
+    if git("remote", "get-url", "origin", cwd=top)[0]:
+        raise Stop("no origin remote, so there's nowhere to push or open a pull request")
+    head = git("rev-parse", "HEAD", cwd=top)[1]
+    print(f"→ {branch} at {head[:12]}, into {base}")
+
+    space = space_for(top, main)
+    if space and space["gh"]:
+        gh_switch(space["gh"])
+    source = project = None
+    if space:
+        prefix = git("rev-parse", "--show-prefix", cwd=space["root"])[1].rstrip("/")
+        source = os.path.join(main, prefix) if prefix else main
+        project = os.path.join(top, prefix) if prefix and os.path.isdir(os.path.join(top, prefix)) else top
+    bead = Bead(source, top)
+
+    git("fetch", "--quiet", "origin", base, cwd=top)
+    if not git("merge-base", "--is-ancestor", "HEAD", f"origin/{base}", cwd=top)[0]:
+        print(f"✓ nothing to ship: every commit is already on {base}. " + leaving(top))
+        return 0
+    rc, out, err = gh("pr", "list", "--head", branch, "--base", base, "--state", "all",
+                      "--json", "number,state,headRefOid,url", cwd=top)
+    try:
+        prs = json.loads(out) if not rc else None
+    except ValueError:
+        prs = None
+    if not isinstance(prs, list):
+        raise Stop(f"couldn't list pull requests with gh ({err or 'no answer'}); is it installed and logged in?")
+    done = next((p for p in prs if p.get("state") == "MERGED" and p.get("headRefOid") == head), None)
+    if done:
+        print(f"✓ already merged by PR #{done['number']}. " + leaving(top))
+        return 0
+
+    rc, out, err = git("push", "-u", "origin", branch, cwd=top)
+    if rc:
+        raise Stop(f"the push was rejected, so nothing more was done:\n{err}")
+    print(f"→ pushed {branch}")
+
+    pr = next((p for p in prs if p.get("state") == "OPEN"), None)
+    if pr:
+        number, url = pr["number"], pr.get("url", "")
+        print(f"→ PR #{number} is open: {url}")
+    else:
+        rc, out, err = gh("pr", "create", "--base", base, "--head", branch, "--fill", cwd=top)
+        m = re.search(r"/pull/(\d+)", out)
+        if rc or not m:
+            raise Stop(f"couldn't open a pull request: {err or out or 'gh said nothing'}")
+        number, url = int(m.group(1)), out.splitlines()[-1]
+        print(f"→ opened PR #{number}: {url}")
+        bead.note(f"PR #{number} opened: {url}")
+
+    state, rows = wait_for_checks(top, number, deadline)
+    for name, bucket, link in rows:
+        print(f"  {bucket or '?':<8} {name}{'  ' + link if link else ''}")
+    if state == RED:
+        bad = ", ".join(n for n, b, _ in rows if b in ("fail", "cancel"))
+        raise Stop(f"PR #{number} is red ({bad}), so it won't be merged. Fix it, commit, and run wb-ship again.")
+    if state == PENDING:
+        print(f"PR #{number}'s checks are still running; run wb-ship again to keep waiting.")
+        return 11
+    print(f"→ PR #{number}: " + ("no CI checks ran on it" if state == NONE else "all checks passed"))
+
+    # The space's before_end gate (a predeploy marker for this SHA, say) is what end-session
+    # checks before letting work go; a merge here puts the work beyond it (end-session skips it
+    # once the branch is merged), so it has to pass before the merge, not after.
+    if space and space["before_end"]:
+        print(f"→ before_end: {space['before_end']}", flush=True)
+        env = {**os.environ, "WB_SPACE": space["key"], "WB_WORKTREE": top, "WB_PROJECT": project,
+               "WB_SOURCE": source or "", "WB_BRANCH": branch, "WB_BEAD": bead.id or "", "WB_SHA": head}
+        if subprocess.run(["sh", "-c", space["before_end"]], cwd=project, env=env,
+                          stdin=subprocess.DEVNULL).returncode:
+            raise Stop(f"before_end failed, so PR #{number} won't be merged. Fix what it says, and run wb-ship again.")
+
+    if yes:
+        if len(yes) < 7 or not head.startswith(yes.lower()):
+            raise Stop(f"HEAD is {head[:12]}, not the commit the yes was for ({yes}); nothing merged.")
+    else:
+        how = method or "the repo's default method"
+        answer = ask(f"Merge PR #{number} into {base} ({how})?")
+        if not answer:
+            print(f"Not merged. Merging is the owner's call: once they say yes, run: wb-ship --yes={head[:12]}")
+            return 10
+    how = merge_method(top, method)
+    rc, out, err = gh("pr", "merge", str(number), f"--{how}", "--match-head-commit", head, cwd=top)
+    if rc:
+        raise Stop(f"GitHub didn't merge PR #{number}: {err or out or 'no reason given'}")
+    bead.note(f"PR #{number} merged into {base} by {how} at {head[:10]}.")
+    print(f"✓ PR #{number} merged into {base} by {how}. " + leaving(top))
+    return 0
+
+
+def main(argv):
+    target, yes, method, wait = None, None, None, 540.0
+    for a in argv:
+        if a in ("-h", "--help"):
+            print(__doc__.strip())
+            return 0
+        if a.startswith("--yes="):
+            yes = a.split("=", 1)[1]
+        elif a.startswith("--method="):
+            method = a.split("=", 1)[1]
+            if method not in METHODS:
+                print(f"wb-ship: --method must be one of {', '.join(METHODS)}", file=sys.stderr)
+                return 2
+        elif a.startswith("--wait="):
+            try:
+                wait = float(a.split("=", 1)[1])
+            except ValueError:
+                print("wb-ship: --wait takes seconds", file=sys.stderr)
+                return 2
+        elif a.startswith("-") or target:
+            print(f"wb-ship: unexpected argument: {a} (see wb-ship --help)", file=sys.stderr)
+            return 2
+        else:
+            target = a
+    target = target or os.getcwd()
+    if not os.path.isdir(target):
+        print(f"wb-ship: no such folder: {target}", file=sys.stderr)
+        return 2
+    try:
+        return ship(target, yes, method, wait)
+    except Stop as e:
+        print(f"wb-ship: {e}", file=sys.stderr)
+        return e.code
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv[1:]))
