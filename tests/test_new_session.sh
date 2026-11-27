@@ -110,10 +110,34 @@ c="$T/clone"; git clone -q "$A.origin.git" "$c"
 git -C "$c" -c user.email=t@example.com -c user.name=t commit -q --allow-empty -m ahead
 git -C "$c" push -q origin main
 before="$(git -C "$A" rev-parse side)"
-"$NS" acme pull check --no-launch >/dev/null 2>&1
+WB_BIN_DIR="$T/bin" "$NS" acme pull check --no-launch >/dev/null 2>&1
 assert_eq "pull: a checkout on another branch is left alone" "$(git -C "$A" rev-parse side)" "$before"
 assert_eq "base: the worktree starts from fetched origin/main" "$(git -C "$W/acme-pull-check" log -1 --format=%s)" "ahead"
 git -C "$A" checkout -q main
+WB_BIN_DIR="$T/bin" "$NS" acme pull main --no-launch >/dev/null 2>&1
+assert_eq "pull: the main checkout fast-forwards" "$(git -C "$A" log -1 --format=%s)" "ahead"
+assert_eq "pull of another repo: nothing installed" "$(ls -A "$T/bin" 2>/dev/null)" ""
+
+# --- the workbench's own checkout: a pull that moves it re-links its commands (install.sh
+# --no-schedule, quietly); a pull that moves nothing runs no install
+WB="$T/wbck"; setup_repo "$WB"
+cp -R "$REPO/bin" "$REPO/lib" "$REPO/install.sh" "$WB/"
+git -C "$WB" add -A; git -C "$WB" commit -q -m wb; git -C "$WB" push -q
+printf '\n[[space]]\nname = "Wb"\nroot = "%s"\nworktrees = true\nspace_key = "wb"\nbeads = false\n' "$WB" >> "$WORKBENCH_CONFIG"
+c="$T/wbclone"; git clone -q "$WB.origin.git" "$c"
+printf '#!/bin/sh\n' > "$c/bin/wb-newthing"; chmod +x "$c/bin/wb-newthing"
+git -C "$c" add bin/wb-newthing
+git -C "$c" -c user.email=t@example.com -c user.name=t commit -q -m newthing; git -C "$c" push -q origin main
+out="$(WB_BIN_DIR="$T/bin" WB_LAUNCH_AGENTS_DIR="$T/agents" "$WB/bin/new-session" wb one --no-launch 2>&1)"; rc=$?
+assert_eq "workbench pull: exits 0" "$rc" "0"
+assert_eq "workbench pull: the new command is linked" "$(readlink "$T/bin/wb-newthing")" "$WB/bin/wb-newthing"
+assert_contains "workbench pull: says so" "$out" "re-linked its commands"
+assert_not_contains "workbench pull: install's own output kept quiet" "$out" "linked $T/bin"
+if [ ! -e "$T/agents" ]; then ok "workbench pull: launch agents untouched"; else bad "workbench pull: launch agents untouched"; fi
+rm -f "$T/bin/wb-spaces"
+out="$(WB_BIN_DIR="$T/bin" "$WB/bin/new-session" wb two --no-launch 2>&1)"
+if [ ! -e "$T/bin/wb-spaces" ]; then ok "no change pulled: install.sh not run"; else bad "no change pulled: install.sh not run"; fi
+assert_not_contains "no change pulled: nothing said" "$out" "re-linked"
 
 # --- gh: already active, or missing
 : > "$FAKE_GH_LOG"

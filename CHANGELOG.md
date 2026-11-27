@@ -4,6 +4,9 @@ What changed for you in each workbench release. Update with `wb-update`.
 
 ## Unreleased
 
+- Starting a session in the workbench's own space no longer leaves new commands unlinked: when
+  `new-session` fast-forwards the workbench checkout, it re-links its commands
+  (`install.sh --no-schedule`), so a command like `wb-ship` is on your PATH right away.
 - `+ new space`: start a project from the launcher. The first screen's last row is now
   `✦ more…`, holding `+ new space`, `✦ open tabs` (moved there; the waiting count moved with it),
   `✦ tidy worktrees`, `✦ health check` and `✦ update`. `+ new space` asks what the project is: an
