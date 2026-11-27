@@ -61,7 +61,9 @@ listing the space keys.
    worktree: error, exit 1, nothing created.
 3. **Base.** If the repo has an `origin` remote: switch gh to `gh_account` if set (below), `git fetch
    origin`, best-effort `git pull --ff-only` of the main checkout (a failure is a note, as today),
-   and branch from `origin/<default>`. **No `origin`:** no fetch; branch from local `<default>`.
+   and branch from `origin/<default>`. When that pull moves the workbench's own checkout (the one
+   `new-session` runs from), it runs `install.sh --no-schedule` quietly so pulled commands are
+   linked; a pull that moves nothing installs nothing, and a failed install is a note. **No `origin`:** no fetch; branch from local `<default>`.
    `<default>` is the **default branch**, found the same way by both scripts: `origin/HEAD`'s target
    when there is an `origin` that sets it, else `main` if that branch exists, else `master` if it
    exists, else the main checkout's current branch.

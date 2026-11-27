@@ -93,8 +93,20 @@ if git -C "$REPO" remote get-url origin >/dev/null 2>&1; then
   # Refresh the main checkout only when it is on the default branch: 'git pull'
   # always merges into whatever branch is checked out.
   if [ "$(git -C "$REPO" symbolic-ref --quiet --short HEAD || true)" = "$DEFAULT" ]; then
+    WAS=$(git -C "$REPO" rev-parse HEAD)
     git -C "$REPO" pull --ff-only --quiet origin "$DEFAULT" 2>/dev/null \
       || echo "  note: couldn't fast-forward $DEFAULT in $REPO; the worktree still starts from origin/$DEFAULT."
+    # The workbench's own checkout (the one these commands run from, which install.sh links
+    # from) may have pulled new commands: link them now, or they wait for a wb-update nobody
+    # runs. --no-schedule: a session start never rewrites the launch agents.
+    if [ "$(git -C "$REPO" rev-parse HEAD)" != "$WAS" ] && [ "$REPO" = "$(cd "$WB_HOME" && pwd -P)" ] \
+       && [ -x "$REPO/install.sh" ]; then
+      if "$REPO/install.sh" --no-schedule >/dev/null 2>&1; then
+        echo "→ workbench updated: re-linked its commands"
+      else
+        echo "  note: workbench updated but its commands weren't re-linked; run $REPO/install.sh --no-schedule."
+      fi
+    fi
   fi
   BASE="origin/$DEFAULT"
 else
