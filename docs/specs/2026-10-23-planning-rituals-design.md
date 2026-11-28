@@ -251,8 +251,11 @@ named there loses its wave (one named nowhere is not judged and keeps it).
   slow answer adds nothing to the screens). `review` names the newest run without a `reviewed` file
   that did not fail and, when more are waiting, how many; `failed` names the newest run when it failed
   (with `login` for an expired login); `missed` names the Saturday with no run; `strategy due` appears when the plan is due or stale, or missing in a
-  space that has runs. A space with neither plan nor runs, or one just started from the templates and
-  never groomed, shows nothing.
+  space that has runs. A space whose plan is missing and that has never been groomed (no plan dir, or
+  one just started from the templates) gets `strategy new` instead: screen 1 says nothing, and the
+  work screen of a space whose bead store reads offers **✦ start a plan**, the strategy session, drafting from the
+  backlog since there are no inferred goals yet (wb-kvx.19: a new space's first plan needs no
+  terminal command).
 - Finishing the review marks the run reviewed (`wb-groom reviewed <run>`, a `reviewed` file with the date). An unreviewed run doesn't block the next one; the
   next summary says how many runs are waiting.
 

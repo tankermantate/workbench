@@ -136,50 +136,37 @@ current, and each Claude Code session is a member of your team, building one bea
 ## 4. Groom the backlog, then build the top bead
 
 Grooming judges a backlog against a **plan**: your goals for the month, what's protected, what's
-due. A space without a plan can still be groomed, but nothing is applied until it has one, and
-its summary leads with "strategy session needed". So the first time through goes like this:
+due. A space without a plan can still be groomed, but nothing is applied until it has one. So the
+first time through, you write the plan first:
 
-**a. A first grooming run.** In Terminal:
+**a. Start a plan.** In the launcher, pick Demo. A space that has never had a plan or a grooming
+run has **✦ start a plan** near the top of its work screen: pick it. Claude reads the backlog,
+drafts a plan from it, then goes through it with you one file at a time: 3–5 goals in your words,
+what's protected, anything dated. The last step sets the plan's date, and from then on grooming
+counts the plan as real. For Demo, goals like "learn the launcher" and "try planning in Desktop"
+are enough. Type `/exit` when Claude says it's done.
+
+**b. Groom, and review it.** In Terminal:
 
 ```bash
 wb-groom run Demo
 ```
 
 This runs Claude once (it counts against your Claude usage, like any session) and takes a few
-minutes. It reads the backlog, guesses at the space's goals and writes a summary, but applies
-nothing yet, because Demo has no plan. Use the space's name as the launcher shows it.
-
-**b. The strategy session.** Open a new Terminal tab and look at Demo on the first screen: it
-now ends with `groomed <day> · review · strategy due`. Pick Demo, then **✦ strategy session**.
-Claude drafts the plan from what grooming guessed, then goes through it with you one file at a
-time: 3–5 goals in your words, what's protected, anything dated. The last step sets the plan's
-date, and from then on grooming counts the plan as real. For Demo, goals like "learn the
-launcher" and "try planning in Desktop" are enough. Type `/exit` when Claude says it's done.
-
-**c. Groom again, and review it.**
-
-```bash
-wb-groom run Demo
-```
-
-This time grooming applies what it's allowed to on its own: it puts beads in NOW and NEXT,
-iceboxes unprotected beads that serve no goal, and flags beads that need attention. Everything
-else becomes a proposal for you to decide. Open a new tab: Demo shows `groomed <day> · review`.
-Pick Demo, then **✦ review <day>'s grooming**. Claude walks you through the summary one group at
-a time (what's due, the new sprint, the proposals) and applies what you accept. To put back
-something grooming applied, tell Claude: it undoes that bead exactly. When you've been through it
-all, Claude marks the run reviewed.
-
-The first run, from step a, is still waiting for review too, and it comes
-back as `review` once this one is done. It ran before Demo had a plan, so there's nothing in it
-to decide: before you finish, ask Claude to mark it reviewed as well
-("mark the earlier grooming run reviewed too"). Then the `review` note goes away.
+minutes. Use the space's name as the launcher shows it. Grooming applies what it's allowed to on
+its own: it puts beads in NOW and NEXT, iceboxes unprotected beads that serve no goal, and flags
+beads that need attention. Everything else becomes a proposal for you to decide. Open a new tab:
+Demo shows `groomed <day> · review`. Pick Demo, then **✦ review <day>'s grooming**. Claude walks
+you through the summary one group at a time (what's due, the new sprint, the proposals) and
+applies what you accept. To put back something grooming applied, tell Claude: it undoes that bead
+exactly. When you've been through it all, Claude marks the run reviewed, and the `review` note
+goes away.
 
 From now on, if you said yes to the schedule in `install.sh`, grooming runs on its own every
-Saturday at 06:00 for each space with a plan. You only do step c's review. Once a month, or when
+Saturday at 06:00 for each space with a plan. You only do step b's review. Once a month, or when
 the plan is 30 days old, the launcher shows `strategy due` again.
 
-**d. Build the top bead.** Open a new tab and pick Demo. The work screen puts the top of the
+**c. Build the top bead.** Open a new tab and pick Demo. The work screen puts the top of the
 backlog first:
 
 - beads that need attention (due soon, or protected and neglected);
@@ -222,8 +209,7 @@ in the README.
 
 - Add your real projects: run `wb-setup` again (it skips what's done), or edit
   `~/.config/workbench/spaces.toml` (`spaces.example.toml` documents every key).
-- Start each real space's plan the same way: a first `wb-groom run <space>`, then the
-  strategy session.
+- Start each real space's plan the same way: pick the space, then **✦ start a plan**.
 - Remove the Demo space when you're done with it: delete its `[[space]]` from `spaces.toml` and
   the folder `~/.local/share/workbench/demo`.
 - See every open session at once with `wb-tabs`, and tidy up finished worktrees with `wb-tidy`.

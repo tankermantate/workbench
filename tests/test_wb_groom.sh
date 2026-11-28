@@ -842,7 +842,8 @@ PYX
 # --- status, reviewed, strategy (what the launcher shows and starts) ---
 SG="$T/sg"; SP="$T/sp"; export WB_GROOM_DIR="$SG" WB_PLANS_DIR="$SP"
 st() { "$WG" status "$@" 2>"$T/err"; }
-assert_eq "status: no plan and no runs shows nothing, exit 0" "$(st acme; echo "rc=$?")" "rc=0"
+assert_eq "status: no plan and no runs offers a first plan, exit 0" "$(st acme; echo "rc=$?")" "strategy	new
+rc=0"
 mkdir -p "$SG/acme/20261010-0600" "$SG/acme/20261017-0600"; : > "$SG/acme/.lock"; mkdir -p "$SG/acme/notes"; : > "$SG/acme/20261024-0600"
 assert_eq "status: no plan, runs: strategy is due (missing plan); the newest unreviewed run, one more waiting" "$(st acme)" \
   "review	$SG/acme/20261017-0600	Sat	1 waiting
@@ -862,7 +863,7 @@ assert_eq "status: plan 60 days old is stale: due" "$(WB_TODAY=2026-12-09 st acm
 rm -rf "$SG/acme"; mkdir -p "$SG/acme"
 assert_eq "status: a due plan with no runs is still due (the date is the clock)" "$(WB_TODAY=2026-11-10 st acme)" "strategy	due"
 rm -rf "$SP/acme"; mkdir -p "$SP/acme"; printf '# Goals\ndate: YYYY-MM-DD\n' > "$SP/acme/goals.md"
-assert_eq "status: an unedited template plan with no runs shows nothing" "$(st acme)" ""
+assert_eq "status: an unedited template plan with no runs still offers a first plan" "$(st acme)" "strategy	new"
 mkdir -p "$SG/acme/20261017-0600"
 assert_contains "status: an unedited template plan with runs is due" "$(st acme)" "strategy	due"
 assert_eq "status: always exit 0, even for an unknown label" "$(st nope/../x; echo $?)" "0"

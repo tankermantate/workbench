@@ -22,6 +22,11 @@ claude_config = "$T/cfg"
 name = "Side"
 glob = "$T/side/*"
 EOF
+# a dated plan for each test space, so the bead tests below don't also get a ✦ start a plan row
+# (the planning-rituals tests remove Acme's)
+for s in Acme Att Blk Dfr Dot Fab Ice; do
+  mkdir -p "$T/plans/$s"; printf 'date: %s\n' "$(date +%Y-%m-%d)" > "$T/plans/$s/goals.md"; : > "$T/plans/$s/protected.md"
+done
 L() { (cd "$T/start" && zsh -f -c "source '$REPO/shell/workbench.zsh'; launch; print \"AFTER rc=\$? PWD=\$PWD\"" 2>&1); }
 
 # wb-ui render-work: sections and kinds
@@ -197,12 +202,21 @@ assert_contains "menu: a mistyped answer asks again" "$out" "DRY-RUN"
 assert_contains "menu: says what it wants" "$out" "type a number from the list"
 
 # planning rituals: an unreviewed run and a due plan add to both screens
+rm -rf "$T/plans/Acme"
 printf 'Acme\t-\t%s\ttrue\t1\tx\tacme\t-\t-\t0\n' "$T/acme" > "$T/start/spaces.tsv"
 out="$("$REPO/bin/wb-ui" render-work "$T/start" 1)"
 assert_not_contains "render-work: no review row without a run" "$out" "✦ review"
 assert_not_contains "render-work: no strategy row without a plan" "$out" "✦ strategy"
+assert_eq "render-work: a space never groomed offers a first plan after something new" "$(printf '%s\n' "$out" | sed -n 2p)" \
+  "strategy	-	$T/plans/Acme		✦ start a plan"
 "$REPO/bin/wb-ui" fill-counts "$T/start"; "$REPO/bin/wb-ui" render-spaces "$T/start" > "$T/screen1"
 assert_not_contains "screen 1: nothing about grooming without a run" "$(cat "$T/screen1")" "groomed"
+assert_not_contains "screen 1: a first plan is not news on screen 1" "$(cat "$T/screen1")" "strategy"
+printf 'Notes\t-\t%s\tfalse\t1\tx\tnotes\t-\t-\t0\n' "$T/acme" > "$T/start/spaces.tsv"
+assert_not_contains "render-work: a space without beads is not offered a plan" "$("$REPO/bin/wb-ui" render-work "$T/start" 1)" "✦ start a plan"
+printf 'Bare\t-\t%s\tif-present\t1\tx\tbare\t-\t-\t0\n' "$T/side/gamma" > "$T/start/spaces.tsv"
+assert_not_contains "render-work: an if-present space with no store is not offered a plan" "$("$REPO/bin/wb-ui" render-work "$T/start" 1)" "✦ start a plan"
+printf 'Acme\t-\t%s\ttrue\t1\tx\tacme\t-\t-\t0\n' "$T/acme" > "$T/start/spaces.tsv"
 mkdir -p "$T/groom/Acme/20261017-0600" "$T/plans/Acme"
 printf 'date: %s\n' "$(date +%Y-%m-%d)" > "$T/plans/Acme/goals.md"; printf 'labels: ws:money\n' > "$T/plans/Acme/protected.md"
 out="$("$REPO/bin/wb-ui" render-work "$T/start" 1)"
