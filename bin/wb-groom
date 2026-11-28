@@ -63,8 +63,10 @@
                                                         that did not fail (k more are waiting, when
                                                         any are; partial when that run was)
         strategy, due                                   the plan is due, stale or missing, and the
-                                                        space has runs (a space with neither plan
-                                                        nor runs shows nothing)
+                                                        space has runs
+        strategy, new                                   the plan is missing (no plan dir, or a
+                                                        template never dated) and the space has no
+                                                        runs: the launcher offers a first plan
       Always exits 0: the launcher calls it on every screen.
   wb-groom reviewed RUN_DIR
       Marks the run reviewed (a `reviewed` file holding the date; the judge cannot write it).
@@ -666,10 +668,12 @@ def cmd_status(label):
                 line.append("partial")
             print(tsv(*line))
         state = wb_groom.plan_state(wb_groom.read_plan(os.path.join(plans_dir(), label)), today())
-        # A missing plan is only worth a line once the space has been groomed: one that never
-        # took part (no plan, no runs) or was just started from a template shows nothing.
+        # A missing plan is news ("due") only once the space has been groomed. Before that it is
+        # an offer ("new"): the launcher's first-plan row, so a new space needs no terminal command.
         if state in ("due", "stale") or state == "missing" and any_runs:
             print("strategy\tdue")
+        elif state == "missing":
+            print("strategy\tnew")
     except Exception:  # noqa: BLE001  (the launcher calls this on every screen: never fail it)
         pass
     return 0

@@ -15,7 +15,8 @@ spaces.tsv (wb-spaces output).
                                screen 2 lines: kind, id, worktree, header, text
                                (sep and msg rows have an empty id, so the
                                preview shows nothing for them); review and strategy
-                               rows (wb-groom status) follow ✦ something new; start here
+                               rows (wb-groom status; ✦ start a plan for a beads space never
+                               groomed) follow ✦ something new; start here
                                (flagged beads, wb-backlog's picks, then the 30-day flow) comes
                                first; reads bd and keeps what it read in
                                TMP/work.<INDEX>.json
@@ -173,19 +174,23 @@ def groomed_note(label):
             parts.append(f"grooming failed {f[2]}: {why}" if why else f"grooming failed {f[2]}, see summary")
         elif f[0] == "review" and len(f) >= 3:
             parts.append(f"groomed {f[2]}{' · partial' if 'partial' in f[3:] else ''} · review")
-        elif f[0] == "strategy":
+        elif f[0] == "strategy" and f[1:2] != ["new"]:  # a first plan is an offer, not news
             parts.append("strategy due")
     return f"\033[2m · {' · '.join(parts)}\033[0m" if parts else ""
 
 
-def ritual_rows(label):
-    """Screen 2's rows for the review and strategy sessions, when grooming has news."""
+def ritual_rows(label, beads=True):
+    """Screen 2's rows for the review and strategy sessions, when grooming has news, and the
+    first-plan row for a space never groomed when BEADS (its store read: grooming needs one)."""
     plan = os.path.join(os.environ.get("WB_PLANS_DIR") or os.path.expanduser("~/.config/workbench/plans"), label)
     rows = []
     for f in ritual_status(label):
         if f[0] == "review" and len(f) >= 3:
             partial = " (partial: not the whole backlog)" if "partial" in f[3:] else ""
             rows.append(f"review\t-\t{f[1]}\t\t✦ review {DAYS.get(f[2], f[2])}'s grooming{partial}")
+        elif f[0] == "strategy" and f[1:2] == ["new"]:
+            if beads:
+                rows.append(f"strategy\t-\t{plan}\t\t✦ start a plan")
         elif f[0] == "strategy":
             rows.append(f"strategy\t-\t{plan}\t\t✦ strategy session")
     return sorted(rows, key=lambda r: not r.startswith("review"))
@@ -254,8 +259,7 @@ def fill_counts(tmp):
 def render_work(tmp, index, query=""):
     s = spaces(tmp)[int(index) - 1]
     print("new\t-\t-\t\t✦ something new", flush=True)
-    work = {"rows": [], "msg": None, "flow": None, "rituals": ritual_rows(s["label"])}
-    print_rituals(work, query)
+    work = {"rows": [], "msg": None, "flow": None, "rituals": []}
     if s["beads"] != "false":
         flow = os.path.join(tmp, f"flow.{index}")
         try:
@@ -273,6 +277,10 @@ def render_work(tmp, index, query=""):
                     work["flow"] = f.read().strip() or None
             except OSError:
                 pass  # no line: nothing to say, or the closed beads couldn't be read
+    # After the read: a first plan is offered only where grooming could run, a store that reads
+    # (most if-present spaces have none).
+    work["rituals"] = ritual_rows(s["label"], s["beads"] != "false" and work["msg"] is None)
+    print_rituals(work, query)
     path = os.path.join(tmp, f"work.{index}.json")
     with open(path + ".part", "w") as f:  # write-then-rename: a keystroke's filter-work may be reading it
         json.dump(work, f, ensure_ascii=False)

@@ -4,6 +4,9 @@ What changed for you in each workbench release. Update with `wb-update`.
 
 ## Unreleased
 
+- A new space's first plan starts from the launcher: a space with beads but no plan and no
+  grooming runs has `✦ start a plan` on its work screen. It opens the strategy session, which
+  drafts the plan from the backlog. You no longer need a first `wb-groom run` to get there.
 - A roadmap page you can open anywhere you use Claude, on the web and the phone: your open beads,
   space by space, in a page in your own Claude account. Change a title or priority, add a note or
   a new task there, and it waits on the page until the next sync. `wb-roadmap sync` (or
