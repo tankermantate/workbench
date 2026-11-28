@@ -316,6 +316,24 @@ close, claim or defer them, can't change grooming's labels (`wave:1`, `wave:2`, 
 `attention`), and can't lower a protected bead's priority. Spec:
 `docs/specs/2026-11-17-plan-in-claude-design.md`.
 
+## The roadmap page, on the web and the phone
+
+A page in your own Claude account shows each space's open beads and takes changes: a title, a
+priority, a note, a new task. They wait on the page until you sync, because only a Claude Code
+session on your Mac can reach it.
+
+```bash
+wb-roadmap sync [SPACE]   # a Claude session: publish the page the first time, apply its changes, refresh it
+wb-roadmap url            # the page's link for this account
+```
+
+The launcher has it under `✦ more…` as `✦ sync roadmap page`. The page shows the spaces of the
+account the session runs as (`SPACE` picks a space's `claude_config`). Changes from the page keep
+the same rules as Claude Desktop. A bead that changed on the Mac since the page last synced keeps
+the Mac's version, and the page says the change wasn't applied. The page holds a copy of the tasks
+it shows; its access rules let only you (and anyone you make an Editor) read it. Spec:
+`docs/specs/2026-11-27-roadmap-view-design.md`.
+
 ## Configuration
 
 Everything about your machine lives in `~/.config/workbench/spaces.toml` (or `$WORKBENCH_CONFIG`),

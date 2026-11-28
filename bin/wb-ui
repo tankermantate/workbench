@@ -116,6 +116,7 @@ def render_more(tmp):
             ("tidy", "✦ tidy worktrees", "end the finished ones"),
             ("doctor", "✦ health check", "wb-doctor"),
             ("update", "✦ update", "wb-update"),
+            ("roadmap", "✦ sync roadmap page", "your beads in claude.ai, on the web and phone"),
             ("back", "← back", "")]
     width = max(len(r[1]) for r in rows)
     for key, label, note in rows:

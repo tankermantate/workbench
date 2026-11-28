@@ -77,8 +77,9 @@ More: [Set up](../README.md#set-up) in the README.
 ## 2. Connect the Claude Desktop app
 
 Planning happens in a chat, against your real beads. Today that chat is the
-**Claude Desktop app** on the same Mac. claude.ai on the web and on your phone can't reach your
-beads yet: that's the roadmap view, still to be built (wb-kvx.2).
+**Claude Desktop app** on the same Mac. On the web and your phone, use the roadmap page instead:
+it shows your beads and takes changes, which wait there until you run `wb-roadmap sync` on the Mac
+(see the README's "The roadmap page").
 
 If `wb-setup` connected Desktop, skip to the check. Otherwise:
 

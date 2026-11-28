@@ -114,12 +114,13 @@ except to Claude, the same way any Claude session does, a once-a-day check with 
 newer version, which you can turn off, and, when you close out a branch that isn't in your main
 branch's history, a question to GitHub through your own `gh` about whether a pull request merged it. Beads itself sends anonymous usage metrics (which
 commands run, never your tasks); `bd metrics off` stops them, and setup says so. Workbench has
-no server and no account. The one exception is the optional roadmap view you can open anywhere: it is a page in your own Claude
-account, so it holds a copy of the tasks it shows.
+no server and no account. The one exception is the optional roadmap page you can open anywhere: it is a page in your own Claude
+account, so it holds a copy of the tasks it shows, readable only by you unless you make someone an editor.
 
 **What do I need?**
 A Mac, Claude Code, and beads (the task tracker workbench is built on). Planning in Claude works
-in the Claude Desktop app, and the roadmap view opens anywhere you use Claude.
+in the Claude Desktop app, and the roadmap page opens anywhere you use Claude. Changes made on the
+page wait there until you sync from your Mac.
 
 **Why not just a to-do list?**
 For one or two streams, a to-do list is enough, and workbench would be overhead. It earns its
@@ -139,7 +140,7 @@ opening on them.
 ### What works today
 
 As of November 2026, the build side is real and in daily use, planning in the Claude Desktop
-app works, and a guided first run sets it all up.
+app works, a roadmap page shows your tasks on the web and phone, and a guided first run sets it all up.
 
 - **Works today:** the launcher in every new terminal tab (Apple Terminal), showing your spaces
   with ready-task counts, then the space's tasks with what's next and what needs attention;
@@ -157,11 +158,15 @@ app works, and a guided first run sets it all up.
   is out (a once-a-day check you can turn off), and `wb-update` to bring you current in one step;
   a way to tell us how it's going without telemetry: GitHub issue forms for bugs and ideas, and
   an opt-in "tell us your setup" form; shipping after the commit (`wb-ship`: push, pull request,
-  CI, and the merge on your yes), with close-out recognising squash merges.
+  CI, and the merge on your yes), with close-out recognising squash merges; a roadmap page in
+  your own Claude account that opens on the web and the phone, showing each area's open tasks and
+  taking changes (title, priority, a note, a new task), which a Claude Code session on your Mac
+  applies under the same rules when you sync (`wb-roadmap sync`).
 - **Partly there:** areas exist as *spaces* (with an optional group), and epics and tasks exist as
   beads, but there is no initiative layer or roll-up across spaces. Shaping before code exists,
   but there is no light spec or acceptance-criteria step.
-- **Not built:** planning in Claude on the web or phone (the roadmap view comes first); review
+- **Not built:** planning by chat on the web or phone (the roadmap page takes changes there, but
+  they wait for a sync from the Mac, and there is no continuous sync); review
   on pull requests and releasing what merged; a single "vibe to strict" setting for how much
   workbench suggests.
 
@@ -183,8 +188,9 @@ several accounts) is a reasonable thing for someone to build later, but it is no
 
 **Why start with the Desktop app?**
 Because a local server is enough there: the Desktop app runs one on your Mac, so your tasks
-never leave it. So the first version is Desktop. A roadmap page you can open anywhere (a published Claude artifact
-that syncs with your tasks) is the likely second step. Putting your tasks on a hosted server so
+never leave it. So the first version is Desktop. The second is a roadmap page you can open anywhere (a published Claude artifact
+holding a copy of your tasks). Only a Claude Code session on your Mac can reach the page's data, so it syncs when you ask, not
+continuously. Putting your tasks on a hosted server so
 the web can reach them is not planned: it breaks "your data stays with you".
 
 **What's not planned?**
@@ -223,8 +229,9 @@ week, and no longer finding forgotten sessions and worktrees.
 ## Gaps between this vision and today
 
 Each promise in the press release, what exists, and what closes the gap. All of them sit under the
-epic wb-kvx, with the launch post (wb-kvx.13). Gaps 1, 4, 6, 7, 12 and 13 closed in November 2026
-and moved to "What works today": plan in Claude (wb-kvx.1, for the Desktop app), guided setup
+epic wb-kvx, with the launch post (wb-kvx.13). Gaps 1, 2, 4, 6, 7, 12 and 13 closed in November 2026
+and moved to "What works today": plan in Claude (wb-kvx.1, for the Desktop app), the roadmap page
+on the web and phone, synced when you ask (wb-kvx.2), guided setup
 (wb-kvx.4), an optional done-when step when shaping something new (wb-kvx.6), shipping after the
 commit with `wb-ship` (wb-kvx.7), issue forms and the "tell us your setup" form (wb-kvx.12) and
 update notices with `wb-update` (wb-kvx.14). Review, the part of
@@ -233,7 +240,6 @@ part of the newcomer test of the getting-started guide (wb-kvx.21).
 
 | # | Promise | Today | Gap | Bead |
 |---|---|---|---|---|
-| 2 | See the roadmap visually, anywhere | Nothing | A roadmap view (a published Claude artifact) that reads and writes your tasks | wb-kvx.2 |
 | 3 | Areas → initiatives → epics → tasks | Spaces (with a group), beads with parent epics | An initiative layer and a roll-up view across spaces | wb-kvx.3 |
 | 5 | Usable by non-developers | A README written for developers; a getting-started guide through the plan, groom and build loop (`docs/getting-started.md`), with its own word list and pictures of the launcher's two screens (`scripts/screenshots.sh`) | A picture or short recording of a Claude session at work, and the guide tried by someone new to workbench | wb-kvx.26, wb-kvx.21 |
 | 8 | Suggests rather than insists | Mostly suggests; strict only where work could be lost | One setting from "vibe" to "strict" that every prompt respects | wb-kvx.8 |

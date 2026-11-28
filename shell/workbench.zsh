@@ -235,6 +235,9 @@ _wb_more() {
       tidy)   _wb_tidy || return 1 ;;
       doctor) $WORKBENCH_HOME/bin/wb-doctor; _wb_tabs_pause || return 1 ;;
       update) $WORKBENCH_HOME/bin/wb-update; _wb_tabs_pause || return 1 ;;
+      # a Claude Code session does the sync: nothing else can reach the page's data
+      roadmap) $WORKBENCH_HOME/bin/wb-roadmap sync && return 0
+              _wb_tabs_pause || return 1 ;;
       new)
         # its questions and messages go to the terminal; the folder is its last stdout line
         if root=$($WORKBENCH_HOME/bin/wb-new-space); then

@@ -1,0 +1,340 @@
+<title>Roadmap</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&family=Space+Grotesk:wght@500;600&display=swap">
+<style>
+/* Layout: one column of spaces as tabs; each space a stack of lanes (in progress, ready, blocked, later),
+   rows sorted by priority; tapping a row opens a bottom sheet to queue an edit. */
+:root {
+  --bg: #f6f7f4; --surface: #ffffff; --fg: #1d2420; --muted: #5f6b64; --line: #dde2dc;
+  --accent: #2f6b4f; --accent-soft: #e2efe7; --warn: #9a5b00; --warn-soft: #fbefd9;
+  --bad: #a3332b; --bad-soft: #f8e3e0;
+  --p0: #a3332b; --p1: #b8621b; --p2: #2f6b4f; --p3: #5f6b64; --p4: #8a948e;
+  --display: "Space Grotesk", "Helvetica Neue", Arial, sans-serif;
+  --body: "IBM Plex Sans", -apple-system, "Segoe UI", sans-serif;
+  --mono: "IBM Plex Mono", ui-monospace, Menlo, monospace;
+}
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) {
+  --bg: #141815; --surface: #1c211e; --fg: #e5ebe6; --muted: #9aa69f; --line: #2c332e;
+  --accent: #7cc59f; --accent-soft: #1f3529; --warn: #e0a54a; --warn-soft: #3a2c14;
+  --bad: #f08a80; --bad-soft: #3d1f1c;
+  --p0: #f08a80; --p1: #eba45e; --p2: #7cc59f; --p3: #9aa69f; --p4: #6d7871; color-scheme: dark } }
+:root[data-theme="dark"] {
+  --bg: #141815; --surface: #1c211e; --fg: #e5ebe6; --muted: #9aa69f; --line: #2c332e;
+  --accent: #7cc59f; --accent-soft: #1f3529; --warn: #e0a54a; --warn-soft: #3a2c14;
+  --bad: #f08a80; --bad-soft: #3d1f1c;
+  --p0: #f08a80; --p1: #eba45e; --p2: #7cc59f; --p3: #9aa69f; --p4: #6d7871; color-scheme: dark }
+body { background: var(--bg); color: var(--fg); font-family: var(--body); font-size: 15px; line-height: 1.45; }
+.wrap { max-width: 760px; margin: 0 auto; padding-block: 20px 96px;
+  padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); }
+h1 { font-family: var(--display); font-weight: 600; font-size: 26px; margin: 0; letter-spacing: -0.01em; }
+h2 { font-family: var(--display); font-weight: 500; font-size: 13px; text-transform: uppercase; letter-spacing: 0.08em;
+  color: var(--muted); margin: 0; }
+header { display: grid; gap: 6px; margin-bottom: 16px; }
+.meta { color: var(--muted); font-size: 13px; }
+.banner { border-radius: 8px; padding: 10px 12px; font-size: 14px; display: flex; gap: 10px; align-items: baseline; flex-wrap: wrap; }
+.banner.pending { background: var(--warn-soft); color: var(--fg); }
+.banner code { font-family: var(--mono); font-size: 13px; }
+.tabs { display: flex; gap: 6px; overflow-x: auto; padding-bottom: 4px; margin-bottom: 12px; scrollbar-width: none; }
+.tab { flex: none; border: 1px solid var(--line); background: var(--surface); color: var(--fg); border-radius: 999px;
+  padding: 6px 12px; font: inherit; font-size: 14px; cursor: pointer; }
+.tab[aria-selected="true"] { background: var(--accent); border-color: var(--accent); color: var(--bg); }
+.tab .n { font-family: var(--mono); font-size: 12px; opacity: 0.75; margin-left: 4px; }
+.note { font-size: 13px; color: var(--warn); margin: 0 0 10px; }
+.lanes { display: grid; gap: 18px; }
+.lane { display: grid; gap: 6px; }
+.rows { display: grid; background: var(--surface); border: 1px solid var(--line); border-radius: 10px; overflow: hidden; }
+.row { display: grid; grid-template-columns: 34px minmax(0, 1fr); gap: 10px; padding: 10px 12px; text-align: left;
+  border: 0; border-top: 1px solid var(--line); background: none; color: inherit; font: inherit; cursor: pointer; }
+.row:first-child { border-top: 0; }
+.row:hover { background: var(--accent-soft); }
+.row:focus-visible, .tab:focus-visible, button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-visible {
+  outline: 2px solid var(--accent); outline-offset: 2px; }
+.prio { font-family: var(--mono); font-weight: 500; font-size: 13px; padding-top: 1px; }
+.prio[data-p="0"] { color: var(--p0); } .prio[data-p="1"] { color: var(--p1); } .prio[data-p="2"] { color: var(--p2); }
+.prio[data-p="3"] { color: var(--p3); } .prio[data-p="4"] { color: var(--p4); }
+.title { font-weight: 500; overflow-wrap: anywhere; }
+.sub { display: flex; flex-wrap: wrap; gap: 4px 10px; font-size: 12.5px; color: var(--muted); margin-top: 2px; }
+.sub .id { font-family: var(--mono); }
+.chip { font-size: 12px; border-radius: 4px; padding: 0 6px; background: var(--accent-soft); color: var(--accent); }
+.chip.warn { background: var(--warn-soft); color: var(--warn); }
+.chip.bad { background: var(--bad-soft); color: var(--bad); }
+.empty { color: var(--muted); padding: 28px 16px; text-align: center; border: 1px dashed var(--line); border-radius: 10px; }
+.fab { position: fixed; right: calc(16px + env(safe-area-inset-right, 0px)); bottom: calc(16px + env(safe-area-inset-bottom, 0px));
+  background: var(--accent); color: var(--bg); border: 0; border-radius: 999px; padding: 12px 18px; font: inherit;
+  font-weight: 600; cursor: pointer; box-shadow: 0 4px 14px rgb(0 0 0 / 0.18); }
+.sheet-bg { position: fixed; inset: 0; background: rgb(0 0 0 / 0.35); display: flex; align-items: flex-end; justify-content: center; z-index: 20; }
+.sheet { background: var(--surface); color: var(--fg); width: 100%; max-width: 560px; border-radius: 14px 14px 0 0;
+  padding: 18px max(16px, env(safe-area-inset-right, 0px)) calc(18px + env(safe-area-inset-bottom, 0px)) max(16px, env(safe-area-inset-left, 0px));
+  display: grid; gap: 12px; max-height: 88vh; overflow-y: auto; }
+.sheet h3 { font-family: var(--display); font-weight: 600; font-size: 18px; margin: 0; overflow-wrap: anywhere; }
+.sheet .desc { font-size: 14px; color: var(--muted); white-space: pre-wrap; overflow-wrap: anywhere; max-height: 9em; overflow-y: auto; }
+label { display: grid; gap: 4px; font-size: 13px; color: var(--muted); }
+input, textarea, select { font: inherit; font-size: 15px; color: var(--fg); background: var(--bg); border: 1px solid var(--line);
+  border-radius: 8px; padding: 8px 10px; width: 100%; box-sizing: border-box; }
+textarea { min-height: 70px; resize: vertical; }
+.seg { display: flex; gap: 6px; }
+.seg button { flex: 1; font-family: var(--mono); font: inherit; padding: 7px 0; border-radius: 8px; border: 1px solid var(--line);
+  background: var(--bg); color: var(--fg); cursor: pointer; }
+.seg button[aria-pressed="true"] { background: var(--accent); color: var(--bg); border-color: var(--accent); }
+.seg button:disabled { opacity: 0.35; cursor: not-allowed; }
+.actions { display: flex; gap: 8px; justify-content: flex-end; flex-wrap: wrap; }
+.btn { font: inherit; border-radius: 8px; padding: 8px 14px; border: 1px solid var(--line); background: var(--bg); color: var(--fg); cursor: pointer; }
+.btn.primary { background: var(--accent); color: var(--bg); border-color: var(--accent); font-weight: 600; }
+.btn:disabled { opacity: 0.5; cursor: not-allowed; }
+.queued { display: grid; gap: 6px; }
+.q { font-size: 13px; border-radius: 8px; padding: 8px 10px; background: var(--warn-soft); display: grid; gap: 4px; }
+.q.bad { background: var(--bad-soft); }
+.q .why { color: var(--muted); }
+.hint { font-size: 12.5px; color: var(--muted); }
+@media (prefers-reduced-motion: no-preference) { .sheet { animation: up 160ms ease-out; } @keyframes up { from { transform: translateY(24px); opacity: 0.6; } } }
+</style>
+
+<div class="wrap">
+  <header>
+    <h1>Roadmap</h1>
+    <div class="meta" id="meta">Loading your beads…</div>
+    <div class="banner pending" id="pending" hidden></div>
+  </header>
+  <nav class="tabs" id="tabs" role="tablist" aria-label="Spaces"></nav>
+  <p class="note" id="note" hidden></p>
+  <main class="lanes" id="lanes">
+    <div class="empty" id="empty">Your open beads appear here after the first sync. On your Mac, run <code>wb-roadmap sync</code>: a Claude Code session copies each space's beads into this page.</div>
+  </main>
+</div>
+<button class="fab" id="add" hidden>+ New task</button>
+<div class="sheet-bg" id="sheetbg" hidden></div>
+
+<script>
+(() => {
+  const $ = (id) => document.getElementById(id);
+  const el = (tag, cls, text) => { const e = document.createElement(tag); if (cls) e.className = cls; if (text != null) e.textContent = String(text); return e; };
+  const state = { spaces: [], edits: [], current: null, db: null, canWrite: true, loaded: false };
+  try { state.current = localStorage.getItem("wb-roadmap-space"); } catch (e) {}
+
+  const LANES = [
+    ["in_progress", "In progress", (t) => t.status === "in_progress"],
+    ["ready", "Ready", (t) => t.status === "open" && !(t.blocked_by || []).length],
+    ["blocked", "Waiting on something", (t) => t.status === "blocked" || (t.status === "open" && (t.blocked_by || []).length)],
+    ["later", "Later", (t) => !["in_progress", "open", "blocked"].includes(t.status)],
+  ];
+  const ago = (iso) => {
+    const s = (Date.now() - Date.parse(iso)) / 1000;
+    if (!isFinite(s)) return "";
+    if (s < 90) return "just now";
+    if (s < 5400) return Math.round(s / 60) + " min ago";
+    if (s < 129600) return Math.round(s / 3600) + " h ago";
+    return Math.round(s / 86400) + " days ago";
+  };
+
+  function editsFor(spaceId, beadId) {
+    return state.edits.filter((e) => e.d.space === spaceId && (beadId === undefined || e.d.bead === beadId));
+  }
+
+  function render() {
+    const tabs = $("tabs"), lanes = $("lanes");
+    tabs.replaceChildren(); lanes.replaceChildren();
+    const waiting = state.edits.filter((e) => !e.d.status);
+    const flagged = state.edits.filter((e) => e.d.status);
+    const pend = $("pending");
+    pend.hidden = !waiting.length && !flagged.length;
+    pend.replaceChildren();
+    if (waiting.length) {
+      pend.append(el("span", null, `${waiting.length} change${waiting.length === 1 ? "" : "s"} waiting for the next sync.`));
+      const c = el("span", "hint"); c.append("On your Mac: "); c.append(el("code", null, "wb-roadmap sync")); pend.append(c);
+    }
+    if (flagged.length) pend.append(el("span", null, `${flagged.length} change${flagged.length === 1 ? "" : "s"} couldn't be applied: open the task to see why.`));
+
+    if (!state.spaces.length) {
+      $("meta").textContent = state.loaded ? "Not synced yet." : $("meta").textContent;
+      const empty = el("div", "empty"); empty.append("Your open beads appear here after the first sync. On your Mac, run ");
+      empty.append(el("code", null, "wb-roadmap sync")); empty.append(": a Claude Code session copies each space's beads into this page.");
+      lanes.append(empty); $("add").hidden = true; return;
+    }
+    if (!state.spaces.some((s) => s.id === state.current)) state.current = state.spaces[0].id;
+    const newest = state.spaces.map((s) => s.d.synced_at).filter(Boolean).sort().pop();
+    $("meta").textContent = `${state.spaces.reduce((n, s) => n + (s.d.tasks || []).length, 0)} open beads in ${state.spaces.length} space${state.spaces.length === 1 ? "" : "s"} · synced ${newest ? ago(newest) : "never"}`;
+    for (const s of state.spaces) {
+      const b = el("button", "tab", s.d.space || s.id); b.setAttribute("role", "tab");
+      b.setAttribute("aria-selected", String(s.id === state.current));
+      b.append(el("span", "n", (s.d.tasks || []).length));
+      b.onclick = () => { state.current = s.id; try { localStorage.setItem("wb-roadmap-space", s.id); } catch (e) {} render(); };
+      tabs.append(b);
+    }
+    const sp = state.spaces.find((s) => s.id === state.current);
+    const note = $("note");
+    note.hidden = !sp.d.protection && !sp.d.descriptions_left_out;
+    note.textContent = [sp.d.protection ? `This space's ${sp.d.protection}: priorities can go up here, not down.` : "",
+      sp.d.descriptions_left_out ? "Descriptions are left out: this space has too many beads for the page." : ""].filter(Boolean).join(" ");
+    const tasks = (sp.d.tasks || []).slice().sort((a, b) => (a.priority - b.priority) || String(a.id).localeCompare(String(b.id)));
+    const titles = Object.fromEntries(tasks.map((t) => [t.id, t.title]));
+    for (const [key, name, test] of LANES) {
+      const list = tasks.filter(test);
+      if (!list.length) continue;
+      const lane = el("section", "lane"); lane.append(el("h2", null, `${name} · ${list.length}`));
+      const rows = el("div", "rows");
+      for (const t of list) rows.append(row(sp, t, titles));
+      lane.append(rows); lanes.append(lane);
+    }
+    if (!tasks.length) lanes.append(el("div", "empty", "No open beads in this space."));
+    const mine = editsFor(sp.id).filter((e) => e.d.kind === "create");
+    if (mine.length) {
+      const lane = el("section", "lane"); lane.append(el("h2", null, `New, not synced yet · ${mine.length}`));
+      const box = el("div", "queued"); for (const e of mine) box.append(queuedItem(e)); lane.append(box); lanes.append(lane);
+    }
+    $("add").hidden = !state.canWrite;
+  }
+
+  function row(sp, t, titles) {
+    const r = el("button", "row"); r.type = "button";
+    const p = el("span", "prio", "P" + t.priority); p.dataset.p = t.priority; r.append(p);
+    const body = el("div"); body.style.minWidth = "0";
+    body.append(el("div", "title", t.title));
+    const sub = el("div", "sub");
+    sub.append(el("span", "id", t.id));
+    if (t.type && t.type !== "task") sub.append(el("span", null, t.type));
+    if (t.parent && titles[t.parent]) sub.append(el("span", null, "in " + titles[t.parent]));
+    if (t.claimed) sub.append(el("span", "chip", "being worked on"));
+    if ((t.blocked_by || []).length) sub.append(el("span", "chip warn", "waits on " + t.blocked_by.join(", ")));
+    if (t.status === "deferred") sub.append(el("span", "chip", "deferred"));
+    if (t.protected) sub.append(el("span", "chip", "protected"));
+    const q = editsFor(sp.id, t.id);
+    if (q.some((e) => e.d.status)) sub.append(el("span", "chip bad", "not applied"));
+    else if (q.length) sub.append(el("span", "chip warn", "change waiting"));
+    body.append(sub); r.append(body);
+    r.onclick = () => openTask(sp, t);
+    return r;
+  }
+
+  function queuedItem(e) {
+    const box = el("div", "q" + (e.d.status ? " bad" : ""));
+    const c = e.d.changes || {};
+    const what = [c.title != null ? `title → “${c.title}”` : "", c.priority != null ? `priority → P${c.priority}` : "",
+      c.append_notes ? `note: “${c.append_notes}”` : "", e.d.kind === "create" ? `new task “${c.title}”` : ""].filter(Boolean).join(" · ");
+    box.append(el("div", null, what || "a change"));
+    box.append(el("div", "why", e.d.status ? `${e.d.status === "conflict" ? "Not applied, changed on the Mac" : "Refused"}: ${e.d.reason || ""}` : "Waiting for the next sync."));
+    if (state.canWrite) {
+      const a = el("div", "actions");
+      const x = el("button", "btn", e.d.status ? "Dismiss" : "Cancel this change");
+      x.onclick = async () => { x.disabled = true; try { await state.db.collection("edits").doc(e.id).delete(); } catch (err) { x.disabled = false; flash(box, "Couldn't remove it: " + (err.code || "try again")); } };
+      a.append(x); box.append(a);
+    }
+    return box;
+  }
+
+  function flash(parent, text) { const m = el("div", "hint", text); parent.append(m); }
+
+  function sheet(build) {
+    const bg = $("sheetbg"); bg.replaceChildren(); const s = el("div", "sheet"); s.setAttribute("role", "dialog"); s.setAttribute("aria-modal", "true");
+    const close = () => { bg.hidden = true; bg.replaceChildren(); };
+    build(s, close); bg.append(s); bg.hidden = false;
+    bg.onclick = (ev) => { if (ev.target === bg) close(); };
+    document.onkeydown = (ev) => { if (ev.key === "Escape") close(); };
+    const f = s.querySelector("input, textarea"); if (f) f.focus();
+  }
+
+  function prioPicker(start, min) {
+    const seg = el("div", "seg"); seg.setAttribute("role", "group"); seg.setAttribute("aria-label", "Priority");
+    let value = start;
+    for (let i = 0; i <= 4; i++) {
+      const b = el("button", null, "P" + i); b.type = "button"; b.setAttribute("aria-pressed", String(i === value));
+      if (min != null && i > min) { b.disabled = true; b.title = "Protected: its priority can only go up"; }
+      b.onclick = () => { value = i; seg.querySelectorAll("button").forEach((x, j) => x.setAttribute("aria-pressed", String(j === i))); };
+      seg.append(b);
+    }
+    return { seg, get: () => value };
+  }
+
+  async function queue(data, status, close) {
+    status.textContent = "Saving…";
+    try {
+      await state.db.collection("edits").add({ ...data, at: new Date().toISOString() });
+      close();
+    } catch (err) {
+      if (err && err.code === "invalid_argument") { state.canWrite = false; render(); }
+      status.textContent = err && err.code === "quota_exceeded" ? "The page is full of waiting changes: sync first." : "Couldn't save that change. Try again.";
+    }
+  }
+
+  function openTask(sp, t) {
+    sheet((s, close) => {
+      s.append(el("h3", null, t.title));
+      const sub = el("div", "sub"); sub.append(el("span", "id", t.id)); sub.append(el("span", null, sp.d.space)); s.append(sub);
+      if (t.description) s.append(el("div", "desc", t.description));
+      const q = editsFor(sp.id, t.id);
+      if (q.length) { const box = el("div", "queued"); q.forEach((e) => box.append(queuedItem(e))); s.append(box); }
+      if (!state.canWrite) { s.append(el("p", "hint", "You can look but not change tasks on this page.")); return; }
+      const title = el("input"); title.id = "edit-title"; title.value = t.title; title.maxLength = 300;
+      const lt = el("label", null, "Title"); lt.append(title); s.append(lt);
+      const pick = prioPicker(t.priority, t.protected ? t.priority : null);
+      const lp = el("label", null, t.protected ? "Priority (protected: it can only go up)" : "Priority"); lp.append(pick.seg); s.append(lp);
+      const notes = el("textarea"); notes.id = "edit-note"; notes.placeholder = "Add a note to the bead";
+      const ln = el("label", null, "Note"); ln.append(notes); s.append(ln);
+      s.append(el("p", "hint", "Changes wait here until the next sync. If the task changes on your Mac first, the Mac's version wins and this page says so."));
+      const status = el("div", "hint"); s.append(status);
+      const a = el("div", "actions"); const cancel = el("button", "btn", "Close"); cancel.onclick = close;
+      const save = el("button", "btn primary", "Queue change");
+      save.onclick = () => {
+        const changes = {};
+        if (title.value.trim() && title.value.trim() !== t.title) changes.title = title.value.trim();
+        if (pick.get() !== t.priority) changes.priority = pick.get();
+        if (notes.value.trim()) changes.append_notes = notes.value.trim();
+        if (!Object.keys(changes).length) { status.textContent = "Nothing changed."; return; }
+        queue({ space: sp.id, bead: t.id, kind: "update", base: t.updated_at || null, changes }, status, close);
+      };
+      a.append(cancel, save); s.append(a);
+    });
+  }
+
+  function openNew() {
+    const sp = state.spaces.find((s) => s.id === state.current); if (!sp) return;
+    sheet((s, close) => {
+      s.append(el("h3", null, "New task in " + sp.d.space));
+      const title = el("input"); title.id = "new-title"; title.maxLength = 300; title.placeholder = "What needs doing";
+      const lt = el("label", null, "Title"); lt.append(title); s.append(lt);
+      const desc = el("textarea"); desc.id = "new-desc"; desc.placeholder = "Why it matters";
+      const ld = el("label", null, "Description"); ld.append(desc); s.append(ld);
+      const pick = prioPicker(2, null);
+      const lp = el("label", null, "Priority"); lp.append(pick.seg); s.append(lp);
+      const epics = (sp.d.tasks || []).filter((t) => t.type === "epic");
+      let parent = null;
+      if (epics.length) {
+        parent = el("select"); parent.id = "new-parent"; parent.append(new Option("No epic", ""));
+        for (const e of epics) parent.append(new Option(e.title, e.id));
+        const le = el("label", null, "Epic"); le.append(parent); s.append(le);
+      }
+      const status = el("div", "hint"); s.append(status);
+      const a = el("div", "actions"); const cancel = el("button", "btn", "Close"); cancel.onclick = close;
+      const save = el("button", "btn primary", "Queue task");
+      save.onclick = () => {
+        if (!title.value.trim()) { status.textContent = "Give it a title."; return; }
+        const changes = { title: title.value.trim(), priority: pick.get() };
+        if (desc.value.trim()) changes.description = desc.value.trim();
+        if (parent && parent.value) changes.parent = parent.value;
+        queue({ space: sp.id, bead: null, kind: "create", base: null, changes }, status, close);
+      };
+      a.append(cancel, save); s.append(a);
+    });
+  }
+  $("add").onclick = openNew;
+
+  (async () => {
+    const db = await claude.use("db");
+    if (!db) { $("meta").textContent = "This view can't load the roadmap. Open it signed in to the Claude account that owns it."; return; }
+    state.db = db;
+    const user = await claude.use("user");
+    if (user) { const ok = await user.can("data.write"); if (ok === false) state.canWrite = false; }
+    const timer = setTimeout(() => { if (!state.loaded) $("meta").textContent = "Can't reach the roadmap's data yet. Check your connection."; }, 10000);
+    db.collection("spaces").onSnapshot((snap) => {
+      state.spaces = snap.docs.filter((d) => d.exists).map((d) => ({ id: d.id, d: d.data() }))
+        .sort((a, b) => String(a.d.space || a.id).localeCompare(String(b.d.space || b.id)));
+      if (!snap.metadata.fromCache) { state.loaded = true; clearTimeout(timer); }
+      render();
+    }, (err) => { clearTimeout(timer); $("meta").textContent = "The roadmap's data isn't available in this view (" + err.code + ")."; });
+    db.collection("edits").onSnapshot((snap) => {
+      state.edits = snap.docs.filter((d) => d.exists).map((d) => ({ id: d.id, d: d.data() }));
+      render();
+    }, () => {});
+  })();
+})();
+</script>
