@@ -300,18 +300,19 @@ out="$(printf 'q\n' | WB_NO_FZF=1 L)"
 assert_contains "more row: in the numbered menu, after the three spaces" "$out" "4) ✦ more…"
 assert_not_contains "more row: open tabs is not on screen 1" "$out" "open tabs"
 out="$(printf '4\nq\nq\n' | WB_NO_FZF=1 L)"
-assert_eq "more: its commands, in order" "$(printf '%s\n' "$out" | grep -E '^ +[0-9]+\) ' | sed -n '5,10p' | sed 's/^ *[0-9]*) //; s/  .*//')" \
+assert_eq "more: its commands, in order" "$(printf '%s\n' "$out" | grep -E '^ +[0-9]+\) ' | sed -n '5,11p' | sed 's/^ *[0-9]*) //; s/  .*//')" \
   "+ new space
 ✦ open tabs
 ✦ tidy worktrees
 ✦ health check
 ✦ update
+✦ sync roadmap page
 ← back"
 out="$(printf '4\nx\nq\nq\n' | WB_NO_FZF=1 L)"
 assert_contains "more: q means back there, and the hint says so" "$out" "r, or q = back"
 assert_contains "screen 1: q still means a shell" "$(printf 'x\nq\n' | WB_NO_FZF=1 L)" "r, or q = shell"
 assert_eq "more: q goes back to screen 1, not a shell" "$(printf '%s\n' "$out" | grep -c '✦ more…')" "2"
-out="$(printf '4\n2\n\n6\n1\n1\n' | WB_NO_FZF=1 L)"
+out="$(printf '4\n2\n\n7\n1\n1\n' | WB_NO_FZF=1 L)"
 assert_contains "open tabs: choosing it shows the tabs view" "$out" "plain shell"
 assert_contains "open tabs: it waits before going back" "$out" "Press Enter to go back"
 assert_eq "open tabs: back on the submenu" "$(printf '%s\n' "$out" | grep -c '← back')" "2"
@@ -335,6 +336,16 @@ for c in "3 wb-tidy" "4 wb-doctor" "5 wb-update"; do
   assert_contains "more: ${c#* } waits to be read" "$out" "Press Enter to go back"
   assert_eq "more: ${c#* } comes back to the submenu" "$(printf '%s\n' "$out" | grep -c '← back')" "2"
 done
+# sync roadmap page (wb-kvx.2): wb-roadmap sync is a Claude session; when it can't start, say why and come back
+printf '#!/bin/sh\necho "ran wb-roadmap $*"\n' > "$T/ui4/bin/wb-roadmap"; chmod +x "$T/ui4/bin/wb-roadmap"
+out="$(printf '4\n6\n' | WB_NO_FZF=1 L4)"
+assert_contains "more: sync roadmap page runs wb-roadmap sync" "$out" "ran wb-roadmap sync"
+assert_contains "more: ... and that was the session: the launcher is done" "$out" "AFTER rc=0"
+assert_not_contains "more: ... without a pause" "$out" "Press Enter to go back"
+printf '#!/bin/sh\necho "wb-roadmap: no account" >&2; exit 1\n' > "$T/ui4/bin/wb-roadmap"
+out="$(printf '4\n6\n\nq\nq\n' | WB_NO_FZF=1 L4)"
+assert_contains "more: a sync that can't start says why" "$out" "no account"
+assert_eq "more: ... and comes back to the submenu" "$(printf '%s\n' "$out" | grep -c '← back')" "2"
 # + new space: wb-new-space asks, makes it, and the new project's first session starts there.
 # A new space's session_cmd is the new-session next to wb-spaces, so the copy's is the fake.
 mkdir -p "$T/ui5" "$T/ns-dev"; cp -R "$REPO"/bin "$REPO"/lib "$REPO"/prompts "$REPO"/shell "$T/ui5/"

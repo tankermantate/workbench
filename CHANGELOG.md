@@ -4,6 +4,14 @@ What changed for you in each workbench release. Update with `wb-update`.
 
 ## Unreleased
 
+- A roadmap page you can open anywhere you use Claude, on the web and the phone: your open beads,
+  space by space, in a page in your own Claude account. Change a title or priority, add a note or
+  a new task there, and it waits on the page until the next sync. `wb-roadmap sync` (or
+  `✦ sync roadmap page` under `✦ more…`) starts a Claude Code session that publishes the page the
+  first time, applies the waiting changes under the same rules as planning in Desktop, and
+  refreshes the page's copy. Sync happens when you ask for it, because only a Claude Code session
+  on your Mac can reach the page. If a bead changed on the Mac first, the Mac's version wins and
+  the page says so.
 - Starting a session in the workbench's own space no longer leaves new commands unlinked: when
   `new-session` fast-forwards the workbench checkout, it re-links its commands
   (`install.sh --no-schedule`), so a command like `wb-ship` is on your PATH right away.

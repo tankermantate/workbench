@@ -1,0 +1,344 @@
+#!/usr/bin/env python3
+"""wb-roadmap — the roadmap page: your beads in a page in your own Claude account, synced on demand.
+
+  wb-roadmap sync [SPACE]   start a Claude Code session that syncs the page (on SPACE's account)
+  wb-roadmap export DIR     write one document per space of this account to DIR/spaces/
+  wb-roadmap apply DIR      apply the page's edits saved in DIR/edits/ through bd; prints the results
+  wb-roadmap url [URL]      the page's link for this account (prints it, or remembers URL)
+  wb-roadmap page           the page's source file, to publish
+
+The page lives in claude.ai, so it opens on the web and the phone, but nothing on this Mac can
+reach it except an interactive Claude Code session (print-mode sessions have no Artifact tools).
+So a sync is a session: export, write the documents to the page, read its queued edits back,
+apply them here. bd is the record: an edit to a bead that changed here since the page saw it is
+a conflict and isn't applied, except a note, which only adds.
+
+The persona is the account the Claude Code session runs as (CLAUDE_CONFIG_DIR's .claude.json, or
+~/.claude.json), and only that account's spaces are exported or edited; when it can't be read,
+everything refuses. Edits go through wb-mcp's own rules: nothing closes, claims or reopens, no
+labels from the page, protected beads keep their priority.
+Spec: docs/specs/2026-11-27-roadmap-view-design.md
+
+WB_ROADMAP_STATE (the applied-edit record), WB_CLAUDE, WB_BD, WB_PLANS_DIR and WB_TODAY are seams.
+"""
+import datetime
+import importlib.machinery
+import importlib.util
+import json
+import os
+import re
+import shutil
+import sys
+
+ME = os.path.realpath(__file__)
+HERE = os.path.dirname(ME)
+REPO = os.path.dirname(HERE)
+sys.path.insert(0, os.path.join(REPO, "lib"))
+import wb_groom  # noqa: E402
+
+# wb-mcp holds the editing rules; load it rather than keep a second copy that could drift.
+_loader = importlib.machinery.SourceFileLoader("wb_mcp", os.path.join(HERE, "wb-mcp"))
+_spec = importlib.util.spec_from_loader("wb_mcp", _loader)
+mcp = importlib.util.module_from_spec(_spec)
+_loader.exec_module(mcp)
+Refused = mcp.Refused
+
+PAGE = os.path.join(REPO, "lib", "roadmap", "roadmap.html")
+PROMPT = os.path.join(REPO, "prompts", "roadmap-sync.txt")
+DESC_MAX = 1000
+DOC_MAX = 240 * 1024      # the page's store takes documents up to 256 KiB
+UPDATE_FIELDS = {"title", "priority", "append_notes"}
+CREATE_FIELDS = {"title", "description", "priority", "parent", "type"}
+URL_RE = re.compile(r"^https://claude\.ai/(code/)?artifact/[A-Za-z0-9-]+$")
+
+
+def die(msg, code=1):
+    print(f"wb-roadmap: {msg}", file=sys.stderr)
+    sys.exit(code)
+
+
+def session_account():
+    acct = mcp.config_account(os.environ.get("CLAUDE_CONFIG_DIR") or None)
+    if not acct:
+        raise Refused("can't tell which Claude account this session runs as, so it won't sync anyone's "
+                      "beads. Sign in to Claude Code (or set CLAUDE_CONFIG_DIR to the space's config).")
+    return acct
+
+
+def persona_spaces():
+    acct = session_account()
+    spaces = [s for s in mcp.all_spaces()
+              if s["beads"] != "false" and os.path.isdir(os.path.join(s["root"], ".beads"))
+              and mcp.config_account(s["claude_config"]) == acct]
+    if not spaces:
+        raise Refused("no workbench space belongs to the account this session runs as.")
+    return acct, spaces
+
+
+def doc_id(label, taken):
+    base = re.sub(r"[^A-Za-z0-9_~:@+-]+", "-", label).strip("-") or "space"
+    out, n = base, 2
+    while out in taken:
+        out, n = f"{base}-{n}", n + 1
+    taken.add(out)
+    return out
+
+
+# --- export ---
+
+def task(b, open_ids, protected):
+    blockers = [d.get("depends_on_id") for d in (b.get("dependencies") or [])
+                if isinstance(d, dict) and d.get("type") == "blocks" and d.get("depends_on_id") in open_ids]
+    desc = (b.get("description") or "").strip()
+    if len(desc) > DESC_MAX:
+        desc = desc[:DESC_MAX - 1].rstrip() + "…"
+    return {"id": b["id"], "title": b.get("title") or "", "status": b.get("status") or "open",
+            "priority": b.get("priority", 2), "type": b.get("issue_type") or "task",
+            "labels": list(b.get("labels") or []), "parent": b.get("parent"),
+            "updated_at": b.get("updated_at"), "claimed": bool(b.get("assignee")),
+            "description": desc, "blocked_by": blockers, "protected": protected(b)}
+
+
+def space_doc(s):
+    state, labels, _ = mcp.protection(s["label"])
+    every = state in ("missing", "stale")
+    data = wb_groom._json_list(mcp.bd(s["root"], "list", "-n", "0", "--json"))
+    if data is None:
+        raise Refused(f"bd list in {s['label']} did not return a list of beads.")
+    beads = [b for b in data if isinstance(b, dict) and b.get("id") and b.get("status") != "closed"]
+    open_ids = {b["id"] for b in beads}
+    prot = lambda b: every or bool(set(b.get("labels") or []) & labels)  # noqa: E731
+    doc = {"space": s["label"], "group": s["group"], "plan": state,
+           "protection": ("no plan: every bead counts as protected" if state == "missing" else
+                          "plan out of date: every bead counts as protected" if state == "stale" else None),
+           "synced_at": datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+           "tasks": [task(b, open_ids, prot) for b in beads]}
+    if len(json.dumps(doc)) > DOC_MAX:
+        for t in doc["tasks"]:
+            t["description"] = ""
+        doc["descriptions_left_out"] = True
+    if len(json.dumps(doc)) > DOC_MAX:
+        raise Refused(f"{s['label']} has too many open beads for one page document.")
+    return doc
+
+
+def cmd_export(out_dir):
+    acct, spaces = persona_spaces()
+    docs, skipped, taken = {}, [], set()
+    for s in spaces:   # every space read before anything is written
+        k = doc_id(s["label"], taken)
+        try:
+            docs[k] = space_doc(s)
+        except Refused as e:   # one store bd can't open mustn't hide the others; its old copy stays
+            skipped.append({"doc_id": k, "space": s["label"], "reason": str(e)})
+    if not docs:
+        raise Refused("no space of this account could be read: " + "; ".join(x["reason"] for x in skipped))
+    sdir = os.path.join(out_dir, "spaces")
+    shutil.rmtree(sdir, ignore_errors=True)
+    os.makedirs(sdir)
+    for k, d in docs.items():
+        with open(os.path.join(sdir, k + ".json"), "w", encoding="utf-8") as f:
+            json.dump(d, f, indent=1, ensure_ascii=False)
+    print(json.dumps({"account": acct, "collection": "spaces",
+                      "documents": [{"doc_id": k, "file": os.path.join(sdir, k + ".json")} for k in docs],
+                      "skipped": skipped},
+                     indent=1))
+
+
+# --- apply ---
+
+def state_dir():
+    return os.environ.get("WB_ROADMAP_STATE") or os.path.expanduser("~/.local/state/workbench/roadmap")
+
+
+def applied_ids():
+    try:
+        with open(os.path.join(state_dir(), "applied.jsonl"), encoding="utf-8") as f:
+            return {json.loads(l).get("edit") for l in f if l.strip()}
+    except (OSError, ValueError):
+        return set()
+
+
+def record_applied(edit, acct, e, message):
+    os.makedirs(state_dir(), exist_ok=True)
+    with open(os.path.join(state_dir(), "applied.jsonl"), "a", encoding="utf-8") as f:
+        f.write(json.dumps({"edit": edit, "account": acct, "space": e.get("space"), "bead": e.get("bead"),
+                            "kind": e.get("kind"), "changes": e.get("changes"), "message": message}) + "\n")
+
+
+def read_edit(path):
+    with open(path, encoding="utf-8") as f:
+        e = json.load(f)
+    if isinstance(e, dict) and isinstance(e.get("data"), dict) and "kind" not in e:
+        e = e["data"]   # saved with its version around it
+    if not isinstance(e, dict) or not isinstance(e.get("changes"), dict):
+        raise ValueError("not an edit")
+    return e
+
+
+def space_for(e, spaces, docs):
+    """The space an edit names: by its page document id (or its label)."""
+    name = e.get("space")
+    for k, s in docs.items():
+        if name in (k, s["label"]):
+            return s
+    raise Refused(f"'{name}' is not one of this account's spaces.")
+
+
+def _when(v):
+    try:
+        return datetime.datetime.fromisoformat(str(v).replace("Z", "+00:00"))
+    except ValueError:
+        return v
+
+
+def apply_one(e, acct, spaces, docs, touched):
+    """TOUCHED maps a bead this run wrote to (its updated_at before the run, after its last write),
+    so a second change queued on the page against the same copy isn't a conflict with the first."""
+    s = space_for(e, spaces, docs)
+    ch = e["changes"]
+    if e.get("kind") == "create":
+        extra = sorted(set(ch) - CREATE_FIELDS)
+        if extra:
+            raise Refused(f"the page can't set {', '.join(extra)} on a new task.")
+        return "applied", mcp.t_create_bead({"space": s["label"], **ch}, acct, spaces)
+    if e.get("kind") != "update":
+        raise Refused("an edit is an update or a create.")
+    extra = sorted(set(ch) - UPDATE_FIELDS)
+    if extra:
+        raise Refused(f"the page can't change {', '.join(extra)}: that happens in the terminal.")
+    if not ch:
+        raise Refused("nothing to change.")
+    mcp.priority_arg(ch)
+    for k in ("title", "append_notes"):
+        mcp.text_arg(ch, k, required=False)
+    b = mcp.bead(s, mcp.text_arg(e, "bead"))
+    seen = b.get("updated_at")
+    before, after = touched.get((s["label"], b["id"]), (None, None))
+    if after is not None and _when(seen) == _when(after):
+        seen = before   # only this run changed it since the page's copy
+    if set(ch) - {"append_notes"} and (seen is None or _when(seen) != _when(e.get("base"))):
+        return "conflict", (f"{b['id']} changed on the Mac since the page last synced, so this edit wasn't "
+                            f"applied and the Mac's version stays. Look again and redo it if it still holds.")
+    msg = mcp.t_update_bead({"space": s["label"], "id": b["id"], **ch}, acct, spaces)
+    touched[(s["label"], b["id"])] = (seen if seen is not None else b.get("updated_at"),
+                                      mcp.bead(s, b["id"]).get("updated_at"))
+    return "applied", msg
+
+
+def cmd_apply(in_dir):
+    acct, spaces = persona_spaces()
+    taken = set()
+    docs = {doc_id(s["label"], taken): s for s in spaces}
+    edir = os.path.join(in_dir, "edits")
+    files = sorted(f for f in os.listdir(edir) if f.endswith(".json")) if os.path.isdir(edir) else []
+    edits = []
+    for f in files:
+        try:
+            e = read_edit(os.path.join(edir, f))
+        except (OSError, ValueError) as err:
+            e = err
+        edits.append((f[:-5], e))
+    edits.sort(key=lambda x: (str(x[1].get("at") or "") if isinstance(x[1], dict) else "", x[0]))
+    done, results, touched = applied_ids(), [], {}
+    for eid, e in edits:
+        if not isinstance(e, dict):
+            results.append({"edit": eid, "status": "refused", "message": "this edit couldn't be read."})
+            continue
+        if e.get("status"):   # reported back already; it waits on the page until dismissed
+            continue
+        if eid in done:
+            results.append({"edit": eid, "status": "applied", "message": "already applied"})
+            continue
+        try:
+            status, msg = apply_one(e, acct, spaces, docs, touched)
+        except Refused as err:
+            status, msg = "refused", str(err)
+        if status == "applied":
+            record_applied(eid, acct, e, msg)
+        results.append({"edit": eid, "status": status, "message": msg})
+    print(json.dumps({"results": results}, indent=1 if results else None, ensure_ascii=False))
+
+
+# --- url, page, sync ---
+
+def url_file():
+    cfg = os.environ.get("WORKBENCH_CONFIG") or os.path.expanduser("~/.config/workbench/spaces.toml")
+    return os.path.join(os.path.dirname(cfg), "roadmap.json")
+
+
+def saved_urls():
+    try:
+        with open(url_file(), encoding="utf-8") as f:
+            d = json.load(f)
+        return d if isinstance(d, dict) else {}
+    except (OSError, ValueError):
+        return {}
+
+
+def cmd_url(new):
+    acct = session_account()
+    urls = saved_urls()
+    if new is None:
+        if not urls.get(acct):
+            return 1
+        print(urls[acct])
+        return 0
+    if not URL_RE.match(new):
+        die("that isn't a claude.ai artifact link (https://claude.ai/artifact/…).", 2)
+    urls[acct] = new
+    tmp = url_file() + ".tmp"
+    with open(tmp, "w", encoding="utf-8") as f:
+        json.dump(urls, f, indent=1)
+    os.replace(tmp, url_file())
+    print(new)
+    return 0
+
+
+def cmd_sync(space):
+    env = dict(os.environ)
+    if space is not None:
+        hit = [s for s in mcp.all_spaces() if s["label"] == space]
+        if not hit:
+            die(f"'{space}' is not a space in spaces.toml.", 2)
+        if hit[0]["claude_config"]:
+            env["CLAUDE_CONFIG_DIR"] = hit[0]["claude_config"]
+        else:
+            env.pop("CLAUDE_CONFIG_DIR", None)
+    os.environ.clear()
+    os.environ.update(env)
+    acct = session_account()
+    url = saved_urls().get(acct)
+    with open(PROMPT, encoding="utf-8") as f:
+        prompt = f.read()
+    prompt = (prompt.replace("{wb_roadmap}", ME).replace("{page}", PAGE)
+              .replace("{url}", url or "(no roadmap page yet: publish one first, step 1)"))
+    claude = os.environ.get("WB_CLAUDE", "claude")
+    os.execvpe(claude, [claude, prompt], env)
+
+
+def main(argv):
+    cmd, args = (argv[1] if len(argv) > 1 else ""), argv[2:]
+    try:
+        if cmd == "export" and len(args) == 1:
+            cmd_export(args[0])
+            return 0
+        if cmd == "apply" and len(args) == 1:
+            cmd_apply(args[0])
+            return 0
+        if cmd == "url" and len(args) <= 1:
+            return cmd_url(args[0] if args else None)
+        if cmd == "page" and not args:
+            print(PAGE)
+            return 0
+        if cmd == "sync" and len(args) <= 1:
+            cmd_sync(args[0] if args else None)
+            return 0
+    except Refused as e:
+        die(str(e))
+    print(__doc__.strip(), file=sys.stderr)
+    return 2
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv))
